@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ItemCategory {
+  COMPONENT
+  RAW_MATERIAL
+  FINISHED_GOOD
+  CONSUMABLE
+}
+
+enum Unit {
+  EACH
+  METER
+  GRAM
+  KILOGRAM
+}
+
+enum LifecycleStatus {
+  ACTIVE
+  NRND
+  OBSOLETE
+}
+
+enum MovementType {
+  RECEIVE
+  CONSUME
+  ADJUST
+  SCRAP
+  RESERVE
+  RETURN
+}
+
+enum PurchaseRequestStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CONVERTED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  APPROVED
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum AgentActionType {
+  READ_STOCK
+  READ_BOM
+  EVALUATE_SHORTAGE
+  COMPARE_SUPPLIERS
+  CREATE_DRAFT_PURCHASE_REQUEST
+}
+
+model Item {
+  id                   String          @id @default(cuid())
+  sku                  String          @unique
+  manufacturerPartNo   String?
+  supplierSku          String?
+  description          String
+  category             ItemCategory
+  unit                 Unit
+  reorderPoint         Int
+  targetStock          Int
+  leadTimeDays         Int
+  lifecycleStatus      LifecycleStatus @default(ACTIVE)
+  storageLocation      String
+  preferredSupplierId  String?
+  preferredSupplier    Supplier?       @relation("PreferredSupplier", fields: [preferredSupplierId], references: [id])
+  supplierOffers       SupplierOffer[]
+  bomParents           BOM[]           @relation("BomParent")
+  bomLines             BOMLine[]       @relation("BomComponent")
+  stockLots            StockLot[]
+  stockMovements       StockMovement[]
+  purchaseRequestLines PurchaseRequestLine[]
+  purchaseOrderLines   PurchaseOrderLine[]
+  reservations          BuildReservation[]
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+}
+
+model Supplier {
+  id               String          @id @default(cuid())
+  name             String          @unique
+  moq              Int
+  leadTimeDays     Int
+  shippingCost     Decimal         @db.Decimal(10, 2)
+  reliabilityScore Decimal         @db.Decimal(5, 2)
+  productPageUrl   String?
+  preferredFor     Item[]          @relation("PreferredSupplier")
+  offers           SupplierOffer[]
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model SupplierOffer {
+  id             String   @id @default(cuid())
+  itemId         String
+  supplierId     String
+  supplierSku    String
+  productPageUrl String?
+  leadTimeDays   Int
+  moq            Int
+  pricingTiers   Json
+  currency       String
+  item           Item     @relation(fields: [itemId], references: [id])
+  supplier       Supplier @relation(fields: [supplierId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([itemId, supplierId])
+}
+
+model BOM {
+  id         String    @id @default(cuid())
+  parentItemId String
+  version    String
+  active     Boolean   @default(true)
+  parentItem Item      @relation("BomParent", fields: [parentItemId], references: [id])
+  lines      BOMLine[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([parentItemId, version])
+}
+
+model BOMLine {
+  id              String @id @default(cuid())
+  bomId           String
+  componentItemId String
+  quantity        Int
+  bom             BOM    @relation(fields: [bomId], references: [id])
+  componentItem   Item   @relation("BomComponent", fields: [componentItemId], references: [id])
+}
+
+model StockLot {
+  id           String          @id @default(cuid())
+  itemId       String
+  lotCode      String
+  receivedAt   DateTime
+  unitCost     Decimal         @db.Decimal(10, 2)
+  item         Item            @relation(fields: [itemId], references: [id])
+  movements    StockMovement[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([itemId, lotCode])
+}
+
+model StockMovement {
+  id           String       @id @default(cuid())
+  itemId       String
+  stockLotId   String?
+  movementType MovementType
+  quantity     Int
+  reason       String
+  reference    String?
+  actorType    String
+  actorId      String
+  createdAt    DateTime     @default(now())
+  item         Item         @relation(fields: [itemId], references: [id])
+  stockLot     StockLot?    @relation(fields: [stockLotId], references: [id])
+}
+
+model PurchaseRequest {
+  id               String                @id @default(cuid())
+  supplierId       String?
+  status           PurchaseRequestStatus @default(DRAFT)
+  rationale        String
+  requestedBy      String
+  approvedBy       String?
+  approvedAt       DateTime?
+  supplier         Supplier?             @relation(fields: [supplierId], references: [id])
+  lines            PurchaseRequestLine[]
+  purchaseOrder    PurchaseOrder?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+}
+
+model PurchaseRequestLine {
+  id                String          @id @default(cuid())
+  purchaseRequestId String
+  itemId            String
+  quantity          Int
+  targetUnitPrice   Decimal?        @db.Decimal(10, 2)
+  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id])
+  item              Item            @relation(fields: [itemId], references: [id])
+}
+
+model PurchaseOrder {
+  id                String              @id @default(cuid())
+  supplierId        String
+  purchaseRequestId String?             @unique
+  status            PurchaseOrderStatus @default(DRAFT)
+  orderedAt         DateTime?
+  expectedAt        DateTime?
+  supplier          Supplier            @relation(fields: [supplierId], references: [id])
+  purchaseRequest   PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id])
+  lines             PurchaseOrderLine[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model PurchaseOrderLine {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  itemId          String
+  quantity        Int
+  unitPrice       Decimal       @db.Decimal(10, 2)
+  receivedQuantity Int          @default(0)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  item            Item          @relation(fields: [itemId], references: [id])
+}
+
+model AgentAction {
+  id         String          @id @default(cuid())
+  actionType AgentActionType
+  agentName  String
+  payload    Json
+  result     Json?
+  createdAt  DateTime        @default(now())
+}
+
+model BuildReservation {
+  id         String   @id @default(cuid())
+  itemId     String
+  buildName  String
+  quantity   Int
+  dueDate    DateTime
+  item       Item     @relation(fields: [itemId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  payload    Json
+  createdAt  DateTime @default(now())
+}
+

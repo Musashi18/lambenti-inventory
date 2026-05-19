@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        DATABASE_URL: postgresql://lambenti:lambenti@db:5432/lambenti?schema=public
+    container_name: lambenti-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://lambenti:lambenti@db:5432/lambenti?schema=public
+      NEXT_PUBLIC_APP_NAME: Lambenti Inventory
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: lambenti-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lambenti
+      POSTGRES_USER: lambenti
+      POSTGRES_PASSWORD: lambenti
+    ports:
+      - "5432:5432"
+    volumes:
+      - lambenti_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lambenti -d lambenti"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lambenti_postgres_data:

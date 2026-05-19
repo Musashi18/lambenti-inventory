@@ -1,0 +1,39 @@
+{
+  "name": "lambenti-inventory",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:local": "next dev -H 127.0.0.1 -p 5173",
+    "build": "next build",
+    "start": "next start",
+    "start:local": "next start -H 127.0.0.1 -p 5173",
+    "lint": "next lint",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "setup": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.511.0",
+    "next": "^15.3.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "autoprefixer": "^10.4.21",
+    "dotenv": "^16.5.0",
+    "postcss": "^8.5.3",
+    "prisma": "^6.8.2",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

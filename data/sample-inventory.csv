@@ -1,0 +1,8 @@
+sku,name,category,unit_of_measure,location,quantity_on_hand,reorder_point,preferred_supplier
+MAG-RING-001,Ring Magnet,Magnet,each,Studio,120,40,Northfield Magnets
+LED-STRIP-2700K,Warm LED Strip,Lighting,meter,Studio,18,30,Luma Components
+PCB-CONTROL-001,Control PCB,Electronics,each,Workshop,42,20,Arc Circuit Supply
+ENC-WOOD-001,Wooden Enclosure,Mechanical,each,Workshop,25,15,Studio Fabrication
+DIFF-ACRYLIC-001,Acrylic Diffuser,Mechanical,each,Studio,35,20,ClearForm Plastics
+CABLE-USB-C-001,USB-C Cable,Electrical,each,Studio,60,25,CableWorks
+

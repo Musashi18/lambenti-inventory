@@ -1,0 +1,7 @@
+supplier_name,contact_name,email,lead_time_days,currency,notes
+Northfield Magnets,Avery Cole,orders@northfield.example,14,CAD,Preferred magnet supplier
+Luma Components,Jordan Lee,sales@luma.example,10,USD,LED supplier
+Arc Circuit Supply,Samir Patel,orders@arc.example,21,USD,PCB fabrication and assembly
+Studio Fabrication,Internal Team,ops@lambenti.example,7,CAD,Internal enclosure production
+ClearForm Plastics,Mia Chen,orders@clearform.example,12,CAD,Acrylic cutting partner
+CableWorks,Noah Singh,sales@cableworks.example,9,USD,Standard cable vendor
