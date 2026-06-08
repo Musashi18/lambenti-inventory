@@ -1,0 +1,153 @@
+"use client";
+
+import { MovementType } from "@prisma/client";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createMovementAction } from "./actions";
+import { initialMovementActionState } from "./state";
+
+const movementOptions = [...Object.values(MovementType), "BUILD"] as const;
+
+type ItemOption = {
+  id: string;
+  sku: string;
+  description: string;
+};
+
+export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOption[]; buildableItemIds?: string[] }) {
+  const router = useRouter();
+  const [actionState, formAction, pending] = useActionState(createMovementAction, initialMovementActionState);
+  const state = {
+    ...initialMovementActionState,
+    ...actionState,
+    values: {
+      ...initialMovementActionState.values,
+      ...(actionState?.values ?? {})
+    }
+  };
+  const initialItemId = state.values.itemId || items[0]?.id || "";
+  const [selectedItemId, setSelectedItemId] = useState(initialItemId);
+  const [movementType, setMovementType] = useState<string>(state.values.movementType || MovementType.RECEIVE);
+  const buildableItemIdSet = useMemo(() => new Set(buildableItemIds), [buildableItemIds]);
+  const filteredItems = useMemo(
+    () => movementType === "BUILD" ? items.filter((item) => buildableItemIdSet.has(item.id)) : items,
+    [buildableItemIdSet, items, movementType]
+  );
+
+  useEffect(() => {
+    if (filteredItems.length === 0) {
+      if (selectedItemId !== "") setSelectedItemId("");
+      return;
+    }
+    if (!filteredItems.some((item) => item.id === selectedItemId)) {
+      setSelectedItemId(filteredItems[0].id);
+    }
+  }, [filteredItems, selectedItemId]);
+
+  useEffect(() => {
+    if (!state.success) return;
+    router.refresh();
+    window.location.reload();
+  }, [router, state.message, state.success]);
+
+  return (
+    <form action={formAction} className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      {state.message ? (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm xl:col-span-5 ${state.success ? "border-mint/40 bg-mint/10 text-emerald-800" : "border-coral/40 bg-coral/10 text-red-800"}`}
+          role="status"
+        >
+          {state.message}
+        </div>
+      ) : null}
+
+      <label className="space-y-1 text-sm xl:col-span-2">
+        <span className="font-medium text-slate-700">Item</span>
+        <select
+          name="itemId"
+          className="w-full rounded-md border px-3 py-2"
+          value={selectedItemId}
+          onChange={(event) => setSelectedItemId(event.target.value)}
+          disabled={filteredItems.length === 0}
+        >
+          {filteredItems.length === 0 ? (
+            <option value="">No active finished BOM unit is available for build movements</option>
+          ) : filteredItems.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.sku} — {item.description}
+            </option>
+          ))}
+        </select>
+        {movementType === "BUILD" ? (
+          <p className="text-xs text-slate-500">Build movements only show active finished goods with an active BOM. Component/raw items are hidden for this movement type.</p>
+        ) : null}
+        <FieldErrors errors={state.fieldErrors.itemId} />
+      </label>
+
+      <label className="space-y-1 text-sm">
+        <span className="font-medium text-slate-700">Movement</span>
+        <select
+          name="movementType"
+          className="w-full rounded-md border px-3 py-2"
+          value={movementType}
+          onChange={(event) => setMovementType(event.target.value)}
+        >
+          {movementOptions.map((type) => (
+            <option key={type}>{type}</option>
+          ))}
+        </select>
+        {movementType === "BUILD" ? (
+          <p className="text-xs text-slate-500">
+            Build consumes active BOM component quantities per finished unit and records assembled packages as finished stock.
+          </p>
+        ) : null}
+        <FieldErrors errors={state.fieldErrors.movementType} />
+      </label>
+
+      <label className="space-y-1 text-sm">
+        <span className="font-medium text-slate-700">Quantity</span>
+        <input
+          name="quantity"
+          type="number"
+          placeholder="Quantity"
+          className="w-full rounded-md border px-3 py-2"
+          defaultValue={state.success ? "" : state.values.quantity}
+          required
+        />
+        <FieldErrors errors={state.fieldErrors.quantity} />
+      </label>
+
+      <label className="space-y-1 text-sm">
+        <span className="font-medium text-slate-700">Reason <span className="font-normal text-slate-400">optional</span></span>
+        <input
+          name="reason"
+          placeholder="Optional operator note"
+          className="w-full rounded-md border px-3 py-2"
+          defaultValue={state.success ? "" : state.values.reason}
+        />
+        <FieldErrors errors={state.fieldErrors.reason} />
+      </label>
+
+      <label className="space-y-1 text-sm xl:col-span-4">
+        <span className="font-medium text-slate-700">Reference</span>
+        <input
+          name="reference"
+          placeholder="PO/build/reservation/audit reference"
+          className="w-full rounded-md border px-3 py-2"
+          defaultValue={state.success ? "" : state.values.reference}
+        />
+        <p className="text-xs text-slate-500">Movements are item-level only for now. Lots are intentionally hidden.</p>
+        <FieldErrors errors={state.fieldErrors.reference} />
+      </label>
+
+      <button className="rounded-md bg-ink px-4 py-2 text-white disabled:opacity-60 xl:col-span-5" disabled={pending}>
+        {pending ? "Recording…" : "Record movement"}
+      </button>
+    </form>
+  );
+}
+
+function FieldErrors({ errors }: { errors?: string[] }) {
+  if (!errors?.length) return null;
+  return <p className="text-xs text-red-700">{errors.join(" ")}</p>;
+}

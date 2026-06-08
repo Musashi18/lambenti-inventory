@@ -5,9 +5,12 @@ import {
   ClipboardList,
   Factory,
   LayoutDashboard,
+  Mail,
   PackageSearch,
+  ReceiptText,
   ShoppingCart,
-  Truck
+  Truck,
+  Workflow
 } from "lucide-react";
 
 const links = [
@@ -17,14 +20,17 @@ const links = [
   { href: "/suppliers", label: "Suppliers", icon: Factory },
   { href: "/purchasing/recommendations", label: "Recommendations", icon: ShoppingCart },
   { href: "/purchasing/requests", label: "Approvals", icon: ClipboardList },
+  { href: "/integrations/email-import", label: "Order Agent", icon: Mail },
+  { href: "/automation", label: "Automation", icon: Workflow },
   { href: "/boms", label: "BOMs", icon: ClipboardList },
   { href: "/incoming", label: "Incoming", icon: Truck },
-  { href: "/inventory/valuation", label: "Valuation", icon: PackageSearch }
+  { href: "/inventory/valuation", label: "Valuation", icon: PackageSearch },
+  { href: "/accounting/invoices", label: "Invoices", icon: ReceiptText }
 ];
 
 export function Sidebar() {
   return (
-    <aside className="border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
+    <aside className="relative z-20 border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
       <div className="mb-6">
         <div className="text-xl font-semibold">Lambenti</div>
         <div className="text-xs text-slate-500">Inventory and sourcing</div>

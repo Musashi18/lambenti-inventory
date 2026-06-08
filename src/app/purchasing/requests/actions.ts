@@ -1,52 +1,37 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
-import { writeAuditLog } from "@/lib/audit";
+import { revalidateWorkspace } from "@/app/revalidate-workspace";
+import { requirePermission } from "@/modules/auth/permissions";
+import { approvePurchaseRequest, rejectPurchaseRequest } from "@/modules/purchasing/requests";
 
 export async function approvePurchaseRequestAction(formData: FormData) {
-  const requestId = String(formData.get("requestId"));
-  const request = await prisma.purchaseRequest.update({
-    where: { id: requestId },
-    data: {
-      status: "APPROVED",
-      approvedBy: "human-admin",
-      approvedAt: new Date()
-    }
+  const requestId = String(formData.get("requestId") ?? "");
+  if (!requestId.trim()) throw new Error("Missing purchase request id.");
+
+  const actor = await requirePermission("purchaseRequest:approve");
+  await approvePurchaseRequest({
+    requestId,
+    actor,
+    comment: optionalString(formData.get("comment"))
   });
 
-  await writeAuditLog({
-    actorType: "USER",
-    actorId: "human-admin",
-    action: "APPROVE_PURCHASE_REQUEST",
-    entityType: "PurchaseRequest",
-    entityId: request.id,
-    payload: { requestId }
-  });
-
-  revalidatePath("/purchasing/requests");
+  revalidateWorkspace();
 }
 
 export async function rejectPurchaseRequestAction(formData: FormData) {
-  const requestId = String(formData.get("requestId"));
-  const request = await prisma.purchaseRequest.update({
-    where: { id: requestId },
-    data: {
-      status: "REJECTED",
-      approvedBy: "human-admin",
-      approvedAt: new Date()
-    }
+  const requestId = String(formData.get("requestId") ?? "");
+  if (!requestId.trim()) throw new Error("Missing purchase request id.");
+
+  const actor = await requirePermission("purchaseRequest:approve");
+  await rejectPurchaseRequest({
+    requestId,
+    actor,
+    comment: optionalString(formData.get("comment"))
   });
 
-  await writeAuditLog({
-    actorType: "USER",
-    actorId: "human-admin",
-    action: "REJECT_PURCHASE_REQUEST",
-    entityType: "PurchaseRequest",
-    entityId: request.id,
-    payload: { requestId }
-  });
-
-  revalidatePath("/purchasing/requests");
+  revalidateWorkspace();
 }
 
+function optionalString(value: FormDataEntryValue | null) {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}

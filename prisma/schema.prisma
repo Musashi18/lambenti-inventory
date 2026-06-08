@@ -27,6 +27,13 @@ enum LifecycleStatus {
   OBSOLETE
 }
 
+enum CostConfidence {
+  UNKNOWN
+  ESTIMATED
+  QUOTED
+  CONFIRMED
+}
+
 enum MovementType {
   RECEIVE
   CONSUME
@@ -61,9 +68,66 @@ enum AgentActionType {
   CREATE_DRAFT_PURCHASE_REQUEST
 }
 
+enum EmailOrderImportStatus {
+  IMPORTED
+  APPLIED
+  NEEDS_REVIEW
+}
+
+enum InvoiceStatus {
+  DRAFT
+  RECEIVED
+  APPROVED
+  PAID
+  VOID
+}
+
+enum UserRole {
+  ADMIN
+  OPERATIONS
+  PURCHASING
+  ACCOUNTING
+  VIEWER
+  AGENT
+}
+
+enum AutomationRunKind {
+  STOCK_REORDER_SCAN
+  BOM_SHORTAGE_SCAN
+  SUPPLIER_EMAIL_SYNC
+  ALIBABA_PORTAL_SYNC
+  INVOICE_RECONCILIATION
+  PO_RECONCILIATION
+  INVENTORY_ANOMALY_SCAN
+  CYCLE_COUNT_PLANNER
+  SUPPLIER_SCORE_REFRESH
+}
+
+enum AutomationRunStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+enum AutomationFindingSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AutomationFindingStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
 model Item {
-  id                   String          @id @default(cuid())
-  sku                  String          @unique
+  id                   String                 @id @default(cuid())
+  sku                  String                 @unique
   manufacturerPartNo   String?
   supplierSku          String?
   description          String
@@ -72,36 +136,67 @@ model Item {
   reorderPoint         Int
   targetStock          Int
   leadTimeDays         Int
-  lifecycleStatus      LifecycleStatus @default(ACTIVE)
-  storageLocation      String
+  lifecycleStatus      LifecycleStatus        @default(ACTIVE)
+  storageLocationId    String
+  storageLocation      StorageLocation        @relation(fields: [storageLocationId], references: [id])
+  estimatedUnitCost    Decimal?               @db.Decimal(10, 2)
+  costCurrency         String                 @default("USD")
+  costConfidence       CostConfidence         @default(UNKNOWN)
+  costSourceRef        String?
   preferredSupplierId  String?
-  preferredSupplier    Supplier?       @relation("PreferredSupplier", fields: [preferredSupplierId], references: [id])
+  preferredSupplier    Supplier?              @relation("PreferredSupplier", fields: [preferredSupplierId], references: [id])
   supplierOffers       SupplierOffer[]
-  bomParents           BOM[]           @relation("BomParent")
-  bomLines             BOMLine[]       @relation("BomComponent")
+  bomParents           BOM[]                  @relation("BomParent")
+  bomLines             BOMLine[]              @relation("BomComponent")
   stockLots            StockLot[]
   stockMovements       StockMovement[]
   purchaseRequestLines PurchaseRequestLine[]
   purchaseOrderLines   PurchaseOrderLine[]
-  reservations          BuildReservation[]
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  emailOrderLines      EmailOrderLineImport[]
+  invoiceLines         SupplierInvoiceLine[]
+  reservations         BuildReservation[]
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+}
+
+model StorageLocation {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  items       Item[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Supplier {
-  id               String          @id @default(cuid())
-  name             String          @unique
-  moq              Int
-  leadTimeDays     Int
-  shippingCost     Decimal         @db.Decimal(10, 2)
-  reliabilityScore Decimal         @db.Decimal(5, 2)
-  productPageUrl   String?
-  preferredFor     Item[]          @relation("PreferredSupplier")
-  offers           SupplierOffer[]
-  purchaseRequests PurchaseRequest[]
-  purchaseOrders   PurchaseOrder[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id                String             @id @default(cuid())
+  name              String             @unique
+  confirmedByHuman  Boolean            @default(false)
+  companyName       String?
+  contactEmail      String?
+  contactName       String?
+  companyRevenue    Decimal?           @db.Decimal(14, 2)
+  foundedYear       Int?
+  address           String?
+  moq               Int
+  leadTimeDays      Int
+  shippingCost      Decimal            @db.Decimal(10, 2)
+  reliabilityScore  Decimal            @db.Decimal(5, 2)
+  productPageUrl    String?
+  archivedAt        DateTime?
+  archivedBy        String?
+  archiveReason     String?
+  preferredFor      Item[]             @relation("PreferredSupplier")
+  offers            SupplierOffer[]
+  purchaseRequests  PurchaseRequest[]
+  purchaseOrders    PurchaseOrder[]
+  invoices          SupplierInvoice[]
+  emailOrderImports EmailOrderImport[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([archivedAt])
 }
 
 model SupplierOffer {
@@ -123,14 +218,14 @@ model SupplierOffer {
 }
 
 model BOM {
-  id         String    @id @default(cuid())
+  id           String    @id @default(cuid())
   parentItemId String
-  version    String
-  active     Boolean   @default(true)
-  parentItem Item      @relation("BomParent", fields: [parentItemId], references: [id])
-  lines      BOMLine[]
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  version      String
+  active       Boolean   @default(true)
+  parentItem   Item      @relation("BomParent", fields: [parentItemId], references: [id])
+  lines        BOMLine[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@unique([parentItemId, version])
 }
@@ -145,47 +240,54 @@ model BOMLine {
 }
 
 model StockLot {
-  id           String          @id @default(cuid())
-  itemId       String
-  lotCode      String
-  receivedAt   DateTime
-  unitCost     Decimal         @db.Decimal(10, 2)
-  item         Item            @relation(fields: [itemId], references: [id])
-  movements    StockMovement[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id         String          @id @default(cuid())
+  itemId     String
+  lotCode    String
+  receivedAt DateTime
+  unitCost   Decimal         @db.Decimal(10, 2)
+  currency   String          @default("USD")
+  item       Item            @relation(fields: [itemId], references: [id])
+  movements  StockMovement[]
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
   @@unique([itemId, lotCode])
 }
 
 model StockMovement {
-  id           String       @id @default(cuid())
-  itemId       String
-  stockLotId   String?
-  movementType MovementType
-  quantity     Int
-  reason       String
-  reference    String?
-  actorType    String
-  actorId      String
-  createdAt    DateTime     @default(now())
-  item         Item         @relation(fields: [itemId], references: [id])
-  stockLot     StockLot?    @relation(fields: [stockLotId], references: [id])
+  id                  String             @id @default(cuid())
+  itemId              String
+  stockLotId          String?
+  purchaseOrderLineId String?
+  movementType        MovementType
+  quantity            Int
+  reason              String
+  reference           String?
+  actorType           String
+  actorId             String
+  createdAt           DateTime           @default(now())
+  item                Item               @relation(fields: [itemId], references: [id])
+  stockLot            StockLot?          @relation(fields: [stockLotId], references: [id])
+  purchaseOrderLine   PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id])
+
+  @@index([itemId, createdAt])
+  @@index([stockLotId, createdAt])
+  @@index([purchaseOrderLineId])
 }
 
 model PurchaseRequest {
-  id               String                @id @default(cuid())
-  supplierId       String?
-  status           PurchaseRequestStatus @default(DRAFT)
-  rationale        String
-  requestedBy      String
-  approvedBy       String?
-  approvedAt       DateTime?
-  supplier         Supplier?             @relation(fields: [supplierId], references: [id])
-  lines            PurchaseRequestLine[]
-  purchaseOrder    PurchaseOrder?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  id            String                @id @default(cuid())
+  supplierId    String?
+  status        PurchaseRequestStatus @default(DRAFT)
+  rationale     String
+  requestedBy   String
+  approvedBy    String?
+  approvedAt    DateTime?
+  supplier      Supplier?             @relation(fields: [supplierId], references: [id])
+  lines         PurchaseRequestLine[]
+  purchaseOrder PurchaseOrder?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 }
 
 model PurchaseRequestLine {
@@ -208,19 +310,34 @@ model PurchaseOrder {
   supplier          Supplier            @relation(fields: [supplierId], references: [id])
   purchaseRequest   PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id])
   lines             PurchaseOrderLine[]
+  emailOrderImports EmailOrderImport[]
+  invoice           SupplierInvoice?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 }
 
 model PurchaseOrderLine {
-  id              String        @id @default(cuid())
-  purchaseOrderId String
-  itemId          String
-  quantity        Int
-  unitPrice       Decimal       @db.Decimal(10, 2)
-  receivedQuantity Int          @default(0)
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  item            Item          @relation(fields: [itemId], references: [id])
+  id               String          @id @default(cuid())
+  purchaseOrderId  String
+  itemId           String
+  quantity         Int
+  unitPrice        Decimal         @db.Decimal(10, 2)
+  receivedQuantity Int             @default(0)
+  purchaseOrder    PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id])
+  item             Item            @relation(fields: [itemId], references: [id])
+  stockMovements   StockMovement[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  role      UserRole @default(VIEWER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
 }
 
 model AgentAction {
@@ -232,15 +349,169 @@ model AgentAction {
   createdAt  DateTime        @default(now())
 }
 
+model AutomationRun {
+  id           String              @id @default(cuid())
+  kind         AutomationRunKind
+  status       AutomationRunStatus @default(RUNNING)
+  startedAt    DateTime            @default(now())
+  finishedAt   DateTime?
+  actorType    String
+  actorId      String
+  inputHash    String?
+  summaryJson  Json?
+  errorMessage String?
+  findings     AutomationFinding[]
+  createdAt    DateTime            @default(now())
+
+  @@index([kind, createdAt])
+  @@index([status, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model AutomationFinding {
+  id                  String                    @id @default(cuid())
+  automationRunId     String
+  automationRun       AutomationRun             @relation(fields: [automationRunId], references: [id], onDelete: Cascade)
+  severity            AutomationFindingSeverity
+  category            String
+  entityType          String
+  entityId            String
+  title               String
+  message             String
+  suggestedActionType String?
+  suggestedActionJson Json?
+  status              AutomationFindingStatus   @default(OPEN)
+  dedupeKey           String?                   @unique
+  createdAt           DateTime                  @default(now())
+  resolvedAt          DateTime?
+
+  @@index([status, severity])
+  @@index([category])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model EmailOrderImport {
+  id                  String                 @id @default(cuid())
+  source              String                 @default("SYNCED_EMAIL")
+  sourceHash          String                 @unique
+  sourceMessageId     String?
+  sourceUrl           String?
+  subject             String?
+  fromAddress         String?
+  rawText             String
+  externalOrderId     String?
+  supplierName        String
+  supplierId          String?
+  supplier            Supplier?              @relation(fields: [supplierId], references: [id])
+  orderDate           DateTime?
+  currency            String                 @default("USD")
+  subtotal            Decimal?               @db.Decimal(12, 2)
+  shippingCost        Decimal?               @db.Decimal(12, 2)
+  taxCost             Decimal?               @db.Decimal(12, 2)
+  totalCost           Decimal?               @db.Decimal(12, 2)
+  status              EmailOrderImportStatus @default(IMPORTED)
+  confidence          CostConfidence         @default(ESTIMATED)
+  purchaseOrderId     String?
+  purchaseOrder       PurchaseOrder?         @relation(fields: [purchaseOrderId], references: [id])
+  invoiceDocumentPath String?
+  invoiceDocumentHash String?
+  invoiceDocumentText String?
+  invoiceDownloadedAt DateTime?
+  archivedAt          DateTime?
+  archivedBy          String?
+  archiveReason       String?
+  lines               EmailOrderLineImport[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([externalOrderId])
+  @@index([source])
+  @@index([archivedAt])
+  @@index([createdAt])
+}
+
+model EmailOrderLineImport {
+  id                String           @id @default(cuid())
+  importId          String
+  import            EmailOrderImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  lineNo            Int
+  rawDescription    String
+  supplierSku       String?
+  productUrl        String?
+  quantity          Int
+  unitPrice         Decimal?         @db.Decimal(12, 4)
+  lineTotal         Decimal?         @db.Decimal(12, 2)
+  shippingAllocated Decimal?         @db.Decimal(12, 2)
+  taxAllocated      Decimal?         @db.Decimal(12, 2)
+  landedUnitCost    Decimal?         @db.Decimal(12, 4)
+  currency          String           @default("USD")
+  matchedItemId     String?
+  matchedItem       Item?            @relation(fields: [matchedItemId], references: [id])
+  matchConfidence   String           @default("UNMATCHED")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([importId, lineNo])
+  @@index([matchedItemId])
+}
+
+model SupplierInvoice {
+  id                 String                @id @default(cuid())
+  invoiceNumber      String                @unique
+  supplierId         String
+  purchaseOrderId    String?               @unique
+  status             InvoiceStatus         @default(DRAFT)
+  currency           String                @default("USD")
+  subtotal           Decimal               @db.Decimal(12, 2)
+  shippingCost       Decimal               @default(0) @db.Decimal(12, 2)
+  taxCost            Decimal               @default(0) @db.Decimal(12, 2)
+  total              Decimal               @db.Decimal(12, 2)
+  invoiceDate        DateTime              @default(now())
+  dueDate            DateTime?
+  sourceDocumentPath String?
+  sourceDocumentHash String?
+  externalSourceUrl  String?
+  notes              String?
+  approvalNotes      String?
+  approvedBy         String?
+  approvedAt         DateTime?
+  paymentReference   String?
+  paidBy             String?
+  paidAt             DateTime?
+  voidReason         String?
+  supplier           Supplier              @relation(fields: [supplierId], references: [id])
+  purchaseOrder      PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
+  lines              SupplierInvoiceLine[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([supplierId])
+  @@index([status])
+  @@index([invoiceDate])
+}
+
+model SupplierInvoiceLine {
+  id          String          @id @default(cuid())
+  invoiceId   String
+  itemId      String?
+  description String
+  quantity    Int
+  unitPrice   Decimal         @db.Decimal(12, 4)
+  lineTotal   Decimal         @db.Decimal(12, 2)
+  invoice     SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item        Item?           @relation(fields: [itemId], references: [id])
+}
+
 model BuildReservation {
-  id         String   @id @default(cuid())
-  itemId     String
-  buildName  String
-  quantity   Int
-  dueDate    DateTime
-  item       Item     @relation(fields: [itemId], references: [id])
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  itemId    String
+  buildName String
+  quantity  Int
+  dueDate   DateTime
+  item      Item     @relation(fields: [itemId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AuditLog {
@@ -253,4 +524,3 @@ model AuditLog {
   payload    Json
   createdAt  DateTime @default(now())
 }
-

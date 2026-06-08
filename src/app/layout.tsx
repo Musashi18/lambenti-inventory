@@ -15,9 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="min-h-screen lg:grid lg:grid-cols-[240px_1fr]">
+        <div className="min-h-screen lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
           <Sidebar />
-          <main className="p-4 lg:p-8">{children}</main>
+          <main className="min-w-0 p-4 lg:p-8">{children}</main>
         </div>
       </body>
     </html>

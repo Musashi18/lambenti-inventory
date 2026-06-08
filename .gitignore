@@ -4,6 +4,9 @@
 node_modules
 dist
 coverage
+qa-output
+var/
+tsconfig.tsbuildinfo
 *.log
 prisma/dev.db
 

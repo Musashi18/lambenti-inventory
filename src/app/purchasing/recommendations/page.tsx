@@ -1,9 +1,11 @@
 import { DashboardTable } from "@/components/dashboard-table";
 import { getPurchaseRecommendations } from "@/modules/purchasing/service";
+import { requirePermission } from "@/modules/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function PurchaseRecommendationsPage() {
+  await requirePermission("purchaseRecommendation:view");
   const recommendations = await getPurchaseRecommendations();
 
   return (

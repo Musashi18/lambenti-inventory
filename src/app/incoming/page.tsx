@@ -1,9 +1,11 @@
 import { DashboardTable } from "@/components/dashboard-table";
 import { getIncomingOrders } from "@/modules/purchasing/service";
+import { requirePermission } from "@/modules/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function IncomingPage() {
+  await requirePermission("receiving:confirm");
   const orders = await getIncomingOrders();
 
   return (

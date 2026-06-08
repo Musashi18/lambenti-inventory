@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { RefreshingActionForm } from "@/app/refreshing-action-form";
+import { requirePermission } from "@/modules/auth/permissions";
 import {
   approvePurchaseRequestAction,
   rejectPurchaseRequestAction
@@ -7,6 +9,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function PurchaseRequestsPage() {
+  await requirePermission("purchaseRequest:draft");
   const requests = await prisma.purchaseRequest.findMany({
     include: {
       supplier: true,
@@ -48,14 +51,14 @@ export default async function PurchaseRequestsPage() {
               </div>
               {request.status === "DRAFT" || request.status === "PENDING_APPROVAL" ? (
                 <div className="flex gap-2">
-                  <form action={approvePurchaseRequestAction}>
+                  <RefreshingActionForm action={approvePurchaseRequestAction}>
                     <input type="hidden" name="requestId" value={request.id} />
                     <button className="rounded-md bg-mint px-3 py-2 text-sm text-white">Approve</button>
-                  </form>
-                  <form action={rejectPurchaseRequestAction}>
+                  </RefreshingActionForm>
+                  <RefreshingActionForm action={rejectPurchaseRequestAction}>
                     <input type="hidden" name="requestId" value={request.id} />
                     <button className="rounded-md bg-coral px-3 py-2 text-sm text-white">Reject</button>
-                  </form>
+                  </RefreshingActionForm>
                 </div>
               ) : null}
             </div>

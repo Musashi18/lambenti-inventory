@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
+type AuditLogClient = Pick<typeof prisma, "auditLog">;
+
 export async function writeAuditLog(input: {
   actorType: string;
   actorId: string;
@@ -8,8 +10,8 @@ export async function writeAuditLog(input: {
   entityType: string;
   entityId: string;
   payload: unknown;
-}) {
-  return prisma.auditLog.create({
+}, client: AuditLogClient = prisma) {
+  return client.auditLog.create({
     data: {
       ...input,
       payload: toJson(input.payload)

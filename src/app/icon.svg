@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lambenti">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <circle cx="32" cy="32" r="20" fill="#f8fafc" opacity="0.16"/>
+  <path d="M32 12c7 10 12 16 12 25a12 12 0 1 1-24 0c0-9 5-15 12-25Z" fill="#fbbf24"/>
+  <circle cx="32" cy="36" r="7" fill="#fff7ed"/>
+</svg>

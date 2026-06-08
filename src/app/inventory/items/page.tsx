@@ -1,73 +1,116 @@
-import { ItemCategory, LifecycleStatus, Unit } from "@prisma/client";
-import { DashboardTable } from "@/components/dashboard-table";
+import { CostConfidence, ItemCategory, LifecycleStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getItems } from "@/modules/items/service";
-import { createItemAction } from "./actions";
+import { exportItemsToCsv } from "@/modules/items/import-export";
+import { getConfirmedSupplierOptions } from "@/modules/suppliers/service";
+import { requirePermission } from "@/modules/auth/permissions";
+import { ItemCreateForm } from "./item-create-form";
+import { ItemImportExportPanel } from "./item-import-export-panel";
+import { ItemsCatalog } from "./items-catalog";
 
 export const dynamic = "force-dynamic";
 
-export default async function ItemsPage() {
-  const [items, suppliers] = await Promise.all([
-    getItems(),
-    prisma.supplier.findMany({ orderBy: { name: "asc" } })
+export default async function ItemsPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ archived?: string }>;
+}) {
+  await requirePermission("item:view");
+  const params = await searchParams;
+  const showArchived = params?.archived === "1";
+  const [items, confirmedSupplierOptions, storageLocations] = await Promise.all([
+    getItems({ archivedOnly: showArchived }),
+    getConfirmedSupplierOptions(),
+    prisma.storageLocation.findMany({ orderBy: { code: "asc" } })
   ]);
+
+  const defaultStorageLocationId = storageLocations[0]?.id;
+  const exportCsv = exportItemsToCsv(items.map((item) => ({
+    sku: item.sku,
+    description: item.description,
+    category: item.category,
+    unit: item.unit,
+    reorderPoint: item.reorderPoint,
+    targetStock: item.targetStock,
+    leadTimeDays: item.leadTimeDays,
+    lifecycleStatus: item.lifecycleStatus,
+    manufacturerPartNo: item.manufacturerPartNo ?? undefined,
+    supplierSku: item.supplierSku ?? undefined,
+    preferredSupplierId: item.preferredSupplierId ?? undefined,
+    estimatedUnitCost: item.estimatedUnitCost === null ? undefined : Number(item.estimatedUnitCost),
+    costCurrency: item.costCurrency,
+    costConfidence: item.costConfidence,
+    costSourceRef: item.costSourceRef ?? undefined
+  })));
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Inventory items</h1>
-        <p className="text-sm text-slate-600">Create and maintain stock master data.</p>
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Inventory items</h1>
+          <p className="text-sm text-slate-600">
+            {showArchived ? "Archived/obsolete items are hidden from active inventory and automated checks." : "Create, edit, and maintain active stock master data."}
+          </p>
+        </div>
+        <a href={showArchived ? "/inventory/items" : "/inventory/items?archived=1"} className="text-sm font-medium text-ink underline underline-offset-4">
+          {showArchived ? "Back to active items" : "View archived items"}
+        </a>
       </div>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4">
-        <h2 className="mb-4 font-medium">Add item</h2>
-        <form action={createItemAction} className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <input name="sku" placeholder="Internal SKU" className="rounded-md border px-3 py-2" required />
-          <input name="manufacturerPartNo" placeholder="Manufacturer part no." className="rounded-md border px-3 py-2" />
-          <input name="supplierSku" placeholder="Supplier SKU" className="rounded-md border px-3 py-2" />
-          <input name="description" placeholder="Description" className="rounded-md border px-3 py-2" required />
-          <select name="category" className="rounded-md border px-3 py-2" defaultValue={ItemCategory.COMPONENT}>
-            {Object.values(ItemCategory).map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <select name="unit" className="rounded-md border px-3 py-2" defaultValue={Unit.EACH}>
-            {Object.values(Unit).map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <input name="reorderPoint" type="number" placeholder="Reorder point" className="rounded-md border px-3 py-2" required />
-          <input name="targetStock" type="number" placeholder="Target stock" className="rounded-md border px-3 py-2" required />
-          <input name="leadTimeDays" type="number" placeholder="Lead time days" className="rounded-md border px-3 py-2" required />
-          <select name="preferredSupplierId" className="rounded-md border px-3 py-2" defaultValue="">
-            <option value="">No preferred supplier</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </select>
-          <select name="lifecycleStatus" className="rounded-md border px-3 py-2" defaultValue={LifecycleStatus.ACTIVE}>
-            {Object.values(LifecycleStatus).map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <input name="storageLocation" placeholder="Storage location" className="rounded-md border px-3 py-2" required />
-          <button className="rounded-md bg-ink px-4 py-2 text-white xl:col-span-4">Create item</button>
-        </form>
-      </section>
+      {!showArchived ? (
+        <>
+          <section className="rounded-md border border-slate-200 bg-white p-4">
+            <h2 className="mb-4 font-medium">Add item</h2>
+            {!defaultStorageLocationId ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Add at least one internal storage location before creating items. Location is hidden in this screen for now, but the database still needs a default internal value.
+              </p>
+            ) : (
+              <ItemCreateForm
+                defaultStorageLocationId={defaultStorageLocationId}
+                suppliers={confirmedSupplierOptions}
+                categories={Object.values(ItemCategory)}
+                units={Object.values(Unit)}
+                lifecycleStatuses={Object.values(LifecycleStatus)}
+                costConfidences={Object.values(CostConfidence)}
+              />
+            )}
+          </section>
+        </>
+      ) : null}
 
-      <DashboardTable
-        title="Item catalog"
-        columns={["SKU", "Description", "Category", "Preferred supplier", "Location"]}
-        rows={items.map((item) => [
-          item.sku,
-          item.description,
-          item.category,
-          item.preferredSupplier?.name ?? "None",
-          item.storageLocation
-        ])}
+      <ItemsCatalog
+        title={showArchived ? "Archived items" : "Active item catalog"}
+        archivedView={showArchived}
+        items={items.map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          manufacturerPartNo: item.manufacturerPartNo ?? "",
+          supplierSku: item.supplierSku ?? "",
+          description: item.description,
+          category: item.category,
+          unit: item.unit,
+          reorderPoint: item.reorderPoint,
+          targetStock: item.targetStock,
+          leadTimeDays: item.leadTimeDays,
+          preferredSupplierId: item.preferredSupplierId ?? "",
+          preferredSupplierName: item.preferredSupplier?.name ?? "",
+          lifecycleStatus: item.lifecycleStatus,
+          estimatedUnitCost: item.estimatedUnitCost?.toString() ?? "",
+          costCurrency: item.costCurrency,
+          costConfidence: item.costConfidence,
+          costSourceRef: item.costSourceRef ?? ""
+        }))}
+        suppliers={confirmedSupplierOptions}
+        categories={Object.values(ItemCategory)}
+        units={Object.values(Unit)}
+        lifecycleStatuses={Object.values(LifecycleStatus)}
+        costConfidences={Object.values(CostConfidence)}
       />
+
+      {!showArchived ? (
+        <ItemImportExportPanel exportCsv={exportCsv} defaultStorageLocationId={defaultStorageLocationId} />
+      ) : null}
     </div>
   );
 }

@@ -16,8 +16,8 @@ export function DashboardTable({
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
-              {columns.map((column) => (
-                <th key={column} className="px-4 py-3 font-medium">
+              {columns.map((column, columnIndex) => (
+                <th key={`${column}-${columnIndex}`} className="px-4 py-3 font-medium">
                   {column}
                 </th>
               ))}
@@ -31,10 +31,10 @@ export function DashboardTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row, index) => (
-                <tr key={`${row.join("-")}-${index}`} className="border-t border-slate-100">
-                  {row.map((cell) => (
-                    <td key={cell} className="px-4 py-3">
+              rows.map((row, rowIndex) => (
+                <tr key={`${row.join("-")}-${rowIndex}`} className="border-t border-slate-100">
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${cell}-${cellIndex}`} className="px-4 py-3">
                       {cell}
                     </td>
                   ))}
