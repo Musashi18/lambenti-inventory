@@ -53,7 +53,7 @@ const uiContracts = [
   },
   {
     route: "/integrations/email-import",
-    expected: ["Sync mailbox now", "Reassess recent imports", "Import a supplier order email manually", "Collapsed by default"]
+    expected: ["Sync mailbox now", "Sync &amp; reassess recent imports", "Import a supplier order email manually", "Collapsed by default"]
   }
 ];
 

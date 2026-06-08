@@ -17,6 +17,8 @@ describe("Order email import page source contract", () => {
     expect(syncButtonSource).toContain("useRouter");
     expect(syncButtonSource).toContain("router.refresh()");
     expect(syncButtonSource).toContain("animate-spin");
+    expect(syncButtonSource).toContain("describeReassessResult");
+    expect(pageSource).not.toContain("disabled={imports.length === 0}");
   });
 
   it("labels synced/manual CSV sources and exposes archived unarchive/delete controls with confirmation", () => {

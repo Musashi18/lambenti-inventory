@@ -81,6 +81,42 @@ Order summary (1 item) Item subtotal USD 15.00 Shipping fee USD 36.50 Total USD 
     });
   });
 
+  it("keeps same-price LED color-temperature variants as separate Alibaba order lines", () => {
+    const parsed = parseAlibabaEmail(`
+Subject: Your initial payment has been received (300174506001023166)
+From: "Alibaba" <credit@notice.alibaba.com>
+Your initial payment has been received (300174506001023166) Hi Musashi Kaneko, The supplier jason zhou has received your initial payment for order no. 300174506001023166. View order details Total
+USD 171.00
+Order date
+2026-04-27 17:40:29 PST
+Your product and delivery information 480led 3000K 12v Cob Led Strip Lights
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+480led 6500K 12v Cob Led Strip Light
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+Order summary (2 items) View details Item subtotal USD 136.00 Shipping fee USD 35.00 Total USD 171.00 Initial payment: USD 171.00 Remaining balance: USD 0.00
+`);
+
+    expect(parsed.externalOrderId).toBe("300174506001023166");
+    expect(parsed.supplierName).toBe("jason zhou");
+    expect(parsed.shippingCost).toBe(35);
+    expect(parsed.totalCost).toBe(171);
+    expect(parsed.lines).toHaveLength(2);
+    expect(parsed.lines.map((line) => line.rawDescription)).toEqual([
+      "480led 3000K 12v Cob Led Strip Lights",
+      "480led 6500K 12v Cob Led Strip Light"
+    ]);
+    expect(parsed.lines.map((line) => line.quantity)).toEqual([100, 100]);
+    expect(parsed.lines.map((line) => line.unitPrice)).toEqual([0.68, 0.68]);
+    expect(parsed.lines.map((line) => line.lineTotal)).toEqual([68, 68]);
+    expect(parsed.lines.map((line) => line.shippingAllocated)).toEqual([17.5, 17.5]);
+  });
+
   it("differentiates several repeated SKU/description blocks in one supplier email", () => {
     const parsed = parseAlibabaEmail(`
 From: supplier@example.com

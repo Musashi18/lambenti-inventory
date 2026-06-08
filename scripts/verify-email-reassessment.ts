@@ -73,7 +73,7 @@ function snapshot(imports: StoredImport[]) {
 }
 
 async function main() {
-  const where = { archivedAt: null, purchaseOrderId: null };
+  const where = { archivedAt: null };
   const beforeImports = await prisma.emailOrderImport.findMany({
     where,
     include: { lines: true },

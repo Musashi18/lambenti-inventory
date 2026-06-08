@@ -102,4 +102,14 @@ describe("order email server actions authorization", () => {
     expect(syncMailboxMock).toHaveBeenCalledWith("operator-1");
     expect(reassessMock).toHaveBeenCalledWith("operator-1");
   });
+
+  it("reassess action grabs current mailbox/image data before reparsing stored imports", async () => {
+    const result = await reassessRecentAlibabaEmailImportsAction();
+
+    expect(syncMailboxMock).toHaveBeenCalledWith("operator-1");
+    expect(reassessMock).toHaveBeenCalledWith("operator-1");
+    expect(syncMailboxMock.mock.invocationCallOrder[0]).toBeLessThan(reassessMock.mock.invocationCallOrder[0]);
+    expect(revalidateWorkspaceMock).toHaveBeenCalled();
+    expect(result).toMatchObject({ scanned: 0, refreshed: 0, skippedManual: 0 });
+  });
 });

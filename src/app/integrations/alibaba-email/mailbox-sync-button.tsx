@@ -3,7 +3,20 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type MailboxAction = () => Promise<void>;
+type MailboxActionResult = void | {
+  scanned?: number;
+  refreshed?: number;
+  skippedManual?: number;
+  sync?: {
+    configured?: boolean;
+    fetchedMessages?: number;
+    imported?: number;
+    duplicates?: number;
+    errors?: string[];
+  };
+};
+
+type MailboxAction = () => Promise<MailboxActionResult>;
 
 type MailboxSyncButtonProps = {
   syncAction: MailboxAction;
@@ -63,10 +76,10 @@ export function ReassessRecentImportsButton({ reassessAction, disabled = false }
     setPending(true);
     setMessage(null);
     try {
-      await reassessAction();
+      const result = await reassessAction();
       router.refresh();
       window.location.reload();
-      setMessage("Recent imports reassessed with the latest multi-item parser.");
+      setMessage(describeReassessResult(result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Reassessment failed. Refresh and try again.");
     } finally {
@@ -85,10 +98,20 @@ export function ReassessRecentImportsButton({ reassessAction, disabled = false }
       >
         <span className="inline-flex items-center gap-2">
           {pending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : null}
-          {pending ? "Reassessing…" : "Reassess recent imports"}
+          {pending ? "Syncing & reassessing…" : "Sync & reassess recent imports"}
         </span>
       </button>
       {message ? <p className="text-xs text-slate-600" role="status">{message}</p> : null}
     </div>
   );
+}
+
+function describeReassessResult(result: MailboxActionResult) {
+  if (!result || typeof result !== "object") return "Recent imports reassessed with the latest multi-item parser.";
+  const sync = result.sync;
+  const syncSummary = sync?.configured
+    ? `Mailbox checked (${sync.fetchedMessages ?? 0} fetched, ${sync.imported ?? 0} new, ${sync.duplicates ?? 0} refreshed/duplicates).`
+    : "Mailbox not configured; reassessed stored imports only.";
+  const errorSummary = sync?.errors?.length ? ` Sync notes: ${sync.errors.join("; ")}` : "";
+  return `${syncSummary} Reassessed ${result.scanned ?? 0} recent imports; updated ${result.refreshed ?? 0}; skipped ${result.skippedManual ?? 0} manually edited.${errorSummary}`;
 }

@@ -263,7 +263,14 @@ export async function applyAlibabaEmailOrderImport(importId: string, actorId: st
     });
 
     if (claim.count !== 1 || currentImport.purchaseOrder || currentImport.archivedAt) {
-      return { purchaseOrder: currentImport.purchaseOrder, updated: currentImport };
+      const updated = currentImport.purchaseOrder && currentImport.status !== "APPLIED"
+        ? await tx.emailOrderImport.update({
+            where: { id: importId },
+            data: { status: "APPLIED" },
+            include: { lines: { include: { matchedItem: true } }, supplier: true, purchaseOrder: true }
+          })
+        : currentImport;
+      return { purchaseOrder: updated.purchaseOrder, updated };
     }
 
     const currentMatchedLines = currentImport.lines.filter((line) =>
@@ -433,7 +440,7 @@ export async function getEmailOrderImports(options: { archivedOnly?: boolean } =
 
 export async function reassessRecentEmailOrderImports(actorId: string) {
   const imports = await prisma.emailOrderImport.findMany({
-    where: { archivedAt: null, purchaseOrderId: null },
+    where: { archivedAt: null },
     include: { lines: true },
     orderBy: { createdAt: "desc" },
     take: 25
@@ -453,7 +460,11 @@ export async function reassessRecentEmailOrderImports(actorId: string) {
 
     const rematchedLines = await matchLines(reparsed.lines);
     const supplier = await findOrCreateSupplier(reparsed.supplierName || orderImport.supplierName);
-    await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier.id);
+    if (orderImport.purchaseOrderId) {
+      await refreshAppliedImport(orderImport.id, reparsed, rematchedLines, supplier.id, actorId);
+    } else {
+      await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier.id);
+    }
     refreshed += 1;
   }
 
@@ -729,6 +740,220 @@ async function refreshExistingImport(
     },
     include: { lines: { include: { matchedItem: true } }, supplier: true, purchaseOrder: true }
   });
+}
+
+async function refreshAppliedImport(
+  importId: string,
+  parsed: ParsedAlibabaEmail,
+  matchedLines: MatchedAlibabaLine[],
+  supplierId: string,
+  actorId: string
+) {
+  const matchedCount = matchedLines.filter((line) => line.matchedItem).length;
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.emailOrderImport.update({
+      where: { id: importId },
+      data: {
+        sourceHash: parsed.sourceHash,
+        sourceMessageId: parsed.sourceMessageId,
+        sourceUrl: parsed.sourceUrl,
+        subject: parsed.subject,
+        fromAddress: parsed.fromAddress,
+        externalOrderId: parsed.externalOrderId,
+        supplierName: parsed.supplierName,
+        supplierId,
+        orderDate: parsed.orderDate,
+        currency: parsed.currency,
+        subtotal: toDecimal(parsed.subtotal),
+        shippingCost: toDecimal(parsed.shippingCost),
+        taxCost: toDecimal(parsed.taxCost),
+        totalCost: toDecimal(parsed.totalCost),
+        confidence: parsed.confidence,
+        status: matchedCount === parsed.lines.length ? "APPLIED" : "NEEDS_REVIEW",
+        lines: {
+          deleteMany: {},
+          create: matchedLines.map((line) => lineCreateData(line))
+        }
+      },
+      include: { lines: { include: { matchedItem: true } }, supplier: true, purchaseOrder: true }
+    });
+
+    if (updated.purchaseOrderId) {
+      await reconcileAppliedPurchaseOrderMetadata(tx, updated.purchaseOrderId, parsed, matchedLines, actorId, updated.id);
+    }
+
+    await writeAuditLog({
+      actorType: "USER",
+      actorId,
+      action: "REASSESS_APPLIED_EMAIL_ORDER_IMPORT",
+      entityType: "EmailOrderImport",
+      entityId: updated.id,
+      payload: {
+        purchaseOrderId: updated.purchaseOrderId,
+        parsedLineCount: parsed.lines.length,
+        matchedCount,
+        note: "Refreshed parsed email/order evidence and ordered metadata. Physical stock was not received."
+      }
+    }, tx);
+
+    return updated;
+  });
+}
+
+async function reconcileAppliedPurchaseOrderMetadata(
+  tx: Prisma.TransactionClient,
+  purchaseOrderId: string,
+  parsed: ParsedAlibabaEmail,
+  matchedLines: MatchedAlibabaLine[],
+  actorId: string,
+  importId: string
+) {
+  const readyLines = matchedLines.filter((line) =>
+    line.matchedItem && line.unitPrice && AUTO_APPLY_MATCHES.has(line.matchConfidence) && isUsdConversionSupported(line.currency)
+  );
+  if (readyLines.length !== matchedLines.length) return;
+
+  const purchaseOrder = await tx.purchaseOrder.findUnique({
+    where: { id: purchaseOrderId },
+    include: { lines: true, invoice: { include: { lines: true } } }
+  });
+  if (!purchaseOrder || purchaseOrder.status !== "ORDERED") return;
+
+  const existingPoLinesByItemId = new Map(purchaseOrder.lines.map((line) => [line.itemId, line]));
+  const missingPoLines = readyLines.filter((line) => !existingPoLinesByItemId.has(line.matchedItem!.id));
+  let updatedPurchaseOrderLines = 0;
+  for (const line of readyLines) {
+    const itemId = line.matchedItem!.id;
+    const unitPriceUsd = roundMoney(convertToUsd(line.unitPrice!, line.currency));
+    const existingLine = existingPoLinesByItemId.get(itemId);
+    if (!existingLine) {
+      await tx.purchaseOrderLine.create({
+        data: {
+          purchaseOrderId,
+          itemId,
+          quantity: line.quantity,
+          unitPrice: unitPriceUsd
+        }
+      });
+      continue;
+    }
+
+    if (existingLine.quantity !== line.quantity || Number(existingLine.unitPrice) !== unitPriceUsd) {
+      await tx.purchaseOrderLine.update({
+        where: { id: existingLine.id },
+        data: {
+          quantity: line.quantity,
+          unitPrice: unitPriceUsd
+        }
+      });
+      updatedPurchaseOrderLines += 1;
+    }
+  }
+
+  const itemIds = readyLines.map((line) => line.matchedItem!.id);
+  const items = await tx.item.findMany({ where: { id: { in: itemIds } } });
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+
+  for (const line of readyLines) {
+    const landedUnitCost = line.landedUnitCost ?? line.unitPrice;
+    const landedUnitCostUsd = convertToUsd(Number(landedUnitCost), line.currency);
+    await tx.item.update({
+      where: { id: line.matchedItem!.id },
+      data: {
+        estimatedUnitCost: landedUnitCostUsd,
+        costCurrency: DEFAULT_CURRENCY,
+        costConfidence: parsed.confidence,
+        costSourceRef: buildCostSourceRef(parsed.externalOrderId ?? importId, {
+          quantity: line.quantity,
+          unitPrice: toUsdDecimal(toDecimal(line.unitPrice), line.currency)!,
+          lineTotal: toUsdDecimal(toDecimal(line.lineTotal), line.currency),
+          shippingAllocated: toUsdDecimal(toDecimal(line.shippingAllocated), line.currency),
+          taxAllocated: toUsdDecimal(toDecimal(line.taxAllocated), line.currency),
+          landedUnitCost: toUsdDecimal(toDecimal(line.landedUnitCost), line.currency)
+        }),
+        preferredSupplierId: purchaseOrder.supplierId,
+        supplierSku: line.supplierSku ?? undefined
+      }
+    });
+  }
+
+  const invoice = purchaseOrder.invoice;
+  let addedInvoiceLines = 0;
+  let updatedInvoiceLines = 0;
+  if (invoice && (invoice.status === "DRAFT" || invoice.status === "RECEIVED")) {
+    const existingInvoiceLinesByItemId = new Map(
+      invoice.lines
+        .filter((line): line is typeof line & { itemId: string } => Boolean(line.itemId))
+        .map((line) => [line.itemId, line])
+    );
+    const invoiceLineCreates = [];
+
+    for (const line of readyLines) {
+      const itemId = line.matchedItem!.id;
+      const item = itemsById.get(itemId);
+      const description = item ? `${item.sku} — ${item.description}` : line.rawDescription;
+      const quantity = line.quantity;
+      const unitPrice = roundUnitCost(convertToUsd(line.unitPrice!, line.currency));
+      const lineTotal = roundMoney(convertToUsd(line.lineTotal ?? (line.unitPrice! * line.quantity), line.currency));
+      const existingLine = existingInvoiceLinesByItemId.get(itemId);
+
+      if (!existingLine) {
+        invoiceLineCreates.push({ itemId, description, quantity, unitPrice, lineTotal });
+        addedInvoiceLines += 1;
+        continue;
+      }
+
+      if (
+        existingLine.description !== description ||
+        existingLine.quantity !== quantity ||
+        Number(existingLine.unitPrice) !== unitPrice ||
+        Number(existingLine.lineTotal) !== lineTotal
+      ) {
+        await tx.supplierInvoiceLine.update({
+          where: { id: existingLine.id },
+          data: { description, quantity, unitPrice, lineTotal }
+        });
+        updatedInvoiceLines += 1;
+      }
+    }
+
+    await tx.supplierInvoice.update({
+      where: { id: invoice.id },
+      data: {
+        subtotal: toUsdMoneyDecimal(parsed.subtotal ?? sumLineTotals(readyLines), parsed.currency),
+        shippingCost: toUsdMoneyDecimal(parsed.shippingCost ?? 0, parsed.currency),
+        taxCost: toUsdMoneyDecimal(parsed.taxCost ?? 0, parsed.currency),
+        total: toUsdMoneyDecimal(parsed.totalCost ?? ((parsed.subtotal ?? sumLineTotals(readyLines)) + (parsed.shippingCost ?? 0) + (parsed.taxCost ?? 0)), parsed.currency),
+        lines: {
+          create: invoiceLineCreates
+        }
+      }
+    });
+  }
+
+  await writeAuditLog({
+    actorType: "USER",
+    actorId,
+    action: "RECONCILE_APPLIED_EMAIL_ORDER_METADATA",
+    entityType: "PurchaseOrder",
+    entityId: purchaseOrderId,
+    payload: {
+      importId,
+      addedPurchaseOrderLines: missingPoLines.length,
+      updatedPurchaseOrderLines,
+      addedInvoiceLines,
+      updatedInvoiceLines,
+      note: "Updated ORDERED metadata discovered by reassessment. No stock movements were created."
+    }
+  }, tx);
+}
+
+function sumLineTotals(lines: MatchedAlibabaLine[]) {
+  return roundMoney(lines.reduce((total, line) => total + (line.lineTotal ?? ((line.unitPrice ?? 0) * line.quantity)), 0));
+}
+
+function toUsdMoneyDecimal(value: number, currency: string) {
+  return new Prisma.Decimal(roundMoney(convertToUsd(value, currency)));
 }
 
 function lineCreateData(line: MatchedAlibabaLine) {
@@ -1549,6 +1774,7 @@ function isDuplicateLine(lines: ParsedAlibabaLine[], candidate: Omit<ParsedAliba
     const sameEconomics = sameQuantity && (sameUnitPrice || sameLineTotal);
     if (!sameEconomics) return false;
     if (hasConflictingImageContext(line, candidate)) return false;
+    if (hasConflictingVariantContext(line, candidate)) return false;
     if (sameSupplierSku) return true;
     return descriptionsOverlap(line.rawDescription, candidate.rawDescription);
   });
@@ -1565,6 +1791,43 @@ function hasConflictingImageContext(
   const lineImageContext = descriptionImageContextDuplicateKey(line.rawDescription);
   const candidateImageContext = descriptionImageContextDuplicateKey(candidate.rawDescription);
   return Boolean(lineImageContext && candidateImageContext && lineImageContext !== candidateImageContext);
+}
+
+function hasConflictingVariantContext(
+  line: ParsedAlibabaLine,
+  candidate: Omit<ParsedAlibabaLine, "lineNo"> | ParsedAlibabaLine
+) {
+  const lineVariants = extractAdaptiveVariantContext(line.rawDescription);
+  const candidateVariants = extractAdaptiveVariantContext(candidate.rawDescription);
+
+  for (const [category, values] of Array.from(lineVariants.entries())) {
+    const otherValues = candidateVariants.get(category);
+    if (!otherValues || values.size === 0 || otherValues.size === 0) continue;
+    if (!setsIntersect(values, otherValues)) return true;
+  }
+
+  return false;
+}
+
+function extractAdaptiveVariantContext(description: string) {
+  const normalized = description.toLowerCase();
+  const variants = new Map<string, Set<string>>();
+  addVariantValues(variants, "cct", normalized.match(/\b\d{3,5}\s*k\b/g)?.map((value) => value.replace(/\s+/g, "")));
+  addVariantValues(variants, "led-count", normalized.match(/\b\d+\s*leds?\b/g)?.map((value) => value.replace(/\s+/g, "")));
+  addVariantValues(variants, "pins", normalized.match(/\b\d+\s*p\b/g)?.map((value) => value.replace(/\s+/g, "")));
+  addVariantValues(variants, "dimension", normalized.match(/\b\d+(?:\.\d+)?\s*(?:mm|cm|m|in|inch|ft)\b/g)?.map((value) => value.replace(/\s+/g, "")));
+  addVariantValues(variants, "tone", normalized.match(/\b(?:warm|cool|neutral|daylight|soft\s+white|warm\s+white|cool\s+white)\b/g)?.map((value) => value.replace(/\s+/g, " ").trim()));
+  return variants;
+}
+
+function addVariantValues(target: Map<string, Set<string>>, category: string, values?: string[]) {
+  const cleaned = values?.map((value) => value.trim()).filter(Boolean);
+  if (!cleaned || cleaned.length === 0) return;
+  target.set(category, new Set(cleaned));
+}
+
+function setsIntersect(a: Set<string>, b: Set<string>) {
+  return Array.from(a).some((value) => b.has(value));
 }
 
 function imageReferenceDuplicateKey(productUrl?: string) {

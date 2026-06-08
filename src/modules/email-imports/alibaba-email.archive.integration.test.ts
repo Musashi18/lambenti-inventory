@@ -364,8 +364,204 @@ Total: USD 4.00
     expect(imported.import.externalOrderId).toBe(shortOrderId);
   });
 
+  it("reassesses stale LED imports into missed color-temperature lines without receiving stock", async () => {
+    const orderId = `${TEST_PREFIX}-LED-REASSESS-${Date.now()}`;
+    const rawText = `
+Subject: Your initial payment has been received (${orderId})
+From: "Alibaba" <credit@notice.alibaba.com>
+Your initial payment has been received (${orderId}) Hi Musashi Kaneko, The supplier ${TEST_PREFIX} LED Supplier has received your initial payment for order no. ${orderId}. View order details Total
+USD 171.00
+Order date
+2026-04-27 17:40:29 PST
+Your product and delivery information 480led 3000K 12v Cob Led Strip Lights
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+480led 6500K 12v Cob Led Strip Light
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+Order summary (2 items) View details Item subtotal USD 136.00 Shipping fee USD 35.00 Total USD 171.00 Initial payment: USD 171.00 Remaining balance: USD 0.00
+`;
+    const supplier = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} LED Supplier ${Date.now()}`,
+        moq: 1,
+        leadTimeDays: 21,
+        shippingCost: 0,
+        reliabilityScore: 3
+      }
+    });
+    const stale = await prisma.emailOrderImport.create({
+      data: {
+        sourceHash: `${TEST_PREFIX}-${orderId}-stale`,
+        subject: `Your initial payment has been received (${orderId})`,
+        rawText,
+        externalOrderId: orderId,
+        supplierName: supplier.name,
+        supplierId: supplier.id,
+        currency: "USD",
+        subtotal: 68,
+        shippingCost: 35,
+        totalCost: 171,
+        confidence: "CONFIRMED",
+        status: "IMPORTED",
+        lines: {
+          create: [{ lineNo: 1, rawDescription: "480led 3000K 12v Cob Led Strip Lights", quantity: 100, unitPrice: 0.68, lineTotal: 68, currency: "USD" }]
+        }
+      },
+      include: { lines: true }
+    });
+    expect(stale.lines).toHaveLength(1);
+
+    const stockMovementWhere = {
+      OR: [
+        { reference: { contains: orderId } },
+        { reason: { contains: orderId } }
+      ]
+    };
+    const stockMovementsBefore = await prisma.stockMovement.count({ where: stockMovementWhere });
+
+    const result = await reassessRecentEmailOrderImports(`${TEST_PREFIX}-actor`);
+
+    const stockMovementsAfter = await prisma.stockMovement.count({ where: stockMovementWhere });
+    const refreshed = await prisma.emailOrderImport.findUniqueOrThrow({
+      where: { id: stale.id },
+      include: { lines: { orderBy: { lineNo: "asc" } } }
+    });
+    expect(result.scanned).toBeGreaterThan(0);
+    expect(result.refreshed).toBeGreaterThanOrEqual(1);
+    expect(stockMovementsAfter).toBe(stockMovementsBefore);
+    expect(refreshed.lines.map((line) => line.rawDescription)).toEqual([
+      "480led 3000K 12v Cob Led Strip Lights",
+      "480led 6500K 12v Cob Led Strip Light"
+    ]);
+    expect(refreshed.lines.map((line) => Number(line.unitPrice))).toEqual([0.68, 0.68]);
+    await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-actor`, action: "REASSESS_RECENT_EMAIL_ORDER_IMPORTS" } })).resolves.toBeGreaterThan(0);
+  });
+
+  it("reassesses stale applied LED imports and updates ordered PO/invoice metadata without receiving stock", async () => {
+    const orderId = `${TEST_PREFIX}-LED-APPLIED-${Date.now()}`;
+    const rawText = `
+Subject: Your initial payment has been received (${orderId})
+From: "Alibaba" <credit@notice.alibaba.com>
+Your initial payment has been received (${orderId}) Hi Musashi Kaneko, The supplier ${TEST_PREFIX} Applied LED Supplier has received your initial payment for order no. ${orderId}. View order details Total
+USD 171.00
+Order date
+2026-04-27 17:40:29 PST
+Your product and delivery information 480led 3000K 12v Cob Led Strip Lights
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+480led 6500K 12v Cob Led Strip Light
+Quantity: 100
+Variations: 1
+Item subtotal: USD 68.00
+View details
+Order summary (2 items) View details Item subtotal USD 136.00 Shipping fee USD 35.00 Total USD 171.00 Initial payment: USD 171.00 Remaining balance: USD 0.00
+`;
+    const [warmItem, coolItem] = await Promise.all([
+      prisma.item.findUniqueOrThrow({ where: { sku: "LED-COB-12V-3000K" } }),
+      prisma.item.findUniqueOrThrow({ where: { sku: "LED-COB-12V-6500K" } })
+    ]);
+    const supplier = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Applied LED Supplier ${Date.now()}`,
+        moq: 1,
+        leadTimeDays: 21,
+        shippingCost: 0,
+        reliabilityScore: 3
+      }
+    });
+    const purchaseOrder = await prisma.purchaseOrder.create({
+      data: {
+        supplierId: supplier.id,
+        status: "ORDERED",
+        orderedAt: new Date("2026-04-27T17:40:29Z"),
+        lines: { create: [{ itemId: warmItem.id, quantity: 50, unitPrice: 0.7 }] }
+      }
+    });
+    await prisma.supplierInvoice.create({
+      data: {
+        invoiceNumber: `${TEST_PREFIX}-LED-${Date.now()}`,
+        supplierId: supplier.id,
+        purchaseOrderId: purchaseOrder.id,
+        status: "RECEIVED",
+        currency: "USD",
+        subtotal: 68,
+        shippingCost: 35,
+        taxCost: 0,
+        total: 171,
+        lines: {
+          create: [{ itemId: warmItem.id, description: `${warmItem.sku} — ${warmItem.description}`, quantity: 50, unitPrice: 0.7, lineTotal: 35 }]
+        }
+      }
+    });
+    const stale = await prisma.emailOrderImport.create({
+      data: {
+        sourceHash: `${TEST_PREFIX}-${orderId}-applied-stale`,
+        subject: `Your initial payment has been received (${orderId})`,
+        rawText,
+        externalOrderId: orderId,
+        supplierName: supplier.name,
+        supplierId: supplier.id,
+        purchaseOrderId: purchaseOrder.id,
+        currency: "USD",
+        subtotal: 68,
+        shippingCost: 35,
+        totalCost: 171,
+        confidence: "CONFIRMED",
+        status: "APPLIED",
+        lines: {
+          create: [{ lineNo: 1, rawDescription: "480led 3000K 12v Cob Led Strip Lights", quantity: 100, unitPrice: 0.68, lineTotal: 68, currency: "USD", matchedItemId: warmItem.id, matchConfidence: "ALIAS" }]
+        }
+      },
+      include: { lines: true }
+    });
+    expect(stale.lines).toHaveLength(1);
+
+    const stockMovementsBefore = await prisma.stockMovement.count();
+
+    const result = await reassessRecentEmailOrderImports(`${TEST_PREFIX}-actor`);
+
+    const stockMovementsAfter = await prisma.stockMovement.count();
+    const refreshed = await prisma.emailOrderImport.findUniqueOrThrow({
+      where: { id: stale.id },
+      include: { lines: { orderBy: { lineNo: "asc" } } }
+    });
+    const poLines = await prisma.purchaseOrderLine.findMany({
+      where: { purchaseOrderId: purchaseOrder.id },
+      include: { item: true },
+      orderBy: { item: { sku: "asc" } }
+    });
+    const invoice = await prisma.supplierInvoice.findUniqueOrThrow({
+      where: { purchaseOrderId: purchaseOrder.id },
+      include: { lines: { include: { item: true }, orderBy: { description: "asc" } } }
+    });
+
+    expect(result.refreshed).toBeGreaterThanOrEqual(1);
+    expect(stockMovementsAfter).toBe(stockMovementsBefore);
+    expect(refreshed.lines).toHaveLength(2);
+    expect(refreshed.lines.map((line) => line.rawDescription)).toEqual([
+      "480led 3000K 12v Cob Led Strip Lights",
+      "480led 6500K 12v Cob Led Strip Light"
+    ]);
+    expect(poLines.map((line) => ({ sku: line.item.sku, quantity: line.quantity, unitPrice: Number(line.unitPrice) }))).toEqual([
+      { sku: warmItem.sku, quantity: 100, unitPrice: 0.68 },
+      { sku: coolItem.sku, quantity: 100, unitPrice: 0.68 }
+    ]);
+    expect(invoice.lines.map((line) => ({ sku: line.item?.sku, quantity: line.quantity, unitPrice: Number(line.unitPrice) }))).toEqual([
+      { sku: warmItem.sku, quantity: 100, unitPrice: 0.68 },
+      { sku: coolItem.sku, quantity: 100, unitPrice: 0.68 }
+    ]);
+  });
+
   it("reassesses recent imports without overwriting manual line edits or receiving stock", async () => {
     const orderId = `${TEST_PREFIX}-REASSESS-${Date.now()}`;
+
     const created = await importAlibabaEmailOrder({
       actorId: `${TEST_PREFIX}-actor`,
       autoApply: false,

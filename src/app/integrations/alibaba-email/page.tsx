@@ -120,11 +120,11 @@ export default async function EmailImportPage({
           <div>
             <h2 className="font-medium">{showArchived ? "Archived imported order emails" : "Recent imported order emails"}</h2>
             <p className="text-xs text-slate-500">
-              {showArchived ? "Archived messages are hidden from the active review queue but kept for audit and later reference." : "Use Ignore & archive to hide messages that are not actionable without deleting them."}
+              {showArchived ? "Archived messages are hidden from the active review queue but kept for audit and later reference." : "Use Ignore & archive to hide messages that are not actionable. Reassess checks the mailbox/OCR pipeline, reparses stored supplier emails, and updates richer line-item/order metadata without receiving stock."}
             </p>
           </div>
           <div className="flex flex-wrap gap-3 md:items-center md:justify-end">
-            {!showArchived ? <ReassessRecentImportsButton reassessAction={reassessRecentAlibabaEmailImportsAction} disabled={imports.length === 0} /> : null}
+            {!showArchived ? <ReassessRecentImportsButton reassessAction={reassessRecentAlibabaEmailImportsAction} /> : null}
             <a
               href={showArchived ? "/integrations/email-import" : "/integrations/email-import?archived=1"}
               className="text-sm font-medium text-ink underline underline-offset-4"

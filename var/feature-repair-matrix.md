@@ -1,12 +1,12 @@
 # Lambenti Inventory Feature Repair Matrix
 
-Updated after interrupted-run recovery and final blocker-fix verification on 2026-06-07 21:35 EDT.
+Updated after interrupted-run recovery and final reassessment/smoke verification on 2026-06-07 23:30 EDT.
 
 ## Verification summary
 
-- `npm run quality`: PASS — lint, typecheck, 40 test files / 167 tests, production build.
+- `npm run quality`: PASS — lint, typecheck, 40 test files / 171 tests, production build.
 - `npm run smoke`: PASS — 12 pages, 5 UI contracts, 4 agent APIs at `http://127.0.0.1:5173`.
-- `npx tsx scripts/verify-email-reassessment.ts`: PASS — scanned 7 active unapplied imports, refreshed 0, stock movements stayed `16 -> 16`, audit payload written.
+- `npx tsx scripts/verify-email-reassessment.ts`: PASS — scanned 9 active imports, refreshed 0, stock movements stayed `16 -> 16`, audit payload written.
 - Focused browser/console pass: PASS for dashboard `/`, `/boms`, `/suppliers`, `/integrations/email-import`, `/automation`, and invoice payment UI at `/accounting/invoices`. Browser console reported no JS errors on checked pages.
 - Independent review: final review blockers and pre-commit blocker re-review findings are fixed and covered by regression tests.
 

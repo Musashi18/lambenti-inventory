@@ -138,8 +138,16 @@ export async function syncAlibabaEmailMailboxAction() {
 
 export async function reassessRecentAlibabaEmailImportsAction() {
   const actor = await requirePermission("integration:mutate");
-  await reassessRecentEmailOrderImports(actor.id);
+  const sync = await syncAlibabaMailboxWithBackoff(actor.id).catch((error) => ({
+    configured: false,
+    fetchedMessages: 0,
+    imported: 0,
+    duplicates: 0,
+    errors: [error instanceof Error ? error.message : String(error)]
+  }));
+  const reassess = await reassessRecentEmailOrderImports(actor.id);
   revalidateWorkspace();
+  return { ...reassess, sync };
 }
 
 function inferManualOrderEmailSource(rawText: string) {
