@@ -14,6 +14,11 @@ type MailboxActionResult = void | {
     duplicates?: number;
     trackingSaved?: number;
     trackingUpdated?: number;
+    shipmentConfirmations?: number;
+    portalCaptureTargetUrls?: number;
+    portalCapturedSnapshots?: number;
+    portalTrackingImported?: number;
+    portalTrackingDuplicates?: number;
     errors?: string[];
   };
 };
@@ -39,10 +44,10 @@ export function MailboxSyncButton({ syncAction, disabled = false }: MailboxSyncB
     setPending(true);
     setMessage(null);
     try {
-      await syncAction();
+      const result = await syncAction();
       router.refresh();
       window.location.reload();
-      setMessage("Mailbox sync complete. Recent imports were refreshed.");
+      setMessage(describeMailboxSyncResult(result));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Mailbox sync failed. Check mailbox settings and try again.");
     } finally {
@@ -106,6 +111,17 @@ export function ReassessRecentImportsButton({ reassessAction, disabled = false }
       {message ? <p className="text-xs text-slate-600" role="status">{message}</p> : null}
     </div>
   );
+}
+
+function describeMailboxSyncResult(result: MailboxActionResult) {
+  if (!result || typeof result !== "object" || !result.sync) return "Mailbox sync complete. Recent imports were refreshed.";
+  const sync = result.sync;
+  if (!sync.configured) return "Mailbox is not configured.";
+  const targeted = sync.portalCaptureTargetUrls && sync.portalCaptureTargetUrls > 0
+    ? ` Targeted Alibaba capture checked ${sync.portalCaptureTargetUrls} order-detail link(s), captured ${sync.portalCapturedSnapshots ?? 0} portal snapshot(s), and imported ${sync.portalTrackingImported ?? 0} tracking evidence snapshot(s) (${sync.portalTrackingDuplicates ?? 0} duplicates/refreshed).`
+    : "";
+  const errorSummary = sync.errors?.length ? ` Sync notes: ${sync.errors.join("; ")}` : "";
+  return `Mailbox checked (${sync.fetchedMessages ?? 0} fetched, ${sync.imported ?? 0} new, ${sync.duplicates ?? 0} refreshed/duplicates, ${sync.shipmentConfirmations ?? 0} shipment confirmation(s), ${sync.trackingSaved ?? 0} tracking saved, ${sync.trackingUpdated ?? 0} tracking updated).${targeted}${errorSummary}`;
 }
 
 function describeReassessResult(result: MailboxActionResult) {

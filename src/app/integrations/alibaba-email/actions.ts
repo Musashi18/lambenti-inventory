@@ -134,6 +134,8 @@ export async function syncAlibabaEmailMailboxAction() {
   if (result.errors.length > 0 && result.fetchedMessages === 0) {
     throw new Error(`Mailbox sync failed: ${result.errors.join("; ")}`);
   }
+
+  return { sync: result };
 }
 
 export async function reassessRecentAlibabaEmailImportsAction() {

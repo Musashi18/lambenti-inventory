@@ -86,7 +86,14 @@ describe("automation runs and findings", () => {
       status: "OPEN",
       suggestedActionType: "DRAFT_PURCHASE_REQUEST"
     });
-    expect(findings[0].suggestedActionJson).toMatchObject({ itemId: item.id, suggestedQuantity: 25 });
+    expect(findings[0].suggestedActionJson).toMatchObject({
+      itemId: item.id,
+      suggestedQuantity: 25,
+      learnedLeadTimeDays: 7,
+      reorderBufferDays: 7,
+      projectedAvailableWithIncoming: 0
+    });
+    expect(findings[0].message).toContain("learned order-to-receipt buffer");
   });
 
   it("does not create reorder findings for finished goods because they are assembled internally", async () => {

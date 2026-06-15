@@ -1,7 +1,12 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { recognizeImageText } from "@/modules/documents/ocr";
-import { captureManualTrackingNumbers, extractManualTrackingNumbersFromText } from "@/modules/tracking/service";
+import {
+  captureManualTrackingNumbers,
+  captureTrackingNumbersFromImports,
+  extractManualTrackingNumbersFromText
+} from "@/modules/tracking/service";
+import { runAlibabaPortalTrackingCapture } from "@/modules/tracking/alibaba-capture-agent";
 import { importAlibabaEmailOrder } from "./alibaba-email";
 
 export type OcrImageTextInput = {
@@ -39,6 +44,11 @@ export type MailboxSyncResult = {
   invoicesCreatedOrUpdated: number;
   trackingSaved: number;
   trackingUpdated: number;
+  shipmentConfirmations: number;
+  portalCaptureTargetUrls: number;
+  portalCapturedSnapshots: number;
+  portalTrackingImported: number;
+  portalTrackingDuplicates: number;
   needsReview: number;
   skipped: number;
   errors: string[];
@@ -121,6 +131,11 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
       invoicesCreatedOrUpdated: 0,
       trackingSaved: 0,
       trackingUpdated: 0,
+      shipmentConfirmations: 0,
+      portalCaptureTargetUrls: 0,
+      portalCapturedSnapshots: 0,
+      portalTrackingImported: 0,
+      portalTrackingDuplicates: 0,
       needsReview: 0,
       skipped: 0,
       errors: ["Mailbox is not configured. Set LAMBENTI_EMAIL_IMAP_HOST, LAMBENTI_EMAIL_IMAP_USER, and LAMBENTI_EMAIL_IMAP_PASSWORD in .env."]
@@ -138,6 +153,11 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
     invoicesCreatedOrUpdated: 0,
     trackingSaved: 0,
     trackingUpdated: 0,
+    shipmentConfirmations: 0,
+    portalCaptureTargetUrls: 0,
+    portalCapturedSnapshots: 0,
+    portalTrackingImported: 0,
+    portalTrackingDuplicates: 0,
     needsReview: 0,
     skipped: 0,
     errors: []
@@ -170,6 +190,7 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
   const lock = await client.getMailboxLock(config.mailbox);
 
   const relevantMessages: string[] = [];
+  const alibabaShipmentTargetUrls: string[] = [];
 
   try {
     // Fetch the latest messages by sequence number instead of using full-text IMAP search.
@@ -234,6 +255,10 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
 
   for (const rawText of dedupe(relevantMessages)) {
     try {
+      const shipmentTargetUrls = extractAlibabaShipmentTrackingTargetUrls(rawText);
+      if (looksLikeShipmentNotificationEmail(rawText)) result.shipmentConfirmations += 1;
+      alibabaShipmentTargetUrls.push(...shipmentTargetUrls);
+
       const imported = await importAlibabaEmailOrder({
         rawText,
         autoApply: config.autoApply,
@@ -264,6 +289,8 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
     }
   }
 
+  await runTargetedAlibabaShipmentCaptures(alibabaShipmentTargetUrls, actorId, result);
+
   return result;
 }
 
@@ -286,8 +313,54 @@ async function captureTrackingFromImportedShipmentEmail(rawText: string, importe
   return { saved: result.saved, updated: result.updated };
 }
 
-function looksLikeShipmentNotificationEmail(rawText: string) {
+async function runTargetedAlibabaShipmentCaptures(targetUrls: string[], actorId: string, result: MailboxSyncResult) {
+  const uniqueTargetUrls = dedupe(targetUrls);
+  result.portalCaptureTargetUrls = uniqueTargetUrls.length;
+  if (uniqueTargetUrls.length === 0) return;
+
+  try {
+    const portal = await runAlibabaPortalTrackingCapture({ targetUrls: uniqueTargetUrls });
+    result.portalCapturedSnapshots += portal.capturedSnapshots;
+    result.portalTrackingImported += portal.imported;
+    result.portalTrackingDuplicates += portal.duplicates;
+    if (portal.errors.length > 0) result.errors.push(...portal.errors);
+    if (portal.loginRequired) result.errors.push("Alibaba login required before targeted shipment tracking capture can continue.");
+    if (portal.securityChallengeRequired) result.errors.push("Alibaba security/CAPTCHA/2FA check blocked targeted shipment tracking capture; complete it manually and rerun sync.");
+
+    const backfill = await captureTrackingNumbersFromImports({ actorId, limit: 200, recentMonths: 3 });
+    result.trackingSaved += backfill.saved;
+    result.trackingUpdated += backfill.updated;
+  } catch (error) {
+    result.errors.push(`Alibaba targeted shipment capture failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export function looksLikeShipmentNotificationEmail(rawText: string) {
   return /\b(?:shipped|shipment|shipping|track\s*(?:package|shipment|order)?|tracking|logistics|waybill|carrier|delivery)\b/i.test(rawText);
+}
+
+export function extractAlibabaShipmentTrackingTargetUrls(rawText: string) {
+  if (!looksLikeShipmentNotificationEmail(rawText)) return [];
+  const urls = String(rawText ?? "").match(/https?:\/\/[^\s<>"']+/gi) ?? [];
+  return dedupe(urls.map(cleanAlibabaTargetUrl).filter((value): value is string => Boolean(value) && isAlibabaOrderTrackingTargetUrl(value)));
+}
+
+function cleanAlibabaTargetUrl(value: string) {
+  return String(value ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/[)\],.;]+$/g, "")
+    .trim();
+}
+
+function isAlibabaOrderTrackingTargetUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (!/(^|\.)alibaba\.com$/i.test(url.hostname)) return false;
+    const targetText = `${url.hostname}${url.pathname}${url.search}`;
+    return /(?:order|trade|ta|detail|logistics|tracking|shipment|messenger|message|orderId|tradeOrderId|orderNumber)/i.test(targetText);
+  } catch {
+    return false;
+  }
 }
 
 async function runSyncAndScheduleBackoff(actorId: string): Promise<MailboxSyncResult> {
@@ -316,6 +389,11 @@ async function runSyncAndScheduleBackoff(actorId: string): Promise<MailboxSyncRe
       invoicesCreatedOrUpdated: 0,
       trackingSaved: 0,
       trackingUpdated: 0,
+      shipmentConfirmations: 0,
+      portalCaptureTargetUrls: 0,
+      portalCapturedSnapshots: 0,
+      portalTrackingImported: 0,
+      portalTrackingDuplicates: 0,
       needsReview: 0,
       skipped: 0,
       errors: [error instanceof Error ? error.message : String(error)]
@@ -382,6 +460,11 @@ function emptyQueuedResult(message: string): MailboxSyncResult {
     invoicesCreatedOrUpdated: 0,
     trackingSaved: 0,
     trackingUpdated: 0,
+    shipmentConfirmations: 0,
+    portalCaptureTargetUrls: 0,
+    portalCapturedSnapshots: 0,
+    portalTrackingImported: 0,
+    portalTrackingDuplicates: 0,
     needsReview: 0,
     skipped: 0,
     errors: [message]

@@ -90,6 +90,52 @@ export type LeadTimeSummaryIndex = {
   bySupplierId: Record<string, LeadTimeSummary>;
 };
 
+export type LeadTimeLogEntry = {
+  purchaseOrderId: string;
+  externalOrderId: string | null;
+  supplierId: string;
+  supplierName: string;
+  itemId: string;
+  itemSku: string;
+  itemDescription: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  startAt: Date;
+  endAt: Date;
+  endSource: "RECEIVED" | "DELIVERED";
+  leadTimeDays: number;
+  leadTimeLabel: string;
+  trackingNumbers: string[];
+  shipTimeStartedAt: Date | null;
+  shipTimeEndedAt: Date | null;
+  shipTimeMs: number | null;
+  shipTimeLabel: string | null;
+};
+
+export type LeadTimeLogItem = {
+  itemId: string;
+  itemSku: string;
+  itemDescription: string;
+  currentLeadTimeDays: number;
+  averageLeadTimeDays: number;
+  weightedAverageLeadTimeDays: number;
+  averageShipTimeDays: number | null;
+  averageShipTimeLabel: string | null;
+  sampleCount: number;
+  totalQuantityOrdered: number;
+  totalQuantityReceived: number;
+  entries: LeadTimeLogEntry[];
+};
+
+export type LeadTimeLog = {
+  sampleCount: number;
+  itemCount: number;
+  totalQuantityOrdered: number;
+  averageLeadTimeDays: number | null;
+  averageShipTimeDays: number | null;
+  items: LeadTimeLogItem[];
+};
+
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 240;
 const DEFAULT_SHIP24_BASE_URL = "https://api.ship24.com";
 const TRACKING_REGEX = /\b(?:1Z[0-9A-Z]{16}|[A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{1,5}\d{8,24}[A-Z]{0,4}|\d{10,24})\b/gi;
@@ -712,6 +758,35 @@ export async function getLeadTimeSummaryIndex(): Promise<LeadTimeSummaryIndex> {
   };
 }
 
+export async function getLeadTimeLog(): Promise<LeadTimeLog> {
+  const samples = await buildLeadTimeSamples();
+  const grouped = new Map<string, LeadTimeSample[]>();
+  for (const sample of samples) {
+    grouped.set(sample.itemId, [...(grouped.get(sample.itemId) ?? []), sample]);
+  }
+
+  const items: LeadTimeLogItem[] = Array.from(grouped.values())
+    .map((group) => buildLeadTimeLogItem(group))
+    .sort((a, b) => a.itemSku.localeCompare(b.itemSku));
+  const totalQuantityOrdered = samples.reduce((sum, sample) => sum + sample.quantityOrdered, 0);
+  const averageLeadTimeDays = samples.length > 0
+    ? roundDays(samples.reduce((sum, sample) => sum + sample.days, 0) / samples.length)
+    : null;
+  const shippingSamples = samples.filter((sample) => sample.shipTimeMs !== null);
+  const averageShipTimeDays = shippingSamples.length > 0
+    ? roundDays(shippingSamples.reduce((sum, sample) => sum + (sample.shipTimeMs ?? 0) / 86_400_000, 0) / shippingSamples.length)
+    : null;
+
+  return {
+    sampleCount: samples.length,
+    itemCount: items.length,
+    totalQuantityOrdered,
+    averageLeadTimeDays,
+    averageShipTimeDays,
+    items
+  };
+}
+
 export async function syncLeadTimeAveragesForPurchaseOrder(
   purchaseOrderId: string,
   actorId: string,
@@ -815,20 +890,46 @@ function formatShipTime(milliseconds: number) {
 type LeadTimeSample = {
   purchaseOrderId: string;
   supplierId: string;
+  supplierName: string;
   itemId: string;
+  itemSku: string;
+  itemDescription: string;
+  itemLeadTimeDays: number;
+  externalOrderId: string | null;
+  quantityOrdered: number;
+  quantityReceived: number;
   startAt: Date;
   endAt: Date;
   endSource: "RECEIVED" | "DELIVERED";
   days: number;
+  trackingNumbers: string[];
+  shipTimeStartedAt: Date | null;
+  shipTimeEndedAt: Date | null;
+  shipTimeMs: number | null;
+  shipTimeLabel: string | null;
 };
 
 async function buildLeadTimeSamples(): Promise<LeadTimeSample[]> {
   const orders = await prisma.purchaseOrder.findMany({
     include: {
-      emailOrderImports: { select: { orderDate: true } },
-      trackingNumbers: { select: { deliveredAt: true, currentStatus: true } },
+      supplier: { select: { id: true, name: true } },
+      emailOrderImports: { select: { externalOrderId: true, orderDate: true } },
+      trackingNumbers: {
+        select: {
+          trackingNumber: true,
+          deliveredAt: true,
+          currentStatus: true,
+          lastEventAt: true,
+          capturedAt: true,
+          events: {
+            select: { occurredAt: true },
+            orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }]
+          }
+        }
+      },
       lines: {
         include: {
+          item: { select: { id: true, sku: true, description: true, leadTimeDays: true } },
           stockMovements: {
             where: { movementType: MovementType.RECEIVE },
             include: { stockLot: { select: { receivedAt: true } } }
@@ -846,7 +947,10 @@ async function buildLeadTimeSamples(): Promise<LeadTimeSample[]> {
     if (!startAt) continue;
     const deliveredAt = earliestDate(order.trackingNumbers
       .filter((tracking) => tracking.currentStatus === "DELIVERED" || tracking.deliveredAt)
-      .map((tracking) => tracking.deliveredAt));
+      .map((tracking) => tracking.deliveredAt ?? tracking.lastEventAt));
+    const shipTime = computeOrderShipTime(order.trackingNumbers);
+    const externalOrderId = order.emailOrderImports.find((entry) => entry.externalOrderId)?.externalOrderId ?? null;
+    const trackingNumbers = unique(order.trackingNumbers.map((tracking) => tracking.trackingNumber));
     for (const line of order.lines) {
       const receivedAt = earliestDate(line.stockMovements.map((movement) => movement.stockLot?.receivedAt ?? movement.createdAt));
       const endAt = receivedAt ?? deliveredAt;
@@ -854,15 +958,110 @@ async function buildLeadTimeSamples(): Promise<LeadTimeSample[]> {
       samples.push({
         purchaseOrderId: order.id,
         supplierId: order.supplierId,
+        supplierName: order.supplier.name,
         itemId: line.itemId,
+        itemSku: line.item.sku,
+        itemDescription: line.item.description,
+        itemLeadTimeDays: line.item.leadTimeDays,
+        externalOrderId,
+        quantityOrdered: line.quantity,
+        quantityReceived: line.receivedQuantity,
         startAt,
         endAt,
         endSource: receivedAt ? "RECEIVED" : "DELIVERED",
-        days: (endAt.getTime() - startAt.getTime()) / 86_400_000
+        days: (endAt.getTime() - startAt.getTime()) / 86_400_000,
+        trackingNumbers,
+        shipTimeStartedAt: shipTime.startedAt,
+        shipTimeEndedAt: shipTime.endedAt,
+        shipTimeMs: shipTime.ms,
+        shipTimeLabel: shipTime.label
       });
     }
   }
   return samples;
+}
+
+function buildLeadTimeLogItem(group: LeadTimeSample[]): LeadTimeLogItem {
+  const first = group[0];
+  const sampleCount = group.length;
+  const totalQuantityOrdered = group.reduce((sum, sample) => sum + sample.quantityOrdered, 0);
+  const totalQuantityReceived = group.reduce((sum, sample) => sum + sample.quantityReceived, 0);
+  const averageLeadTimeDays = roundDays(group.reduce((sum, sample) => sum + sample.days, 0) / sampleCount);
+  const weightedAverageLeadTimeDays = totalQuantityOrdered > 0
+    ? roundDays(group.reduce((sum, sample) => sum + sample.days * sample.quantityOrdered, 0) / totalQuantityOrdered)
+    : averageLeadTimeDays;
+  const shippingSamples = group.filter((sample) => sample.shipTimeMs !== null);
+  const averageShipTimeDays = shippingSamples.length > 0
+    ? roundDays(shippingSamples.reduce((sum, sample) => sum + (sample.shipTimeMs ?? 0) / 86_400_000, 0) / shippingSamples.length)
+    : null;
+
+  return {
+    itemId: first.itemId,
+    itemSku: first.itemSku,
+    itemDescription: first.itemDescription,
+    currentLeadTimeDays: first.itemLeadTimeDays,
+    averageLeadTimeDays,
+    weightedAverageLeadTimeDays,
+    averageShipTimeDays,
+    averageShipTimeLabel: averageShipTimeDays === null ? null : formatLeadTimeDays(averageShipTimeDays),
+    sampleCount,
+    totalQuantityOrdered,
+    totalQuantityReceived,
+    entries: group
+      .map((sample) => ({
+        purchaseOrderId: sample.purchaseOrderId,
+        externalOrderId: sample.externalOrderId,
+        supplierId: sample.supplierId,
+        supplierName: sample.supplierName,
+        itemId: sample.itemId,
+        itemSku: sample.itemSku,
+        itemDescription: sample.itemDescription,
+        quantityOrdered: sample.quantityOrdered,
+        quantityReceived: sample.quantityReceived,
+        startAt: sample.startAt,
+        endAt: sample.endAt,
+        endSource: sample.endSource,
+        leadTimeDays: roundDays(sample.days),
+        leadTimeLabel: `${formatLeadTimeDays(sample.days)} payment/order → ${sample.endSource === "RECEIVED" ? "receipt" : "delivery"}`,
+        trackingNumbers: sample.trackingNumbers,
+        shipTimeStartedAt: sample.shipTimeStartedAt,
+        shipTimeEndedAt: sample.shipTimeEndedAt,
+        shipTimeMs: sample.shipTimeMs,
+        shipTimeLabel: sample.shipTimeLabel
+      }))
+      .sort((a, b) => b.endAt.getTime() - a.endAt.getTime())
+  };
+}
+
+function computeOrderShipTime(trackings: Array<{
+  deliveredAt: Date | null;
+  lastEventAt: Date | null;
+  capturedAt: Date;
+  currentStatus: string;
+  events: Array<{ occurredAt: Date | null }>;
+}>) {
+  const deliveredAt = earliestDate(trackings
+    .filter((tracking) => tracking.currentStatus === "DELIVERED" || tracking.deliveredAt)
+    .map((tracking) => tracking.deliveredAt ?? tracking.lastEventAt));
+  if (!deliveredAt) return { startedAt: null, endedAt: null, ms: null, label: null };
+
+  const eventDates = trackings.flatMap((tracking) => tracking.events.map((event) => event.occurredAt));
+  const earliestEvent = earliestDate(eventDates);
+  const fallbackCapturedAt = earliestDate(trackings.map((tracking) => tracking.capturedAt).filter((value) => value <= deliveredAt));
+  const startedAt = earliestEvent ?? fallbackCapturedAt;
+  if (!startedAt || deliveredAt < startedAt) return { startedAt: null, endedAt: deliveredAt, ms: null, label: null };
+
+  const ms = deliveredAt.getTime() - startedAt.getTime();
+  return { startedAt, endedAt: deliveredAt, ms, label: formatShipTime(ms) };
+}
+
+function roundDays(value: number) {
+  return Number(value.toFixed(1));
+}
+
+function formatLeadTimeDays(value: number) {
+  const rounded = roundDays(value);
+  return `${rounded}d`;
 }
 
 function summarizeLeadTimes(samples: LeadTimeSample[], key: "itemId" | "supplierId") {
@@ -1024,19 +1223,26 @@ async function resolveTrackingOrderLink(input: { externalOrderId?: string; email
   const explicitImport = input.emailOrderImportId
     ? await prisma.emailOrderImport.findUnique({ where: { id: input.emailOrderImportId } })
     : null;
-  const matchedImport = explicitImport ?? (input.externalOrderId
+  const lookupExternalOrderId = input.externalOrderId ?? explicitImport?.externalOrderId ?? undefined;
+  const linkedImport = lookupExternalOrderId
     ? await prisma.emailOrderImport.findFirst({
-        where: { externalOrderId: input.externalOrderId },
+        where: { externalOrderId: lookupExternalOrderId, purchaseOrderId: { not: null } },
+        orderBy: { updatedAt: "desc" }
+      })
+    : null;
+  const matchedImport = linkedImport ?? explicitImport ?? (lookupExternalOrderId
+    ? await prisma.emailOrderImport.findFirst({
+        where: { externalOrderId: lookupExternalOrderId },
         orderBy: [{ purchaseOrderId: "desc" }, { updatedAt: "desc" }]
       })
     : null);
 
   return {
-    externalOrderId: input.externalOrderId ?? matchedImport?.externalOrderId ?? null,
-    supplierName: matchedImport?.supplierName ?? null,
+    externalOrderId: lookupExternalOrderId ?? matchedImport?.externalOrderId ?? null,
+    supplierName: explicitImport?.supplierName ?? matchedImport?.supplierName ?? null,
     purchaseOrderId: matchedImport?.purchaseOrderId ?? null,
-    emailOrderImportId: matchedImport?.id ?? null,
-    orderDate: matchedImport?.orderDate ?? null
+    emailOrderImportId: explicitImport?.id ?? matchedImport?.id ?? null,
+    orderDate: explicitImport?.orderDate ?? matchedImport?.orderDate ?? null
   };
 }
 

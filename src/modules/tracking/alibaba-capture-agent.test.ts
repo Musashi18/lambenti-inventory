@@ -25,6 +25,17 @@ describe("Alibaba portal tracking capture agent wrapper", () => {
     expect(command.env.LAMBENTI_ALIBABA_BROWSER_PROFILE_DIR?.replace(/\\/g, "/")).toBe("C:/repo/lambenti-inventory/var/alibaba-chrome-profile");
   });
 
+  it("adds email-provided Alibaba order-detail links as targeted tracking capture arguments", () => {
+    const targetUrl = "https://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166&spm=a2700";
+    const command = buildAlibabaPortalTrackingCaptureCommand({
+      projectRoot: "C:/repo/lambenti-inventory",
+      targetUrls: [targetUrl, targetUrl]
+    });
+
+    expect(command.args).toContain(`--tracking-target-url=${targetUrl}`);
+    expect(command.args.filter((arg) => arg.startsWith("--tracking-target-url="))).toHaveLength(1);
+  });
+
   it("keeps an explicit opt-in escape hatch for using the normal Work Chrome profile", () => {
     const env = buildAlibabaPortalTrackingCaptureEnv("C:/repo/lambenti-inventory", {
       LAMBENTI_ALIBABA_TRACKING_CAPTURE_USE_WORK_PROFILE: "true",

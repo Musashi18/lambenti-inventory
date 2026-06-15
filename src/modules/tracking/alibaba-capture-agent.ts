@@ -60,9 +60,11 @@ type ProcessRunner = (command: AlibabaPortalTrackingCommand, timeoutMs: number) 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 420_000;
 const MAX_CHILD_OUTPUT_CHARS = 120_000;
 
-export function buildAlibabaPortalTrackingCaptureCommand(input: { projectRoot?: string; env?: Partial<NodeJS.ProcessEnv> } = {}): AlibabaPortalTrackingCommand {
+export function buildAlibabaPortalTrackingCaptureCommand(input: { projectRoot?: string; env?: Partial<NodeJS.ProcessEnv>; targetUrls?: string[] } = {}): AlibabaPortalTrackingCommand {
   const projectRoot = input.projectRoot ?? process.cwd();
   const env = buildAlibabaPortalTrackingCaptureEnv(projectRoot, input.env);
+  const targetArgs = uniqueTargetUrls(input.targetUrls ?? [])
+    .map((url) => `--tracking-target-url=${url}`);
   return {
     command: process.execPath,
     args: [
@@ -70,7 +72,8 @@ export function buildAlibabaPortalTrackingCaptureCommand(input: { projectRoot?: 
       "--json",
       "--tracking-only",
       "--deep",
-      "--recent-months=3"
+      "--recent-months=3",
+      ...targetArgs
     ],
     cwd: projectRoot,
     env
@@ -98,8 +101,9 @@ export async function runAlibabaPortalTrackingCapture(input: {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   runner?: ProcessRunner;
+  targetUrls?: string[];
 } = {}): Promise<AlibabaPortalAgentResult> {
-  const command = buildAlibabaPortalTrackingCaptureCommand({ projectRoot: input.projectRoot, env: input.env });
+  const command = buildAlibabaPortalTrackingCaptureCommand({ projectRoot: input.projectRoot, env: input.env, targetUrls: input.targetUrls });
   const timeoutMs = positiveInt(input.timeoutMs ?? command.env.LAMBENTI_ALIBABA_CAPTURE_TIMEOUT_MS, DEFAULT_CAPTURE_TIMEOUT_MS);
   const runner = input.runner ?? spawnPortalAgent;
   const result = await runner(command, timeoutMs);
@@ -193,6 +197,19 @@ export function summarizeAlibabaPortalTrackingCapture(input: {
   lines.push("Controlled tracking capture uses the dedicated Alibaba automation Chrome profile by default because current Chrome blocks DevTools control of the normal Work profile.");
   lines.push("The portal run uses tracking-only mode (autoApply=false, autoCreateInvoices=false); it saves/link tracking evidence only and does not receive stock, pay invoices, or confirm delivery.");
   return lines.join(" ");
+}
+
+
+function uniqueTargetUrls(values: string[]) {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const value of values) {
+    const trimmed = String(value ?? "").trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    urls.push(trimmed);
+  }
+  return urls;
 }
 
 function coerceAlibabaPortalAgentResult(value: Partial<AlibabaPortalAgentResult>): AlibabaPortalAgentResult {

@@ -1,10 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ItemCategory, PurchaseOrderStatus, Unit } from "@prisma/client";
+import { ItemCategory, MovementType, PurchaseOrderStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   captureTrackingNumbersFromImports,
   captureTrackingNumbersFromPortalSnapshot,
   extractTrackingNumbersFromText,
+  getLeadTimeLog,
   getTrackingDashboard,
   normalizeTrackingNumber,
   pruneOldAlibabaTrackingNumbers,
@@ -45,6 +46,7 @@ async function cleanupTestData() {
   const itemIds = items.map((item) => item.id);
   if (itemIds.length > 0) {
     await prisma.stockMovement.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.stockLot.deleteMany({ where: { itemId: { in: itemIds } } });
     await prisma.purchaseOrderLine.deleteMany({ where: { itemId: { in: itemIds } } });
   }
   if (supplierIds.length > 0) await prisma.purchaseOrder.deleteMany({ where: { supplierId: { in: supplierIds } } });
@@ -323,6 +325,113 @@ describe("tracking service", () => {
       externalOrderId: fixture.externalOrderId,
       purchaseOrderId: fixture.order.id,
       emailOrderImportId: fixture.orderImport.id
+    });
+  });
+
+  it("links portal tracking captured from a shipment import back to the initial payment purchase order", async () => {
+    const fixture = await createOrderImportFixture("SHIPMENT-LINK");
+    const shipmentImport = await prisma.emailOrderImport.create({
+      data: {
+        source: "SYNCED_EMAIL",
+        sourceHash: `${TEST_PREFIX}-SHIPMENT-LINK-shipment-hash`,
+        sourceMessageId: `<${TEST_PREFIX}-SHIPMENT-LINK-shipment>`,
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}#shipment-email`,
+        subject: "Your Alibaba order has shipped",
+        rawText: `Subject: Your Alibaba order has shipped\nOrder ID: ${fixture.externalOrderId}\nTrack package in Alibaba portal`,
+        externalOrderId: fixture.externalOrderId,
+        supplierName: fixture.supplier.name,
+        supplierId: fixture.supplier.id,
+        status: "IMPORTED",
+        totalCost: 12.5,
+        lines: {
+          create: [{ lineNo: 1, rawDescription: fixture.item.description, quantity: 10, unitPrice: 1.25, lineTotal: 12.5, matchedItemId: fixture.item.id, matchConfidence: "MANUAL" }]
+        }
+      }
+    });
+
+    const result = await captureTrackingNumbersFromPortalSnapshot({
+      emailOrderImportId: shipmentImport.id,
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}#tracking`,
+        orderId: fixture.externalOrderId,
+        supplierName: fixture.supplier.name,
+        capturedAt: "2026-06-14T02:00:00.000Z",
+        trackingNumbers: ["1Z675EW60490310040"],
+        text: "Shipment confirmation\nTracking Number: 1Z675EW60490310040"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+
+    expect(result.saved).toBe(1);
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310040" } })).resolves.toMatchObject({
+      purchaseOrderId: fixture.order.id,
+      emailOrderImportId: shipmentImport.id,
+      externalOrderId: fixture.externalOrderId
+    });
+  });
+
+  it("builds an expandable lead-time log with ordered quantity, received quantity, and shipping time samples", async () => {
+    const fixture = await createOrderImportFixture("LEAD-LOG");
+    const line = await prisma.purchaseOrderLine.findFirstOrThrow({ where: { purchaseOrderId: fixture.order.id } });
+    const tracking = await prisma.trackingNumber.create({
+      data: {
+        trackingNumber: "1Z675EW60490310041",
+        source: "ALIBABA_PORTAL",
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        externalOrderId: fixture.externalOrderId,
+        supplierName: fixture.supplier.name,
+        purchaseOrderId: fixture.order.id,
+        emailOrderImportId: fixture.orderImport.id,
+        currentStatus: "DELIVERED",
+        capturedAt: new Date("2026-06-11T00:00:00.000Z"),
+        deliveredAt: new Date("2026-06-18T00:00:00.000Z"),
+        lastEventAt: new Date("2026-06-18T00:00:00.000Z"),
+        nextRefreshAt: null,
+        refreshStatus: "SUCCESS"
+      }
+    });
+    await prisma.trackingEvent.createMany({
+      data: [
+        { trackingNumberId: tracking.id, status: "IN_TRANSIT", description: "Picked up", occurredAt: new Date("2026-06-12T00:00:00.000Z") },
+        { trackingNumberId: tracking.id, status: "DELIVERED", description: "Delivered", occurredAt: new Date("2026-06-18T00:00:00.000Z") }
+      ]
+    });
+    const lot = await prisma.stockLot.create({
+      data: { itemId: fixture.item.id, lotCode: `${TEST_PREFIX}-LEAD-LOG-LOT`, receivedAt: new Date("2026-06-20T00:00:00.000Z"), unitCost: 1.25 }
+    });
+    await prisma.stockMovement.create({
+      data: {
+        itemId: fixture.item.id,
+        stockLotId: lot.id,
+        purchaseOrderLineId: line.id,
+        movementType: MovementType.RECEIVE,
+        quantity: 10,
+        reason: "Lead time fixture receive",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-agent`
+      }
+    });
+    await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: { receivedQuantity: 10 } });
+
+    const log = await getLeadTimeLog();
+    const itemLog = log.items.find((row) => row.itemId === fixture.item.id);
+    expect(itemLog).toMatchObject({
+      itemSku: fixture.item.sku,
+      sampleCount: 1,
+      totalQuantityOrdered: 10,
+      totalQuantityReceived: 10,
+      averageLeadTimeDays: 10,
+      averageShipTimeDays: 6
+    });
+    expect(itemLog?.entries[0]).toMatchObject({
+      purchaseOrderId: fixture.order.id,
+      externalOrderId: fixture.externalOrderId,
+      quantityOrdered: 10,
+      quantityReceived: 10,
+      leadTimeDays: 10,
+      endSource: "RECEIVED",
+      shipTimeLabel: "6d",
+      trackingNumbers: ["1Z675EW60490310041"]
     });
   });
 

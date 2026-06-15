@@ -131,7 +131,7 @@ export async function importAlibabaEmailOrder(input: {
   const existingByExternalOrder = !existingByHash && parsed.externalOrderId
     ? await prisma.emailOrderImport.findFirst({
         where: { externalOrderId: parsed.externalOrderId },
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ purchaseOrderId: "desc" }, { createdAt: "desc" }],
         include: { lines: { include: { matchedItem: true } }, supplier: true, purchaseOrder: true }
       })
     : null;

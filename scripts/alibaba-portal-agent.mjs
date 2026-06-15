@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -75,6 +74,7 @@ const DEFAULT_ALIBABA_ORDERS_URL = "https://biz.alibaba.com/order/list.htm";
 const DEFAULT_ALIBABA_MESSAGES_URL = "https://message.alibaba.com/message/messenger.htm";
 const startUrl = normalizePortalUrl(process.env.LAMBENTI_ALIBABA_ORDERS_URL, DEFAULT_ALIBABA_ORDERS_URL);
 const messagesUrl = normalizePortalUrl(process.env.LAMBENTI_ALIBABA_MESSAGES_URL, DEFAULT_ALIBABA_MESSAGES_URL);
+const trackingTargetUrls = readTrackingTargetUrls(process.argv.slice(2), process.env);
 const maxMessageThreads = positiveInt(process.env.LAMBENTI_ALIBABA_MAX_MESSAGE_THREADS, trackingOnly ? 12 : 20);
 const maxMessageListScrolls = positiveInt(process.env.LAMBENTI_ALIBABA_MESSAGE_LIST_SCROLLS, trackingOnly ? 4 : 4);
 const orderStatusSettleMs = positiveInt(process.env.LAMBENTI_ALIBABA_ORDER_STATUS_SETTLE_MS, trackingOnly ? 350 : 700);
@@ -108,8 +108,17 @@ export function buildPortalImportPayload(snapshots, options = portalImportOption
   };
 }
 
-export function buildPortalCaptureTargets(options = portalImportOptions, urls = { ordersUrl: startUrl, messagesUrl }) {
+export function buildPortalCaptureTargets(options = portalImportOptions, urls = { ordersUrl: startUrl, messagesUrl, targetUrls: trackingTargetUrls }) {
   if (options.trackingOnly) {
+    const targetUrls = Array.isArray(urls.targetUrls) ? uniqueTrackingTargetUrls(urls.targetUrls) : [];
+    if (targetUrls.length > 0) {
+      return targetUrls.map((url, index) => ({
+        url,
+        kind: "orders",
+        label: `orders-email-detail-${index + 1}`,
+        targeted: true
+      }));
+    }
     return [
       { url: urls.ordersUrl, kind: "orders", orderStatus: "delivering", label: "orders-delivering" },
       { url: urls.ordersUrl, kind: "orders", orderStatus: "completed-review", label: "orders-completed-review" },
@@ -2641,9 +2650,61 @@ async function waitForEnter() {
   }
 }
 
-function readOptionValue(name) {
+export function readTrackingTargetUrls(argv = process.argv.slice(2), env = process.env) {
+  const cliValues = readOptionValues("--tracking-target-url", argv);
+  const envValues = String(env.LAMBENTI_ALIBABA_TRACKING_TARGET_URLS ?? "")
+    .split(/[\n,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return uniqueTrackingTargetUrls([...cliValues, ...envValues]);
+}
+
+function uniqueTrackingTargetUrls(values) {
+  const urls = [];
+  const seen = new Set();
+  for (const value of values ?? []) {
+    const normalized = normalizeTrackingTargetUrl(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    urls.push(normalized);
+  }
+  return urls;
+}
+
+function normalizeTrackingTargetUrl(value) {
+  const raw = String(value ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/[<>'"()]+$/g, "")
+    .trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const url = new URL(raw);
+    if (!/(^|\.)alibaba\.com$/i.test(url.hostname)) return null;
+    const text = [url.href, url.pathname, url.search].join("\n");
+    if (!/(?:order|trade|ta|logistics|tracking|shipment|message|messenger|orderId|tradeOrderId|orderNumber)/i.test(text)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function readOptionValues(name, argv = process.argv.slice(2)) {
   const prefix = `${name}=`;
-  return process.argv.slice(2).find((value) => value.startsWith(prefix))?.slice(prefix.length);
+  const values = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (value === name && argv[index + 1]) {
+      values.push(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (value?.startsWith(prefix)) values.push(value.slice(prefix.length));
+  }
+  return values;
+}
+
+function readOptionValue(name) {
+  return readOptionValues(name)[0];
 }
 
 function positiveInt(value, fallback) {

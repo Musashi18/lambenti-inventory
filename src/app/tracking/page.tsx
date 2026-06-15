@@ -5,14 +5,24 @@ import {
   saveManualTrackingNumbersAction
 } from "./actions";
 import { TrackingAutoRefresh } from "./tracking-auto-refresh";
-import { getTrackingDashboard, getTrackingLinkOptions, type TrackingDashboardRow, type TrackingLinkOption } from "@/modules/tracking/service";
+import {
+  getLeadTimeLog,
+  getTrackingDashboard,
+  getTrackingLinkOptions,
+  type LeadTimeLog,
+  type LeadTimeLogEntry,
+  type LeadTimeLogItem,
+  type TrackingDashboardRow,
+  type TrackingLinkOption
+} from "@/modules/tracking/service";
 
 export const dynamic = "force-dynamic";
 
 export default async function TrackingPage() {
-  const [dashboard, linkOptions] = await Promise.all([
+  const [dashboard, linkOptions, leadTimeLog] = await Promise.all([
     getTrackingDashboard(),
-    getTrackingLinkOptions()
+    getTrackingLinkOptions(),
+    getLeadTimeLog()
   ]);
 
   return (
@@ -134,7 +144,108 @@ export default async function TrackingPage() {
           </table>
         </div>
       </section>
+
+      <LeadTimeLearningLog log={leadTimeLog} />
     </main>
+  );
+}
+
+function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 p-5">
+        <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Reorder forecasting input</p>
+        <h2 className="mt-1 text-lg font-semibold text-slate-900">Lead-time learning log</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Completed tracking/receiving samples update item and supplier lead-time days automatically. Expand an item to audit quantity ordered, payment/order start, receipt or delivery endpoint, tracking evidence, and shipping time before those averages are used as reorder buffers.
+        </p>
+      </div>
+      <div className="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-4">
+        <Metric label="Sampled items" value={log.itemCount} />
+        <Metric label="Order-line samples" value={log.sampleCount} />
+        <Metric label="Quantity sampled" value={log.totalQuantityOrdered} />
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Avg lead / ship</div>
+          <div className="mt-1 text-2xl font-semibold text-slate-900">{formatDays(log.averageLeadTimeDays)}</div>
+          <div className="text-xs text-slate-500">shipping {formatDays(log.averageShipTimeDays)}</div>
+        </div>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {log.items.length === 0 ? (
+          <div className="p-5 text-sm text-slate-500">No completed lead-time samples yet. Samples appear after linked orders have carrier delivery or human receiving evidence.</div>
+        ) : log.items.map((item) => <LeadTimeLogItemDetails key={item.itemId} item={item} />)}
+      </div>
+    </section>
+  );
+}
+
+function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
+  return (
+    <details className="group p-5">
+      <summary className="flex cursor-pointer list-none flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="font-medium text-slate-900">{item.itemSku}</div>
+          <div className="text-sm text-slate-600">{item.itemDescription}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Current item lead time {item.currentLeadTimeDays}d · weighted average {formatDays(item.weightedAverageLeadTimeDays)} across {item.totalQuantityOrdered} ordered · shipping avg {formatDays(item.averageShipTimeDays)}
+          </div>
+        </div>
+        <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
+          {item.sampleCount} sample{item.sampleCount === 1 ? "" : "s"}
+        </span>
+      </summary>
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-100">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Order</th>
+              <th className="px-3 py-2">Supplier</th>
+              <th className="px-3 py-2">Qty</th>
+              <th className="px-3 py-2">Lead time</th>
+              <th className="px-3 py-2">Start → end</th>
+              <th className="px-3 py-2">Shipping</th>
+              <th className="px-3 py-2">Tracking evidence</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {item.entries.map((entry) => <LeadTimeLogEntryRow key={`${entry.purchaseOrderId}-${entry.itemId}-${entry.endAt.toISOString()}`} entry={entry} />)}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
+  return (
+    <tr className="align-top">
+      <td className="px-3 py-2">
+        <div className="font-mono text-xs text-slate-900">{entry.externalOrderId ?? entry.purchaseOrderId}</div>
+        <div className="text-xs text-slate-500">PO {entry.purchaseOrderId}</div>
+      </td>
+      <td className="px-3 py-2 text-slate-700">{entry.supplierName}</td>
+      <td className="px-3 py-2 text-slate-700">
+        <div>{entry.quantityOrdered} ordered</div>
+        <div className="text-xs text-slate-500">{entry.quantityReceived} received</div>
+      </td>
+      <td className="px-3 py-2">
+        <div className="font-medium text-slate-900">{entry.leadTimeLabel}</div>
+        <div className="text-xs text-slate-500">Endpoint: {entry.endSource.toLowerCase()}</div>
+      </td>
+      <td className="px-3 py-2 text-xs text-slate-600">
+        <div>{formatDate(entry.startAt)}</div>
+        <div>→ {formatDate(entry.endAt)}</div>
+      </td>
+      <td className="px-3 py-2 text-slate-700">
+        <div>{entry.shipTimeLabel ?? "—"}</div>
+        {entry.shipTimeStartedAt && entry.shipTimeEndedAt ? (
+          <div className="text-xs text-slate-500">{formatDate(entry.shipTimeStartedAt)} → {formatDate(entry.shipTimeEndedAt)}</div>
+        ) : <div className="text-xs text-slate-400">No carrier range</div>}
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-slate-700">
+        {entry.trackingNumbers.length > 0 ? entry.trackingNumbers.join(", ") : "—"}
+      </td>
+    </tr>
   );
 }
 
@@ -280,6 +391,11 @@ function StatusBadge({ status }: { status: string }) {
         ? "bg-red-100 text-red-800"
         : "bg-slate-100 text-slate-700";
   return <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{status}</span>;
+}
+
+function formatDays(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toFixed(1).replace(/\.0$/, "")}d`;
 }
 
 function formatDate(value: Date | null) {

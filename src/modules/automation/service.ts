@@ -60,20 +60,25 @@ export async function runStockReorderScan(actor: AutomationActor): Promise<Autom
       const suggestedQuantity = Math.max(row.targetStock - projected, 0);
       if (row.available >= row.reorderPoint || suggestedQuantity <= 0) continue;
 
+      const learnedLeadTimeDays = item.leadTimeDays;
+      const reorderBuffer = `${learnedLeadTimeDays}d learned order-to-receipt buffer`;
       findingInputs.push({
         severity: row.available <= 0 ? AutomationFindingSeverity.HIGH : AutomationFindingSeverity.MEDIUM,
         category: "REORDER_SHORTAGE",
         entityType: "Item",
         entityId: row.itemId,
         title: `${row.sku} is below reorder point`,
-        message: `Available ${row.available}; reorder point ${row.reorderPoint}; incoming ${incoming}; open purchase requests ${openPr}; target ${row.targetStock}. Suggested order quantity ${suggestedQuantity}.`,
+        message: `Available ${row.available}; reorder point ${row.reorderPoint}; incoming ${incoming}; open purchase requests ${openPr}; target ${row.targetStock}. Suggested order quantity ${suggestedQuantity}. Reorder buffer uses ${reorderBuffer}.`,
         suggestedActionType: "DRAFT_PURCHASE_REQUEST",
         suggestedActionJson: {
           itemId: row.itemId,
           sku: row.sku,
           suggestedQuantity,
           preferredSupplierId: item.preferredSupplier?.archivedAt ? null : item.preferredSupplierId,
-          rationale: `Automation reorder scan: available ${row.available}, incoming ${incoming}, open PR ${openPr}, target ${row.targetStock}. Human approval required before purchase.`
+          learnedLeadTimeDays,
+          reorderBufferDays: learnedLeadTimeDays,
+          projectedAvailableWithIncoming: projected,
+          rationale: `Automation reorder scan: available ${row.available}, incoming ${incoming}, open PR ${openPr}, target ${row.targetStock}, learned order-to-receipt buffer ${learnedLeadTimeDays}d from tracking/receiving history. Human approval required before purchase.`
         },
         dedupeKey: [
           "STOCK_REORDER_SCAN",
@@ -83,7 +88,8 @@ export async function runStockReorderScan(actor: AutomationActor): Promise<Autom
           `incoming=${incoming}`,
           `openPr=${openPr}`,
           `target=${row.targetStock}`,
-          `suggest=${suggestedQuantity}`
+          `suggest=${suggestedQuantity}`,
+          `leadTimeDays=${learnedLeadTimeDays}`
         ].join(":")
       });
     }

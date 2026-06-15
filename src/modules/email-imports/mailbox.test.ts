@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { parseAlibabaEmail } from "./alibaba-email";
-import { getAlibabaMailboxConfigStatus, isSupplierOrderEmailText, sourceToImportTexts } from "./mailbox";
+import { getAlibabaMailboxConfigStatus, isSupplierOrderEmailText, sourceToImportTexts, extractAlibabaShipmentTrackingTargetUrls } from "./mailbox";
 
 const originalMarkSeen = process.env.LAMBENTI_EMAIL_MARK_IMPORTED_SEEN;
 
@@ -30,6 +30,25 @@ From: security@example-components.com
 Security code: 123456
 This code expires in 10 minutes.
 `)).toBe(false);
+  });
+});
+
+describe("mailbox shipment confirmations", () => {
+  it("extracts Alibaba order-detail links for targeted tracking capture", () => {
+    expect(extractAlibabaShipmentTrackingTargetUrls(`
+Subject: Your order has shipped
+Track package for Alibaba order 304716450001023166:
+https://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166&amp;spm=a2700
+Other link: https://example.com/not-used
+`)).toEqual(["https://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166&spm=a2700"]);
+  });
+
+  it("does not launch portal capture for non-shipment Alibaba payment emails", () => {
+    expect(extractAlibabaShipmentTrackingTargetUrls(`
+Subject: Initial payment has been received
+Order ID: 304716450001023166
+https://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166
+`)).toEqual([]);
   });
 });
 

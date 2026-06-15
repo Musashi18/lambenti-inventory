@@ -13,6 +13,7 @@ import {
   isWaitingForSupplierToShipText,
   recordMessageThreadRead,
   recordTrackingOrderRead,
+  readTrackingTargetUrls,
   resolvePortalImportOptions,
   seedTrackingCaptureMemoryFromSavedTrackingRows,
   shouldReadMessageThread,
@@ -77,6 +78,37 @@ describe("Alibaba portal agent CLI import mode", () => {
       expect.objectContaining({ kind: "orders", orderStatus: "delivering", label: "orders-delivering" }),
       expect.objectContaining({ kind: "orders", orderStatus: "completed-review", label: "orders-completed-review" }),
       expect.objectContaining({ kind: "messages", label: "messages" })
+    ]);
+  });
+
+  it("tracking capture checks email-provided Alibaba order-detail links directly before falling back to broad scans", () => {
+    const targetUrl = "https://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166&foo=bar";
+    const targets = buildPortalCaptureTargets(
+      { trackingOnly: true, autoApply: false, autoCreateInvoices: false },
+      {
+        ordersUrl: "https://biz.alibaba.com/order/list.htm",
+        messagesUrl: "https://message.alibaba.com/message/messenger.htm",
+        targetUrls: [targetUrl]
+      }
+    );
+
+    expect(targets).toEqual([
+      expect.objectContaining({
+        kind: "orders",
+        label: "orders-email-detail-1",
+        targeted: true,
+        url: targetUrl
+      })
+    ]);
+    expect(readTrackingTargetUrls([
+      "--tracking-target-url=https://example.com/not-alibaba",
+      "--tracking-target-url",
+      "https://biz.alibaba.com/order/detail.htm?orderId=305000000001023166"
+    ], {
+      LAMBENTI_ALIBABA_TRACKING_TARGET_URLS: "https://message.alibaba.com/message/messenger.htm?orderId=306000000001023166"
+    })).toEqual([
+      "https://biz.alibaba.com/order/detail.htm?orderId=305000000001023166",
+      "https://message.alibaba.com/message/messenger.htm?orderId=306000000001023166"
     ]);
   });
 

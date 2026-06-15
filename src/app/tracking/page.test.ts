@@ -24,6 +24,10 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("Active tracking numbers");
     expect(pageSource).toContain("Delivered tracking history");
     expect(pageSource).toContain("Total ship time");
+    expect(pageSource).toContain("Lead-time learning log");
+    expect(pageSource).toContain("Reorder forecasting input");
+    expect(pageSource).toContain("quantity ordered");
+    expect(pageSource).toContain("getLeadTimeLog");
     expect(pageSource).toContain("dashboard.deliveredRows");
     expect(pageSource).toContain("refreshAllTrackingAction");
     expect(actionsSource).toContain("refreshAllTrackingAction");
