@@ -14,7 +14,11 @@ export type AlibabaPortalSnapshot = {
   subject?: string;
   messageId?: string;
   orderId?: string;
+  orderStatus?: string;
+  orderDate?: string;
   supplierName?: string;
+  trackingNumbers?: string[];
+  conversationContext?: string;
   text: string;
   invoiceDocuments?: AlibabaPortalInvoiceDocument[];
 };
@@ -34,10 +38,17 @@ export function portalSnapshotToImportText(snapshot: AlibabaPortalSnapshot) {
     snapshot.capturedAt ? `Captured-At: ${snapshot.capturedAt}` : undefined,
     snapshot.sourceUrl ? `Source URL: ${snapshot.sourceUrl}` : undefined,
     snapshot.orderId ? `Order Number: ${snapshot.orderId}` : undefined,
-    snapshot.supplierName ? `Supplier: ${snapshot.supplierName}` : undefined
+    snapshot.orderStatus ? `Order Status: ${snapshot.orderStatus}` : undefined,
+    snapshot.orderDate ? `Order Date: ${snapshot.orderDate}` : undefined,
+    snapshot.supplierName ? `Supplier: ${snapshot.supplierName}` : undefined,
+    snapshot.trackingNumbers?.length ? `Tracking Number: ${snapshot.trackingNumbers.join(", ")}` : undefined
   ].filter(Boolean) as string[];
 
-  const sections = [headers.join("\n"), normalizePortalText(snapshot.text)];
+  const sections = [
+    headers.join("\n"),
+    snapshot.conversationContext ? `Conversation context:\n${normalizePortalText(snapshot.conversationContext)}` : undefined,
+    normalizePortalText(snapshot.text)
+  ];
 
   const invoiceDocuments = snapshot.invoiceDocuments ?? [];
   for (let index = 0; index < invoiceDocuments.length; index += 1) {
@@ -53,7 +64,7 @@ export function portalSnapshotToImportText(snapshot: AlibabaPortalSnapshot) {
     sections.push([invoiceHeaders.join("\n"), normalizePortalText(document.text ?? "")].filter(Boolean).join("\n"));
   }
 
-  return sections.filter((section) => section.trim().length > 0).join("\n\n---\n\n");
+  return sections.filter((section): section is string => Boolean(section?.trim())).join("\n\n---\n\n");
 }
 
 export function extractPortalInvoiceMetadata(document?: AlibabaPortalInvoiceDocument): PortalInvoiceMetadata {

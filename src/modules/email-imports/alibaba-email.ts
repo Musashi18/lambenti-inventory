@@ -48,6 +48,15 @@ const CURRENCIES = ["USD", "CAD", "CNY", "RMB", "CN¥", "US$", "CA$", "C$"];
 const CURRENCY_REGEX = new RegExp(`(?:${CURRENCIES.map(escapeRegex).join("|")}|\\$|¥)`, "i");
 const AUTO_APPLY_MATCHES = new Set(["SKU", "SUPPLIER_SKU", "ALIAS", "FUZZY_HIGH", "MANUAL"]);
 const SYNCED_EMAIL_SOURCE = "SYNCED_EMAIL";
+const TRACKING_ONLY_PORTAL_EVIDENCE_WHERE: Prisma.EmailOrderImportWhereInput = {
+  source: "ALIBABA_PORTAL",
+  OR: [
+    { subject: { startsWith: "Alibaba portal message thread" } },
+    { subject: { startsWith: "Alibaba portal tracking" } },
+    { sourceMessageId: { startsWith: "<alibaba-portal:message:" } },
+    { sourceUrl: { contains: "message.alibaba.com/message/messenger.htm" } }
+  ]
+};
 
 const ITEM_ALIASES: Array<{
   sku: string;
@@ -304,6 +313,11 @@ export async function applyAlibabaEmailOrderImport(importId: string, actorId: st
       include: { lines: { include: { item: true } }, supplier: true }
     });
 
+    const currentItemSupplierIds = new Map((await tx.item.findMany({
+      where: { id: { in: currentMatchedLines.map((line) => line.matchedItemId!) } },
+      select: { id: true, preferredSupplierId: true }
+    })).map((item) => [item.id, item.preferredSupplierId]));
+
     for (const line of currentMatchedLines) {
       const landedUnitCost = line.landedUnitCost ?? line.unitPrice;
       const landedUnitCostUsd = convertToUsd(Number(landedUnitCost), line.currency);
@@ -321,7 +335,7 @@ export async function applyAlibabaEmailOrderImport(importId: string, actorId: st
             taxAllocated: toUsdDecimal(line.taxAllocated, line.currency),
             landedUnitCost: toUsdDecimal(line.landedUnitCost, line.currency)
           }),
-          preferredSupplierId: currentImport.supplierId,
+          preferredSupplierId: currentItemSupplierIds.get(line.matchedItemId!) ?? currentImport.supplierId,
           supplierSku: line.supplierSku ?? undefined
         }
       });
@@ -430,7 +444,7 @@ export async function updateEmailOrderImportLine(input: {
 
 export async function getEmailOrderImports(options: { archivedOnly?: boolean } = {}) {
   const imports = await prisma.emailOrderImport.findMany({
-    where: options.archivedOnly ? { archivedAt: { not: null } } : { archivedAt: null },
+    where: options.archivedOnly ? { archivedAt: { not: null } } : activeOrderEmailQueueWhere(),
     include: { lines: { include: { matchedItem: true } }, supplier: true, purchaseOrder: true },
     orderBy: { createdAt: "desc" },
     take: options.archivedOnly ? 25 : 100
@@ -440,7 +454,7 @@ export async function getEmailOrderImports(options: { archivedOnly?: boolean } =
 
 export async function reassessRecentEmailOrderImports(actorId: string) {
   const imports = await prisma.emailOrderImport.findMany({
-    where: { archivedAt: null },
+    where: activeOrderEmailQueueWhere(),
     include: { lines: true },
     orderBy: { createdAt: "desc" },
     take: 25
@@ -478,6 +492,13 @@ export async function reassessRecentEmailOrderImports(actorId: string) {
   });
 
   return { scanned: imports.length, refreshed, skippedManual };
+}
+
+function activeOrderEmailQueueWhere(): Prisma.EmailOrderImportWhereInput {
+  return {
+    archivedAt: null,
+    NOT: TRACKING_ONLY_PORTAL_EVIDENCE_WHERE
+  };
 }
 
 export async function archiveEmailOrderImport(importId: string, actorId: string, reason = "Ignored by operator") {
@@ -815,7 +836,7 @@ async function reconcileAppliedPurchaseOrderMetadata(
 
   const purchaseOrder = await tx.purchaseOrder.findUnique({
     where: { id: purchaseOrderId },
-    include: { lines: true, invoice: { include: { lines: true } } }
+    include: { lines: true, invoices: { include: { lines: true }, orderBy: { invoiceDate: "desc" }, take: 1 } }
   });
   if (!purchaseOrder || purchaseOrder.status !== "ORDERED") return;
 
@@ -857,6 +878,7 @@ async function reconcileAppliedPurchaseOrderMetadata(
   for (const line of readyLines) {
     const landedUnitCost = line.landedUnitCost ?? line.unitPrice;
     const landedUnitCostUsd = convertToUsd(Number(landedUnitCost), line.currency);
+    const item = itemsById.get(line.matchedItem!.id);
     await tx.item.update({
       where: { id: line.matchedItem!.id },
       data: {
@@ -871,13 +893,13 @@ async function reconcileAppliedPurchaseOrderMetadata(
           taxAllocated: toUsdDecimal(toDecimal(line.taxAllocated), line.currency),
           landedUnitCost: toUsdDecimal(toDecimal(line.landedUnitCost), line.currency)
         }),
-        preferredSupplierId: purchaseOrder.supplierId,
+        preferredSupplierId: item?.preferredSupplierId ?? purchaseOrder.supplierId,
         supplierSku: line.supplierSku ?? undefined
       }
     });
   }
 
-  const invoice = purchaseOrder.invoice;
+  const invoice = purchaseOrder.invoices[0];
   let addedInvoiceLines = 0;
   let updatedInvoiceLines = 0;
   if (invoice && (invoice.status === "DRAFT" || invoice.status === "RECEIVED")) {
@@ -898,7 +920,7 @@ async function reconcileAppliedPurchaseOrderMetadata(
       const existingLine = existingInvoiceLinesByItemId.get(itemId);
 
       if (!existingLine) {
-        invoiceLineCreates.push({ itemId, description, quantity, unitPrice, lineTotal });
+        invoiceLineCreates.push({ itemId, purchaseOrderLineId: existingPoLinesByItemId.get(itemId)?.id, description, quantity, unitPrice, lineTotal });
         addedInvoiceLines += 1;
         continue;
       }
@@ -1017,7 +1039,10 @@ function parseLineItems(text: string, fallbackCurrency: string): ParsedAlibabaLi
   const compact = text.replace(/\s+/g, " ").trim();
   const results: ParsedAlibabaLine[] = [];
   appendUniqueLines(results, parseStructuredFieldBlocks(text, fallbackCurrency));
-  appendUniqueLines(results, parseAlibabaGraphicalProductCards(text, fallbackCurrency));
+  // Alibaba product-card segments are already explicit supplier line boundaries.
+  // Do not collapse similarly named cards inside the same extraction batch merely
+  // because their quantity/price match; separate cards must remain editable lines.
+  appendUniqueLines(results, parseAlibabaGraphicalProductCards(text, fallbackCurrency), { dedupeWithinBatch: false });
   appendUniqueLines(results, parseGenericGraphicalProductCards(text, fallbackCurrency));
   appendUniqueLines(results, parseCompactOrderSummaryCards(text, fallbackCurrency));
   appendUniqueLines(results, parseDelimitedOrderRows(text, fallbackCurrency));
@@ -1050,10 +1075,16 @@ function parseLineItems(text: string, fallbackCurrency: string): ParsedAlibabaLi
   return results.map((line, index) => ({ ...line, lineNo: index + 1 }));
 }
 
-function appendUniqueLines(target: ParsedAlibabaLine[], lines: ParsedAlibabaLine[]) {
+function appendUniqueLines(
+  target: ParsedAlibabaLine[],
+  lines: ParsedAlibabaLine[],
+  options: { dedupeWithinBatch?: boolean } = {}
+) {
+  const duplicateScope = options.dedupeWithinBatch === false ? [...target] : target;
   for (const line of lines) {
-    if (isDuplicateLine(target, line)) continue;
-    target.push({ ...line, lineNo: target.length + 1 });
+    if (isDuplicateLine(duplicateScope, line)) continue;
+    const appended = { ...line, lineNo: target.length + 1 };
+    target.push(appended);
   }
 }
 

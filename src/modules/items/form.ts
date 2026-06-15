@@ -23,6 +23,7 @@ export const itemFormSchema = z.object({
   targetStock: z.coerce.number().int().min(0),
   leadTimeDays: z.coerce.number().int().min(0),
   preferredSupplierId: optionalText,
+  customSupplierName: optionalText,
   lifecycleStatus: z.nativeEnum(LifecycleStatus),
   estimatedUnitCost: optionalNumber,
   costCurrency: z.string().trim().min(3).max(3).default("USD"),

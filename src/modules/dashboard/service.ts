@@ -4,13 +4,16 @@ import { getIncomingOrders, getPurchaseRecommendations } from "@/modules/purchas
 import { prisma } from "@/lib/prisma";
 import type { ShortageSummary } from "@/types/inventory";
 
+const LAMBENTI_ASSEMBLED_PACKAGE_SKU = "LAMBENTI_PACKAGE";
+const LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS = [/lambenti\s+assembled\s+package/i, /complete\s+package\s+assembly/i];
+
 export async function getDashboardSummary() {
   const stock = await getStockSummaries();
   const lowStockItems = stock.filter((item) => item.available < item.reorderPoint);
   const [activeItems, activeFinishedBoms, reservations] = await Promise.all([
     prisma.item.findMany({
       where: { lifecycleStatus: { not: "OBSOLETE" } },
-      select: { id: true, sku: true, category: true }
+      select: { id: true, sku: true, description: true, category: true }
     }),
     prisma.bOM.findMany({
       where: {
@@ -53,10 +56,12 @@ export async function getDashboardSummary() {
   const componentsOnHand = stock
     .filter((item) => itemCategoryById.get(item.itemId) !== "FINISHED_GOOD")
     .reduce((total, item) => total + item.onHand, 0);
-  const assembledPackages = stock
-    .filter((item) => itemCategoryById.get(item.itemId) === "FINISHED_GOOD")
-    .reduce((total, item) => total + item.onHand, 0);
-  const buildCapacity = summarizeBuildCapacity(activeFinishedBoms, stockByItemId);
+  const assembledPackageItem = findLambentiAssembledPackageItem(activeItems);
+  const assembledPackages = assembledPackageItem ? stockByItemId.get(assembledPackageItem.id)?.onHand ?? 0 : 0;
+  const packageBoms = assembledPackageItem
+    ? activeFinishedBoms.filter((bom) => bom.parentItem.id === assembledPackageItem.id)
+    : activeFinishedBoms.filter((bom) => isLambentiAssembledPackageItem(bom.parentItem));
+  const buildCapacity = summarizeBuildCapacity(packageBoms, stockByItemId);
 
   const pricedItems = await prisma.item.findMany({
     where: { lifecycleStatus: { not: "OBSOLETE" }, estimatedUnitCost: { not: null } },
@@ -77,19 +82,7 @@ export async function getDashboardSummary() {
 
   const recommendations = await getPurchaseRecommendations();
   const incomingOrders = await getIncomingOrders();
-  const [emailImportsNeedingReview, pendingPurchaseRequests, invoicesNeedingAction, openAutomationFindings, failedAutomationRuns] = await Promise.all([
-    prisma.emailOrderImport.findMany({
-      where: {
-        archivedAt: null,
-        OR: [
-          { status: "NEEDS_REVIEW" },
-          { lines: { some: { OR: [{ matchedItemId: null }, { matchConfidence: "UNMATCHED" }] } } }
-        ]
-      },
-      include: { lines: true, supplier: true },
-      orderBy: { createdAt: "desc" },
-      take: 5
-    }),
+  const [pendingPurchaseRequests, invoicesNeedingAction, openAutomationFindings, failedAutomationRuns] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { status: { in: ["DRAFT", "PENDING_APPROVAL"] } },
       include: { supplier: true, lines: { include: { item: true } } },
@@ -115,12 +108,6 @@ export async function getDashboardSummary() {
   ]);
 
   const humanReviewActions = [
-    ...emailImportsNeedingReview.map((orderImport) => ({
-      kind: "Email import",
-      label: orderImport.externalOrderId ? `Review order ${orderImport.externalOrderId}` : `Review ${orderImport.supplier?.name ?? orderImport.supplierName}`,
-      reason: `${orderImport.lines.filter((line) => !line.matchedItemId || line.matchConfidence === "UNMATCHED").length} unmatched/uncertain line(s) need catalog matching before all effects are safe.`,
-      href: "/integrations/email-import"
-    })),
     ...recommendations.slice(0, 5).map((item) => ({
       kind: "Suggested PO",
       label: `Draft/order ${item.recommendedOrderQuantity} × ${item.sku}`,
@@ -173,18 +160,37 @@ export async function getDashboardSummary() {
 
 type DashboardStockEntry = {
   itemId: string;
+  onHand: number;
   available: number;
+};
+
+type DashboardItemOption = {
+  id: string;
+  sku: string;
+  description: string;
+  category: string;
 };
 
 type ActiveFinishedBom = {
   version: string;
-  parentItem: { sku: string; description: string };
+  parentItem: DashboardItemOption;
   lines: Array<{
     componentItemId: string;
     quantity: number;
     componentItem: { sku: string; description: string };
   }>;
 };
+
+function findLambentiAssembledPackageItem(items: DashboardItemOption[]) {
+  return items.find((item) => item.sku === LAMBENTI_ASSEMBLED_PACKAGE_SKU)
+    ?? items.find(isLambentiAssembledPackageItem);
+}
+
+function isLambentiAssembledPackageItem(item: Pick<DashboardItemOption, "sku" | "description" | "category">) {
+  return item.category === "FINISHED_GOOD"
+    && (item.sku === LAMBENTI_ASSEMBLED_PACKAGE_SKU
+      || LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(item.description)));
+}
 
 function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockByItemId: Map<string, DashboardStockEntry>) {
   const candidates = activeFinishedBoms.map((bom) => {
@@ -202,12 +208,13 @@ function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockBy
       if (!lowest || current.capacity < lowest.capacity) return current;
       return lowest;
     }, undefined);
+    const componentsRequiredPerBuild = componentCapacities.reduce((total, component) => total + component.requiredPerBuild, 0);
 
     return {
       finishedSku: bom.parentItem.sku,
       finishedDescription: bom.parentItem.description,
       bomVersion: bom.version,
-      componentsRequiredPerBuild: bom.lines.length,
+      componentsRequiredPerBuild,
       finishedBuildCapacity: bottleneck?.capacity ?? 0,
       bottleneckSku: bottleneck?.sku ?? "",
       componentCapacities
@@ -215,7 +222,7 @@ function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockBy
   });
 
   return candidates.reduce((best, current) => {
-    if (!best || current.finishedBuildCapacity > best.finishedBuildCapacity) return current;
+    if (!best.finishedSku || current.finishedBuildCapacity > best.finishedBuildCapacity) return current;
     return best;
   }, {
     finishedSku: "",

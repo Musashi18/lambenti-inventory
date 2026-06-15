@@ -24,11 +24,19 @@ describe("ItemsPage import/export source contract", () => {
     expect(panelSource).not.toContain("<details open");
   });
 
-  it("loads cleaned confirmed supplier options instead of raw supplier rows", () => {
+  it("loads active supplier options instead of only human-confirmed supplier rows", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
 
-    expect(source).toContain("getConfirmedSupplierOptions");
-    expect(source).toContain("confirmedSupplierOptions");
+    expect(source).toContain("getActiveSupplierOptions");
+    expect(source).toContain("supplierOptions");
+    expect(source).not.toContain("getConfirmedSupplierOptions");
+  });
+
+  it("exposes a custom supplier name input in the add-item form", () => {
+    const source = readFileSync(join(__dirname, "item-create-form.tsx"), "utf8");
+
+    expect(source).toContain('name="customSupplierName"');
+    expect(source).toContain("Custom supplier");
   });
 });
 

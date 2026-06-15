@@ -15,6 +15,13 @@ export type RecognizeImageTextInput = {
 export async function recognizeImageText(input: RecognizeImageTextInput): Promise<string | null> {
   if (process.env.LAMBENTI_OCR_DISABLED === "true") return null;
 
+  const nativeText = await recognizeWithNativeTesseract(input);
+  if (nativeText) return nativeText;
+
+  return recognizeWithTesseractJs(input);
+}
+
+async function recognizeWithNativeTesseract(input: RecognizeImageTextInput): Promise<string | null> {
   const tempDir = await mkdtemp(join(tmpdir(), "lambenti-ocr-"));
   const imagePath = join(tempDir, `attachment${extensionFor(input.filename, input.contentType)}`);
 
@@ -25,14 +32,36 @@ export async function recognizeImageText(input: RecognizeImageTextInput): Promis
       [imagePath, "stdout", "-l", process.env.LAMBENTI_OCR_LANG || "eng"],
       { timeout: Number(process.env.LAMBENTI_OCR_TIMEOUT_MS || 30_000), maxBuffer: 2_000_000 }
     );
-    const text = stdout.trim();
-    return text.length > 0 ? text : null;
-  } catch (error) {
-    if (isMissingTesseract(error)) return null;
+    return normalizeOcrText(stdout);
+  } catch {
     return null;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+async function recognizeWithTesseractJs(input: RecognizeImageTextInput): Promise<string | null> {
+  if (process.env.LAMBENTI_TESSERACT_JS_DISABLED === "true") return null;
+
+  try {
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker(process.env.LAMBENTI_OCR_LANG || "eng", undefined, {
+      cachePath: process.env.LAMBENTI_OCR_CACHE_DIR || join(process.cwd(), "var", "ocr-cache")
+    });
+    try {
+      const result = await worker.recognize(input.content);
+      return normalizeOcrText(result.data.text);
+    } finally {
+      await worker.terminate();
+    }
+  } catch {
+    return null;
+  }
+}
+
+function normalizeOcrText(text: string | undefined | null) {
+  const trimmed = text?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function extensionFor(filename: string, contentType: string) {
@@ -54,10 +83,4 @@ function extensionFor(filename: string, contentType: string) {
     default:
       return ".png";
   }
-}
-
-function isMissingTesseract(error: unknown) {
-  if (typeof error !== "object" || error === null) return false;
-  const code = (error as { code?: unknown }).code;
-  return code === "ENOENT";
 }

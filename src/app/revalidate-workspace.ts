@@ -8,11 +8,19 @@ export const WORKSPACE_PATHS = [
   "/incoming",
   "/integrations/alibaba-email",
   "/integrations/email-import",
+  "/tracking",
   "/purchasing/recommendations",
   "/purchasing/requests",
   "/suppliers",
   "/boms",
+  "/accounting",
   "/accounting/invoices",
+  "/accounting/customer-invoices",
+  "/accounting/payments",
+  "/accounting/exports",
+  "/accounting/accounts",
+  "/accounting/journals",
+  "/accounting/landed-cost",
   "/automation"
 ];
 

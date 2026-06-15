@@ -64,6 +64,7 @@ export function ItemCreateForm({
           <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
         ))}
       </select>
+      <input name="customSupplierName" placeholder="Custom supplier name (if missing from dropdown)" className="rounded-md border px-3 py-2" />
       <select name="lifecycleStatus" className="rounded-md border px-3 py-2" defaultValue="ACTIVE">
         {lifecycleStatuses.map((value) => (
           <option key={value} value={value}>{value}</option>

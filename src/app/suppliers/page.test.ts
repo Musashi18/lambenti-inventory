@@ -10,7 +10,7 @@ describe("Suppliers page source contract", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
 
     expect(source).toContain("getItemSupplierEntries");
-    expect(source).toContain("getUniqueSupplierProfiles");
+    expect(source).toContain("getActiveSupplierOptions");
     expect(source).toContain("updateItemSupplierEntryAction");
     expect(source).toContain("unarchiveSupplierAction");
     expect(source).toContain("<h2 className=\"font-medium\">Suppliers</h2>");
@@ -22,7 +22,7 @@ describe("Suppliers page source contract", () => {
     expect(source).toContain("Edit company revenue");
     expect(source).toContain("Edit founded year");
     expect(source).toContain("Edit address");
-    expect(source).toContain("Edit dropdown confirmation");
+    expect(source).toContain("Edit human confirmation");
     expect(source).toContain("archiveSupplierAction");
     expect(source).toContain("deleteArchivedSupplierAction");
     expect(source).toContain("Archive supplier");
@@ -30,15 +30,43 @@ describe("Suppliers page source contract", () => {
     expect(source).toContain("Delete archived supplier");
     expect(source).toContain("Unarchive supplier");
     expect(source).toContain("ArchiveSupplierControl");
-    expect(source).toContain("inline-block max-w-full");
-    expect(source).toContain("inline-flex w-fit");
-    expect(source).toContain("text-[10px]");
-    expect(source).toContain("px-1.5");
+    expect(source).toContain("inline-block max-w-full text-xs text-slate-600");
+    expect(source).toContain("text-[11px]");
+    expect(source).toContain("hover:text-slate-800");
+    expect(source).not.toContain("bg-amber-50");
+    expect(source).not.toContain("border-amber-200");
+    expect(source).not.toContain("text-amber-800");
     expect(source).toContain("Clean item type");
     expect(source).toContain("Unit price (USD)");
-    expect(source).toContain("Confirmed supplier for item dropdown");
+    expect(source).toContain("Add new supplier");
+    expect(source).toContain("Human-confirmed supplier record");
     expect(source).not.toContain("Supplier contact profiles");
     expect(source).not.toContain("Supplier offers");
     expect(source).not.toContain("No supplier offers found.");
+  });
+
+  it("keeps custom supplier creation in one expandable section above archived suppliers", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    const addSectionMountIndex = source.indexOf("<AddNewSupplierSection supplierEntries={supplierEntries} costConfidences={costConfidences} />");
+    const archivedSectionIndex = source.indexOf("Archived suppliers");
+    expect(addSectionMountIndex).toBeGreaterThanOrEqual(0);
+    expect(archivedSectionIndex).toBeGreaterThan(addSectionMountIndex);
+    expect(source).not.toContain('form={formId} name="customSupplierName"');
+
+    const addSectionStart = source.indexOf("function AddNewSupplierSection");
+    const nextComponentStart = source.indexOf("function SupplierAdditionalContactDetails");
+    expect(addSectionStart).toBeGreaterThanOrEqual(0);
+    expect(nextComponentStart).toBeGreaterThan(addSectionStart);
+    const addSectionSource = source.slice(addSectionStart, nextComponentStart);
+
+    expect(addSectionSource).toContain("<summary");
+    expect(addSectionSource).toContain("Add new supplier");
+    expect(addSectionSource).toContain('name="itemId"');
+    expect(addSectionSource).toContain('name="customSupplierName"');
+    expect(addSectionSource).toContain('name="supplierSku"');
+    expect(addSectionSource).toContain('name="estimatedUnitCost"');
+    expect(addSectionSource).toContain('name="costConfidence"');
+    expect(addSectionSource).toContain('name="costSourceRef"');
   });
 });

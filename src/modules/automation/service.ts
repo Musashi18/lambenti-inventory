@@ -3,6 +3,7 @@ import {
   AutomationFindingSeverity,
   AutomationRunKind,
   AutomationRunStatus,
+  ItemCategory,
   LifecycleStatus,
   Prisma,
   PurchaseOrderStatus,
@@ -51,7 +52,7 @@ export async function runStockReorderScan(actor: AutomationActor): Promise<Autom
     const findingInputs: FindingInput[] = [];
     for (const row of stock) {
       const item = itemById.get(row.itemId);
-      if (!item || item.lifecycleStatus === LifecycleStatus.OBSOLETE) continue;
+      if (!item || item.lifecycleStatus === LifecycleStatus.OBSOLETE || item.category === ItemCategory.FINISHED_GOOD) continue;
 
       const incoming = incomingByItem.get(row.itemId) ?? 0;
       const openPr = openPrByItem.get(row.itemId) ?? 0;

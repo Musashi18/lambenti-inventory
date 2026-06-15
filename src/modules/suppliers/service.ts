@@ -35,6 +35,8 @@ export type ConfirmedSupplierOption = {
   name: string;
 };
 
+export type ActiveSupplierOption = ConfirmedSupplierOption;
+
 export type SupplierProfile = {
   id: string;
   name: string;
@@ -46,6 +48,7 @@ export type SupplierProfile = {
   foundedYear: string;
   address: string;
   productPageUrl: string;
+  leadTimeDays: number;
   sourceLabel: string;
   confirmedByHuman: boolean;
   archivedAt: string;
@@ -62,6 +65,7 @@ type SupplierOptionCandidate = {
   foundedYear?: number | null;
   address?: string | null;
   productPageUrl?: string | null;
+  leadTimeDays?: number | null;
   archivedAt?: Date | null;
   archivedBy?: string | null;
   archiveReason?: string | null;
@@ -79,6 +83,16 @@ type SupplierProfileCandidate = SupplierOptionCandidate & {
   createdAt?: Date | null;
   updatedAt?: Date | null;
 };
+
+type SupplierWriteClient = Pick<typeof prisma, "supplier" | "auditLog">;
+
+export async function getActiveSupplierOptions(): Promise<ActiveSupplierOption[]> {
+  const profiles = await getUniqueSupplierProfiles();
+  return profiles.map((supplier) => ({
+    id: supplier.id,
+    name: supplier.displayName
+  }));
+}
 
 export async function getConfirmedSupplierOptions(): Promise<ConfirmedSupplierOption[]> {
   const suppliers = await prisma.supplier.findMany({
@@ -146,6 +160,7 @@ export async function getUniqueSupplierProfiles(): Promise<SupplierProfile[]> {
       foundedYear: true,
       address: true,
       productPageUrl: true,
+      leadTimeDays: true,
       archivedAt: true,
       archivedBy: true,
       archiveReason: true,
@@ -175,6 +190,7 @@ export async function getUniqueSupplierProfiles(): Promise<SupplierProfile[]> {
     foundedYear: supplier.foundedYear,
     address: supplier.address,
     productPageUrl: supplier.productPageUrl,
+    leadTimeDays: supplier.leadTimeDays,
     archivedAt: supplier.archivedAt,
     archivedBy: supplier.archivedBy,
     archiveReason: supplier.archiveReason,
@@ -204,6 +220,7 @@ export async function getArchivedSupplierProfiles(): Promise<SupplierProfile[]> 
       foundedYear: true,
       address: true,
       productPageUrl: true,
+      leadTimeDays: true,
       archivedAt: true,
       archivedBy: true,
       archiveReason: true,
@@ -233,6 +250,7 @@ export async function getArchivedSupplierProfiles(): Promise<SupplierProfile[]> 
     foundedYear: supplier.foundedYear,
     address: supplier.address,
     productPageUrl: supplier.productPageUrl,
+    leadTimeDays: supplier.leadTimeDays,
     archivedAt: supplier.archivedAt,
     archivedBy: supplier.archivedBy,
     archiveReason: supplier.archiveReason,
@@ -309,6 +327,7 @@ function toSupplierProfile(supplier: SupplierProfileCandidate): SupplierProfile 
     foundedYear: supplier.foundedYear?.toString() ?? "",
     address: supplier.address?.trim() ?? "",
     productPageUrl: supplier.productPageUrl?.trim() ?? "",
+    leadTimeDays: supplier.leadTimeDays ?? 0,
     sourceLabel: supplierSourceLabel(supplier),
     confirmedByHuman: Boolean(supplier.confirmedByHuman),
     archivedAt: supplier.archivedAt?.toISOString() ?? "",
@@ -392,6 +411,7 @@ export async function getItemSupplierEntries(): Promise<ItemSupplierEntry[]> {
 export async function updateItemSupplierEntry(input: {
   itemId: string;
   preferredSupplierId?: string;
+  customSupplierName?: string;
   supplierSku?: string;
   estimatedUnitCost?: number;
   costConfidence?: CostConfidence;
@@ -399,35 +419,116 @@ export async function updateItemSupplierEntry(input: {
   actorId: string;
   actorType?: "USER" | "AGENT";
 }) {
-  const item = await prisma.item.update({
-    where: { id: input.itemId },
+  return prisma.$transaction(async (tx) => {
+    const preferredSupplierId = await resolveSupplierSelection({
+      preferredSupplierId: input.preferredSupplierId,
+      customSupplierName: input.customSupplierName,
+      actorId: input.actorId,
+      actorType: input.actorType,
+      client: tx
+    });
+
+    const item = await tx.item.update({
+      where: { id: input.itemId },
+      data: {
+        preferredSupplierId,
+        supplierSku: blankToNull(input.supplierSku),
+        estimatedUnitCost: input.estimatedUnitCost === undefined ? null : new Prisma.Decimal(input.estimatedUnitCost),
+        costCurrency: "USD",
+        costConfidence: input.costConfidence ?? CostConfidence.UNKNOWN,
+        costSourceRef: blankToNull(input.costSourceRef)
+      }
+    });
+
+    await writeAuditLog({
+      actorType: input.actorType ?? "USER",
+      actorId: input.actorId,
+      action: "UPDATE_ITEM_SUPPLIER_ENTRY",
+      entityType: "Item",
+      entityId: item.id,
+      payload: {
+        preferredSupplierId: item.preferredSupplierId,
+        customSupplierName: normalizeCustomSupplierName(input.customSupplierName),
+        supplierSku: item.supplierSku,
+        estimatedUnitCost: item.estimatedUnitCost?.toString() ?? null,
+        costCurrency: item.costCurrency,
+        costConfidence: item.costConfidence,
+        costSourceRef: item.costSourceRef
+      }
+    }, tx);
+
+    return item;
+  });
+}
+
+export async function resolveSupplierSelection(input: {
+  preferredSupplierId?: string | null;
+  customSupplierName?: string | null;
+  actorId: string;
+  actorType?: "USER" | "AGENT";
+  client?: SupplierWriteClient;
+}) {
+  const customSupplierName = normalizeCustomSupplierName(input.customSupplierName);
+  if (customSupplierName) {
+    const supplier = await getOrCreateCustomSupplier({
+      name: customSupplierName,
+      actorId: input.actorId,
+      actorType: input.actorType,
+      client: input.client
+    });
+    return supplier.id;
+  }
+
+  return blankToNull(input.preferredSupplierId ?? undefined);
+}
+
+async function getOrCreateCustomSupplier(input: {
+  name: string;
+  actorId: string;
+  actorType?: "USER" | "AGENT";
+  client?: SupplierWriteClient;
+}) {
+  const client = input.client ?? prisma;
+  const name = normalizeCustomSupplierName(input.name);
+  if (name.length < 2 || looksLikeEmailHeading(name) || looksLikeImportedEmailSentence(name) || looksLikeGenericImportedSupplier(name)) {
+    throw new Error("Enter a specific supplier name, not an email heading or generic supplier label.");
+  }
+
+  const existing = await client.supplier.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } }
+  });
+  if (existing) {
+    if (existing.archivedAt) {
+      throw new Error(`Supplier "${existing.name}" is archived. Unarchive it from Suppliers before assigning it again.`);
+    }
+    return existing;
+  }
+
+  const supplier = await client.supplier.create({
     data: {
-      preferredSupplierId: blankToNull(input.preferredSupplierId),
-      supplierSku: blankToNull(input.supplierSku),
-      estimatedUnitCost: input.estimatedUnitCost === undefined ? null : new Prisma.Decimal(input.estimatedUnitCost),
-      costCurrency: "USD",
-      costConfidence: input.costConfidence ?? CostConfidence.UNKNOWN,
-      costSourceRef: blankToNull(input.costSourceRef)
+      name,
+      companyName: name,
+      confirmedByHuman: true,
+      moq: 1,
+      leadTimeDays: 0,
+      shippingCost: 0,
+      reliabilityScore: 0
     }
   });
 
   await writeAuditLog({
     actorType: input.actorType ?? "USER",
     actorId: input.actorId,
-    action: "UPDATE_ITEM_SUPPLIER_ENTRY",
-    entityType: "Item",
-    entityId: item.id,
+    action: "CREATE_CUSTOM_SUPPLIER",
+    entityType: "Supplier",
+    entityId: supplier.id,
     payload: {
-      preferredSupplierId: item.preferredSupplierId,
-      supplierSku: item.supplierSku,
-      estimatedUnitCost: item.estimatedUnitCost?.toString() ?? null,
-      costCurrency: item.costCurrency,
-      costConfidence: item.costConfidence,
-      costSourceRef: item.costSourceRef
+      supplierName: supplier.name,
+      note: "Created from a human-entered custom supplier field. No inventory quantity was changed."
     }
-  });
+  }, client);
 
-  return item;
+  return supplier;
 }
 
 export async function updateSupplierContactProfile(input: {
@@ -640,6 +741,10 @@ function looksLikeTestOrUselessSupplier(value: string) {
     || /\btest-email-archive\b/i.test(cleaned)
     || /^[a-z0-9_-]{48,}$/i.test(cleaned)
     || /\buseless\b/.test(normalized);
+}
+
+function normalizeCustomSupplierName(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim() ?? "";
 }
 
 function blankToNull(value?: string) {

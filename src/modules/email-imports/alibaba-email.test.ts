@@ -260,6 +260,52 @@ Total USD 353.00
     expect(parsed.lines.map((line) => line.unitPrice)).toEqual([0.03, 0.035, 0.05, 0.04]);
   });
 
+  it("keeps similar Alibaba product cards as distinct lines when quantity and price match", () => {
+    const parsed = parseAlibabaEmail(`
+Subject: Your initial payment has been received (304716450001023166)
+From: "Alibaba" <credit@notice.alibaba.com>
+Your initial payment has been received (304716450001023166)
+Hi Musashi Kaneko,
+The supplier Winnie XU has received your initial payment for order no. 304716450001023166.
+View order details
+Total
+USD 145.50
+Order date
+2026-06-08 18:24:26 PST
+Your product and delivery information
+Super Glue Self-adhesive Car Cable Clamp 3m Adhesive Cable Clips Clamps Plastic Nylon Cable Organizer Clip
+Quantity: 1000
+Variations: 1
+Item subtotal: USD 20.00
+View details
+White Adhesive Nylon Cable Clips & Organizers (R Type Model WCL-0805) for Industrial Use-Wire Holders & Cord Management
+Quantity: 500
+Variations: 1
+Item subtotal: USD 10.00
+View details
+Self-adhesive Wire Rope Clip 3m Adhesive Cable Clips Plastic Nylon Cable Organizer 14.5MM*15.8MM
+Quantity: 1000
+Variations: 1
+Item subtotal: USD 20.00
+View details
+Order summary (3 items)
+Item subtotal USD 50.00
+Shipping fee USD 95.50
+Total USD 145.50
+Initial payment: USD 145.50
+`);
+
+    expect(parsed.externalOrderId).toBe("304716450001023166");
+    expect(parsed.lines).toHaveLength(3);
+    expect(parsed.lines.map((line) => line.rawDescription)).toEqual([
+      "Super Glue Self-adhesive Car Cable Clamp 3m Adhesive Cable Clips Clamps Plastic Nylon Cable Organizer Clip",
+      "White Adhesive Nylon Cable Clips & Organizers (R Type Model WCL-0805) for Industrial Use-Wire Holders & Cord Management",
+      "Self-adhesive Wire Rope Clip 3m Adhesive Cable Clips Plastic Nylon Cable Organizer 14.5MM*15.8MM"
+    ]);
+    expect(parsed.lines.map((line) => line.quantity)).toEqual([1000, 500, 1000]);
+    expect(parsed.lines.map((line) => line.lineTotal)).toEqual([20, 10, 20]);
+  });
+
   it("extracts order numbers from Alibaba Trade Assurance status emails", () => {
     const parsed = parseAlibabaEmail(`
 Subject: The payment status for your Trade Assurance order 303671327001023166 has changed

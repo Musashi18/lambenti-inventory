@@ -2,7 +2,11 @@
 
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import { requirePermission } from "@/modules/auth/permissions";
-import { approvePurchaseRequest, rejectPurchaseRequest } from "@/modules/purchasing/requests";
+import {
+  approvePurchaseRequest,
+  rejectPurchaseRequest
+} from "@/modules/purchasing/requests";
+import { convertApprovedPurchaseRequestToDraftPurchaseOrder } from "@/modules/purchasing/service";
 
 export async function approvePurchaseRequestAction(formData: FormData) {
   const requestId = String(formData.get("requestId") ?? "");
@@ -24,6 +28,20 @@ export async function rejectPurchaseRequestAction(formData: FormData) {
 
   const actor = await requirePermission("purchaseRequest:approve");
   await rejectPurchaseRequest({
+    requestId,
+    actor,
+    comment: optionalString(formData.get("comment"))
+  });
+
+  revalidateWorkspace();
+}
+
+export async function convertApprovedPurchaseRequestAction(formData: FormData) {
+  const requestId = String(formData.get("requestId") ?? "");
+  if (!requestId.trim()) throw new Error("Missing purchase request id.");
+
+  const actor = await requirePermission("purchaseOrder:create");
+  await convertApprovedPurchaseRequestToDraftPurchaseOrder({
     requestId,
     actor,
     comment: optionalString(formData.get("comment"))

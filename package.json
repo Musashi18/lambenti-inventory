@@ -10,7 +10,8 @@
     "start:local": "node scripts/start-local.mjs",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "quality": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "test:serial": "vitest run --no-file-parallelism",
+    "quality": "npm run lint && npm run typecheck && npm run test:serial && npm run build",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
@@ -22,7 +23,9 @@
     "agent:alibaba-email": "node scripts/alibaba-order-agent.mjs",
     "agent:alibaba-portal": "node scripts/alibaba-portal-agent.mjs",
     "agent:alibaba-login": "node scripts/alibaba-portal-agent.mjs --setup-login",
+    "agent:tracking-refresh": "node scripts/tracking-refresh.mjs",
     "agent:functional": "node scripts/functional-qa-agent.mjs",
+    "agent:local-worker-smoke": "node scripts/hermes-local-worker-smoke.mjs",
     "qa:functional": "node scripts/functional-qa-agent.mjs --skip-quality-gates",
     "smoke": "node scripts/smoke.mjs",
     "test": "vitest run"
@@ -38,6 +41,7 @@
     "playwright-core": "^1.60.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "tesseract.js": "^7.0.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {

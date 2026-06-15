@@ -25,4 +25,20 @@ describe("ItemsCatalog client interaction source contract", () => {
     expect(source).toContain('if (rawUnitCost === "") return "—";');
     expect(source).toContain("Number(rawUnitCost)");
   });
+
+  it("exposes a custom supplier name input in the edit modal", () => {
+    const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+
+    expect(source).toContain('name="customSupplierName"');
+    expect(source).toContain("Custom supplier");
+  });
+
+  it("keeps the current preferred supplier option available when active supplier filtering omits it", () => {
+    const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+
+    expect(source).toContain("supplierOptionsForItem");
+    expect(source).toContain("current preferred supplier");
+    expect(source).toContain("item.preferredSupplierId");
+    expect(source).toContain("item.preferredSupplierName");
+  });
 });

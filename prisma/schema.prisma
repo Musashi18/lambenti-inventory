@@ -82,6 +82,51 @@ enum InvoiceStatus {
   VOID
 }
 
+enum CustomerInvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  VOID
+}
+
+enum AccountingDocumentStatus {
+  UPLOADED
+  ANALYZED
+  NEEDS_REVIEW
+  APPLIED
+  ATTACHED
+  ARCHIVED
+  FAILED
+}
+
+enum BankTransactionStatus {
+  IMPORTED
+  MATCHED
+  IGNORED
+}
+
+enum GLAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+  COGS
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
+enum JournalEntryKind {
+  AP_INVOICE
+  AP_PAYMENT
+  MANUAL
+  REVERSAL
+}
+
 enum UserRole {
   ADMIN
   OPERATIONS
@@ -154,6 +199,7 @@ model Item {
   purchaseOrderLines   PurchaseOrderLine[]
   emailOrderLines      EmailOrderLineImport[]
   invoiceLines         SupplierInvoiceLine[]
+  customerInvoiceLines CustomerInvoiceLine[]
   reservations         BuildReservation[]
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
@@ -170,31 +216,33 @@ model StorageLocation {
 }
 
 model Supplier {
-  id                String             @id @default(cuid())
-  name              String             @unique
-  confirmedByHuman  Boolean            @default(false)
-  companyName       String?
-  contactEmail      String?
-  contactName       String?
-  companyRevenue    Decimal?           @db.Decimal(14, 2)
-  foundedYear       Int?
-  address           String?
-  moq               Int
-  leadTimeDays      Int
-  shippingCost      Decimal            @db.Decimal(10, 2)
-  reliabilityScore  Decimal            @db.Decimal(5, 2)
-  productPageUrl    String?
-  archivedAt        DateTime?
-  archivedBy        String?
-  archiveReason     String?
-  preferredFor      Item[]             @relation("PreferredSupplier")
-  offers            SupplierOffer[]
-  purchaseRequests  PurchaseRequest[]
-  purchaseOrders    PurchaseOrder[]
-  invoices          SupplierInvoice[]
-  emailOrderImports EmailOrderImport[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                    String               @id @default(cuid())
+  name                  String               @unique
+  confirmedByHuman      Boolean              @default(false)
+  companyName           String?
+  contactEmail          String?
+  contactName           String?
+  taxRegistrationNumber String?
+  companyRevenue        Decimal?             @db.Decimal(14, 2)
+  foundedYear           Int?
+  address               String?
+  moq                   Int
+  leadTimeDays          Int
+  shippingCost          Decimal              @db.Decimal(10, 2)
+  reliabilityScore      Decimal              @db.Decimal(5, 2)
+  productPageUrl        String?
+  archivedAt            DateTime?
+  archivedBy            String?
+  archiveReason         String?
+  preferredFor          Item[]               @relation("PreferredSupplier")
+  offers                SupplierOffer[]
+  purchaseRequests      PurchaseRequest[]
+  purchaseOrders        PurchaseOrder[]
+  invoices              SupplierInvoice[]
+  accountingDocuments   AccountingDocument[]
+  emailOrderImports     EmailOrderImport[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   @@index([archivedAt])
 }
@@ -301,31 +349,34 @@ model PurchaseRequestLine {
 }
 
 model PurchaseOrder {
-  id                String              @id @default(cuid())
-  supplierId        String
-  purchaseRequestId String?             @unique
-  status            PurchaseOrderStatus @default(DRAFT)
-  orderedAt         DateTime?
-  expectedAt        DateTime?
-  supplier          Supplier            @relation(fields: [supplierId], references: [id])
-  purchaseRequest   PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id])
-  lines             PurchaseOrderLine[]
-  emailOrderImports EmailOrderImport[]
-  invoice           SupplierInvoice?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id                  String               @id @default(cuid())
+  supplierId          String
+  purchaseRequestId   String?              @unique
+  status              PurchaseOrderStatus  @default(DRAFT)
+  orderedAt           DateTime?
+  expectedAt          DateTime?
+  supplier            Supplier             @relation(fields: [supplierId], references: [id])
+  purchaseRequest     PurchaseRequest?     @relation(fields: [purchaseRequestId], references: [id])
+  lines               PurchaseOrderLine[]
+  emailOrderImports   EmailOrderImport[]
+  trackingNumbers     TrackingNumber[]
+  invoices            SupplierInvoice[]
+  accountingDocuments AccountingDocument[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 }
 
 model PurchaseOrderLine {
-  id               String          @id @default(cuid())
+  id               String                @id @default(cuid())
   purchaseOrderId  String
   itemId           String
   quantity         Int
-  unitPrice        Decimal         @db.Decimal(10, 2)
-  receivedQuantity Int             @default(0)
-  purchaseOrder    PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id])
-  item             Item            @relation(fields: [itemId], references: [id])
+  unitPrice        Decimal               @db.Decimal(10, 2)
+  receivedQuantity Int                   @default(0)
+  purchaseOrder    PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id])
+  item             Item                  @relation(fields: [itemId], references: [id])
   stockMovements   StockMovement[]
+  invoiceLines     SupplierInvoiceLine[]
 }
 
 model User {
@@ -422,6 +473,8 @@ model EmailOrderImport {
   archivedBy          String?
   archiveReason       String?
   lines               EmailOrderLineImport[]
+  trackingNumbers     TrackingNumber[]
+  accountingDocuments AccountingDocument[]
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
 
@@ -457,50 +510,292 @@ model EmailOrderLineImport {
 }
 
 model SupplierInvoice {
-  id                 String                @id @default(cuid())
-  invoiceNumber      String                @unique
-  supplierId         String
-  purchaseOrderId    String?               @unique
-  status             InvoiceStatus         @default(DRAFT)
-  currency           String                @default("USD")
-  subtotal           Decimal               @db.Decimal(12, 2)
-  shippingCost       Decimal               @default(0) @db.Decimal(12, 2)
-  taxCost            Decimal               @default(0) @db.Decimal(12, 2)
-  total              Decimal               @db.Decimal(12, 2)
-  invoiceDate        DateTime              @default(now())
-  dueDate            DateTime?
-  sourceDocumentPath String?
-  sourceDocumentHash String?
-  externalSourceUrl  String?
-  notes              String?
-  approvalNotes      String?
-  approvedBy         String?
-  approvedAt         DateTime?
-  paymentReference   String?
-  paidBy             String?
-  paidAt             DateTime?
-  voidReason         String?
-  supplier           Supplier              @relation(fields: [supplierId], references: [id])
-  purchaseOrder      PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
-  lines              SupplierInvoiceLine[]
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  id                      String                             @id @default(cuid())
+  invoiceNumber           String
+  invoiceNumberKey        String
+  supplierId              String
+  purchaseOrderId         String?
+  status                  InvoiceStatus                      @default(DRAFT)
+  currency                String                             @default("USD")
+  subtotal                Decimal                            @db.Decimal(12, 2)
+  shippingCost            Decimal                            @default(0) @db.Decimal(12, 2)
+  taxCost                 Decimal                            @default(0) @db.Decimal(12, 2)
+  taxJurisdiction         String?
+  taxRate                 Decimal?                           @db.Decimal(6, 4)
+  taxRecoverableAmount    Decimal?                           @db.Decimal(12, 2)
+  taxNonRecoverableAmount Decimal?                           @db.Decimal(12, 2)
+  dutyCost                Decimal                            @default(0) @db.Decimal(12, 2)
+  brokerageCost           Decimal                            @default(0) @db.Decimal(12, 2)
+  otherLandedCost         Decimal                            @default(0) @db.Decimal(12, 2)
+  total                   Decimal                            @db.Decimal(12, 2)
+  sourceCurrency          String?
+  sourceSubtotal          Decimal?                           @db.Decimal(12, 2)
+  sourceTaxCost           Decimal?                           @db.Decimal(12, 2)
+  sourceTotal             Decimal?                           @db.Decimal(12, 2)
+  invoiceDate             DateTime                           @default(now())
+  dueDate                 DateTime?
+  sourceDocumentPath      String?
+  sourceDocumentHash      String?
+  externalSourceUrl       String?
+  notes                   String?
+  approvalNotes           String?
+  approvedBy              String?
+  approvedAt              DateTime?
+  paymentReference        String?
+  paidBy                  String?
+  paidAt                  DateTime?
+  voidReason              String?
+  supplier                Supplier                           @relation(fields: [supplierId], references: [id])
+  purchaseOrder           PurchaseOrder?                     @relation(fields: [purchaseOrderId], references: [id])
+  lines                   SupplierInvoiceLine[]
+  accountingDocuments     AccountingDocument[]
+  paymentAllocations      SupplierInvoicePaymentAllocation[]
+  journalEntries          JournalEntry[]
+  createdAt               DateTime                           @default(now())
+  updatedAt               DateTime                           @updatedAt
 
+  @@unique([supplierId, invoiceNumberKey])
+  @@index([invoiceNumber])
   @@index([supplierId])
+  @@index([purchaseOrderId])
   @@index([status])
   @@index([invoiceDate])
 }
 
 model SupplierInvoiceLine {
-  id          String          @id @default(cuid())
-  invoiceId   String
-  itemId      String?
-  description String
-  quantity    Int
-  unitPrice   Decimal         @db.Decimal(12, 4)
-  lineTotal   Decimal         @db.Decimal(12, 2)
-  invoice     SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  item        Item?           @relation(fields: [itemId], references: [id])
+  id                  String             @id @default(cuid())
+  invoiceId           String
+  itemId              String?
+  purchaseOrderLineId String?
+  glAccountId         String?
+  description         String
+  quantity            Int
+  unitPrice           Decimal            @db.Decimal(12, 4)
+  lineTotal           Decimal            @db.Decimal(12, 2)
+  invoice             SupplierInvoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item                Item?              @relation(fields: [itemId], references: [id])
+  purchaseOrderLine   PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: SetNull)
+  glAccount           GLAccount?         @relation(fields: [glAccountId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseOrderLineId])
+  @@index([glAccountId])
+}
+
+model AccountingDocument {
+  id                 String                   @id @default(cuid())
+  source             String                   @default("MANUAL_UPLOAD")
+  sourceKind         String                   @default("UPLOAD")
+  originalFileName   String
+  storedPath         String
+  sha256             String                   @unique
+  mimeType           String
+  sizeBytes          Int
+  extractedText      String?
+  analysisJson       Json?
+  status             AccountingDocumentStatus @default(UPLOADED)
+  errorMessage       String?
+  uploadedBy         String?
+  supplierId         String?
+  supplier           Supplier?                @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseOrderId    String?
+  purchaseOrder      PurchaseOrder?           @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  supplierInvoiceId  String?
+  supplierInvoice    SupplierInvoice?         @relation(fields: [supplierInvoiceId], references: [id], onDelete: SetNull)
+  emailOrderImportId String?
+  emailOrderImport   EmailOrderImport?        @relation(fields: [emailOrderImportId], references: [id], onDelete: SetNull)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([status, createdAt])
+  @@index([supplierId])
+  @@index([purchaseOrderId])
+  @@index([supplierInvoiceId])
+  @@index([emailOrderImportId])
+}
+
+model BankTransaction {
+  id           String                             @id @default(cuid())
+  source       String
+  sourceHash   String                             @unique
+  accountName  String?
+  postedAt     DateTime
+  description  String
+  counterparty String?
+  currency     String                             @default("USD")
+  amount       Decimal                            @db.Decimal(12, 2)
+  reference    String?
+  status       BankTransactionStatus              @default(IMPORTED)
+  allocations  SupplierInvoicePaymentAllocation[]
+  createdAt    DateTime                           @default(now())
+  updatedAt    DateTime                           @updatedAt
+
+  @@index([postedAt])
+  @@index([status])
+  @@index([reference])
+}
+
+model SupplierInvoicePaymentAllocation {
+  id                String           @id @default(cuid())
+  supplierInvoiceId String
+  bankTransactionId String?
+  amount            Decimal          @db.Decimal(12, 2)
+  currency          String           @default("USD")
+  paymentDate       DateTime
+  reference         String
+  reconciledBy      String
+  reconciledAt      DateTime         @default(now())
+  notes             String?
+  supplierInvoice   SupplierInvoice  @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  bankTransaction   BankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: SetNull)
+  journalEntry      JournalEntry?
+
+  @@unique([supplierInvoiceId, bankTransactionId])
+  @@index([supplierInvoiceId])
+  @@index([bankTransactionId])
+}
+
+model GLAccount {
+  id           String                @id @default(cuid())
+  code         String                @unique
+  name         String
+  type         GLAccountType
+  active       Boolean               @default(true)
+  mappings     GLAccountMapping[]
+  invoiceLines SupplierInvoiceLine[]
+  journalLines JournalEntryLine[]
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+}
+
+model GLAccountMapping {
+  id          String    @id @default(cuid())
+  scopeType   String
+  scopeId     String?
+  purpose     String
+  glAccountId String
+  priority    Int       @default(100)
+  active      Boolean   @default(true)
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  glAccount   GLAccount @relation(fields: [glAccountId], references: [id])
+
+  @@index([scopeType, scopeId])
+  @@index([purpose])
+  @@index([glAccountId])
+}
+
+model JournalEntry {
+  id                                 String                            @id @default(cuid())
+  entryNumber                        String                            @unique
+  idempotencyKey                     String                            @unique
+  kind                               JournalEntryKind
+  status                             JournalEntryStatus                @default(DRAFT)
+  entryDate                          DateTime
+  currency                           String                            @default("USD")
+  totalDebit                         Decimal                           @default(0) @db.Decimal(14, 2)
+  totalCredit                        Decimal                           @default(0) @db.Decimal(14, 2)
+  memo                               String?
+  sourceType                         String
+  sourceId                           String
+  sourceReference                    String?
+  supplierInvoiceId                  String?
+  supplierInvoice                    SupplierInvoice?                  @relation(fields: [supplierInvoiceId], references: [id], onDelete: Restrict)
+  supplierInvoicePaymentAllocationId String?                           @unique
+  supplierInvoicePaymentAllocation   SupplierInvoicePaymentAllocation? @relation(fields: [supplierInvoicePaymentAllocationId], references: [id], onDelete: Restrict)
+  reversesJournalEntryId             String?                           @unique
+  reversesJournalEntry               JournalEntry?                     @relation("JournalEntryReversal", fields: [reversesJournalEntryId], references: [id], onDelete: Restrict)
+  reversalJournalEntry               JournalEntry?                     @relation("JournalEntryReversal")
+  createdBy                          String
+  postedBy                           String?
+  postedAt                           DateTime?
+  voidedBy                           String?
+  voidedAt                           DateTime?
+  voidReason                         String?
+  lines                              JournalEntryLine[]
+  createdAt                          DateTime                          @default(now())
+  updatedAt                          DateTime                          @updatedAt
+
+  @@index([status, entryDate])
+  @@index([kind, entryDate])
+  @@index([sourceType, sourceId])
+  @@index([supplierInvoiceId])
+}
+
+model JournalEntryLine {
+  id                  String        @id @default(cuid())
+  journalEntryId      String
+  lineNo              Int
+  glAccountId         String
+  accountCodeSnapshot String
+  accountNameSnapshot String
+  accountTypeSnapshot GLAccountType
+  description         String
+  debit               Decimal       @default(0) @db.Decimal(14, 2)
+  credit              Decimal       @default(0) @db.Decimal(14, 2)
+  sourceLineType      String?
+  sourceLineId        String?
+  journalEntry        JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  glAccount           GLAccount     @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([journalEntryId, lineNo])
+  @@index([glAccountId])
+  @@index([sourceLineType, sourceLineId])
+}
+
+model Customer {
+  id                    String            @id @default(cuid())
+  name                  String            @unique
+  companyName           String?
+  contactEmail          String?
+  taxRegistrationNumber String?
+  invoices              CustomerInvoice[]
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+}
+
+model CustomerInvoice {
+  id               String                @id @default(cuid())
+  invoiceNumber    String                @unique
+  customerId       String
+  status           CustomerInvoiceStatus @default(DRAFT)
+  currency         String                @default("CAD")
+  subtotal         Decimal               @db.Decimal(12, 2)
+  taxCost          Decimal               @default(0) @db.Decimal(12, 2)
+  total            Decimal               @db.Decimal(12, 2)
+  invoiceDate      DateTime              @default(now())
+  dueDate          DateTime?
+  notes            String?
+  sentBy           String?
+  sentAt           DateTime?
+  paymentReference String?
+  paidBy           String?
+  paidAt           DateTime?
+  voidReason       String?
+  customer         Customer              @relation(fields: [customerId], references: [id])
+  lines            CustomerInvoiceLine[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([invoiceDate])
+}
+
+model CustomerInvoiceLine {
+  id                String          @id @default(cuid())
+  customerInvoiceId String
+  itemId            String?
+  description       String
+  quantity          Int
+  unitPrice         Decimal         @db.Decimal(12, 4)
+  taxRate           Decimal?        @db.Decimal(6, 4)
+  lineTotal         Decimal         @db.Decimal(12, 2)
+  taxAmount         Decimal         @default(0) @db.Decimal(12, 2)
+  customerInvoice   CustomerInvoice @relation(fields: [customerInvoiceId], references: [id], onDelete: Cascade)
+  item              Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
 }
 
 model BuildReservation {
@@ -512,6 +807,57 @@ model BuildReservation {
   item      Item     @relation(fields: [itemId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model TrackingNumber {
+  id                 String           @id @default(cuid())
+  trackingNumber     String           @unique
+  carrier            String?
+  provider           String           @default("UNCONFIGURED")
+  currentStatus      String           @default("UNKNOWN")
+  statusDescription  String?
+  origin             String?
+  destination        String?
+  source             String           @default("MANUAL")
+  sourceUrl          String?
+  externalOrderId    String?
+  supplierName       String?
+  purchaseOrderId    String?
+  purchaseOrder      PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
+  emailOrderImportId String?
+  emailOrderImport   EmailOrderImport? @relation(fields: [emailOrderImportId], references: [id], onDelete: SetNull)
+  lastEventAt        DateTime?
+  deliveredAt        DateTime?
+  lastCheckedAt      DateTime?
+  nextRefreshAt      DateTime?
+  refreshStatus      String           @default("PENDING")
+  refreshError       String?
+  rawStatusJson      Json?
+  capturedAt         DateTime         @default(now())
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  events             TrackingEvent[]
+
+  @@index([externalOrderId])
+  @@index([purchaseOrderId])
+  @@index([emailOrderImportId])
+  @@index([currentStatus])
+  @@index([nextRefreshAt])
+  @@index([updatedAt])
+}
+
+model TrackingEvent {
+  id               String         @id @default(cuid())
+  trackingNumberId String
+  trackingNumber   TrackingNumber @relation(fields: [trackingNumberId], references: [id], onDelete: Cascade)
+  status           String?
+  description      String
+  location         String?
+  occurredAt       DateTime?
+  rawEventJson     Json?
+  createdAt        DateTime       @default(now())
+
+  @@index([trackingNumberId, occurredAt])
 }
 
 model AuditLog {

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { assertPermission, AuthorizationError, type AuthenticatedActor } from "@/modules/auth/permissions";
 import { createStockMovementInTransaction } from "@/modules/inventory/service";
+import { syncLeadTimeAveragesForPurchaseOrder } from "@/modules/tracking/service";
 
 type ReceiveLotInput =
   | { stockLotId: string; lot?: never }
@@ -32,12 +33,12 @@ export async function receivePurchaseOrderLine(input: ReceivePurchaseOrderLineIn
   assertPermission(input.actor, "receiving:confirm");
   const receiveLot = normalizeReceiveLotInput(input);
 
-  return withSerializableRetry(() => prisma.$transaction(async (tx) => {
+  const result = await withSerializableRetry(() => prisma.$transaction(async (tx) => {
     const line = await tx.purchaseOrderLine.findUniqueOrThrow({
       where: { id: input.purchaseOrderLineId },
       include: {
         item: true,
-        purchaseOrder: { include: { supplier: true, invoice: true } }
+        purchaseOrder: { include: { supplier: true, invoices: true } }
       }
     });
 
@@ -114,6 +115,9 @@ export async function receivePurchaseOrderLine(input: ReceivePurchaseOrderLineIn
       purchaseOrder: updatedOrder
     };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+
+  await syncLeadTimeAveragesForPurchaseOrder(result.purchaseOrder.id, input.actor.id, "USER").catch(() => undefined);
+  return result;
 }
 
 function assertHumanReceivingActor(actor: AuthenticatedActor) {

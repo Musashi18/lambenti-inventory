@@ -10,7 +10,7 @@ The workflow is intentionally **manual for now**: you run the agent or press the
 ## What the sync does
 
 - Imports relevant supplier order/email/portal evidence into auditable records.
-- Reuses a local Google Chrome profile/session created by `npm run agent:alibaba-login` for the optional Alibaba portal reader.
+- Reuses the signed-in **Work/Lambenti Google Chrome profile** (auto-detected from Chrome Local State, or configured by profile directory) for the optional Alibaba portal reader.
 - Detects CAPTCHA/security/2FA checks and stops for manual completion in Chrome; it does not bypass those checks.
 - Reads Alibaba order/message pages and downloads invoice/receipt PDFs or invoice HTML pages into `var/alibaba-invoices` when the portal reader is used.
 - Extracts invoice text when possible and stores source document path/hash/source URL provenance.
@@ -24,34 +24,65 @@ The workflow is intentionally **manual for now**: you run the agent or press the
   - `SupplierInvoice` accounting/AP records
   - item cost/provenance/preferred supplier fields
   - audit log entries
-- Surfaces follow-up work on the dashboard **Human approval queue**.
+- Surfaces follow-up work on the Order Email Agent, invoice, accounting, and automation pages; the dashboard no longer shows email catalog-matching nag notices.
 - Does **not** receive physical stock. Receiving remains a separate human-approved inventory ledger action.
 
 ## Direct Alibaba portal setup
 
-Run this once from `C:/Users/musas/Desktop/lambenti-inventory`:
+Run this once from `C:/Users/musas/Desktop/lambenti-inventory` to confirm the profile the portal reader will use:
+
+```bash
+npm run agent:alibaba-portal -- --profile-info --json
+```
+
+On this Windows workstation the agent is configured to use the existing Chrome user-data directory and the Lambenti/Work profile (`Profile 1`, `team@lambenti.com`) when present. You can override this in `.env`:
+
+```env
+LAMBENTI_ALIBABA_USE_WORK_CHROME_PROFILE="true"
+LAMBENTI_ALIBABA_BROWSER_USER_DATA_DIR="C:/Users/musas/AppData/Local/Google/Chrome/User Data"
+LAMBENTI_ALIBABA_BROWSER_PROFILE_DIRECTORY="Profile 1"
+LAMBENTI_ALIBABA_BROWSER_PROFILE_NAME="lambenti.com"
+```
+
+Then run a manual login/handoff pass if Alibaba asks for a fresh session:
 
 ```bash
 npm run agent:alibaba-login
 ```
 
-A Google Chrome window opens. Sign into Alibaba manually, complete any 2FA/security/CAPTCHA checks, open the order/message center once, then return to the terminal and press Enter. CAPTCHA/security checks are manual-only; the agent detects them and will not bypass them.
+A Google Chrome window opens using the Work/Lambenti profile. Sign into Alibaba manually if needed, complete any 2FA/security/CAPTCHA checks, open the order/message center once, then return to the terminal and press Enter. CAPTCHA/security checks are manual-only; the agent detects them and will not bypass them.
 
-The browser cookies are saved under `var/alibaba-chrome-profile`; later manual runs reuse that Chrome profile and do not need your password stored in the app. If Chrome saves/autofills the login fields in that profile, the agent may auto-submit those saved fields on later runs when Alibaba only shows the normal login form.
+If Chrome refuses to launch because the Work profile is already open, close Chrome windows for that profile and retry. Browser automation against Chrome's default profile can be constrained by Chrome policy; the fallback is manual completion in that same Work profile, not CAPTCHA circumvention.
+
+The agent reads from the Work profile cookies/session and does not store your Alibaba password in the app. If Chrome saves/autofills the login fields in that profile, the agent may auto-submit those saved fields on later runs when Alibaba only shows the normal login form.
 
 Configuration options in `.env`:
 
 ```env
 LAMBENTI_ALIBABA_AGENT_SECRET=
-LAMBENTI_ALIBABA_ORDERS_URL="https://www.alibaba.com/trade/order/list.htm"
-LAMBENTI_ALIBABA_MESSAGES_URL="https://message.alibaba.com/"
-LAMBENTI_ALIBABA_BROWSER_PROFILE_DIR="var/alibaba-chrome-profile"
+LAMBENTI_ALIBABA_ORDERS_URL="https://biz.alibaba.com/order/list.htm"
+LAMBENTI_ALIBABA_MESSAGES_URL="https://message.alibaba.com/message/messenger.htm"
+LAMBENTI_ALIBABA_USE_WORK_CHROME_PROFILE="true"
+LAMBENTI_ALIBABA_BROWSER_USER_DATA_DIR="C:/Users/musas/AppData/Local/Google/Chrome/User Data"
+LAMBENTI_ALIBABA_BROWSER_PROFILE_DIRECTORY="Profile 1"
+LAMBENTI_ALIBABA_BROWSER_PROFILE_NAME="lambenti.com"
 LAMBENTI_ALIBABA_INVOICE_DIR="var/alibaba-invoices"
+# Legacy fallback only if you explicitly set LAMBENTI_ALIBABA_USE_WORK_CHROME_PROFILE="false":
+# LAMBENTI_ALIBABA_BROWSER_PROFILE_DIR="var/alibaba-chrome-profile"
 # Optional if Google Chrome is installed somewhere non-standard.
 # LAMBENTI_ALIBABA_BROWSER_EXECUTABLE_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe"
 # Submit Chrome-saved/autofilled login fields automatically when Alibaba shows a normal login form.
 # CAPTCHA/security/2FA checks are detected and require manual completion; they are not bypassed.
 LAMBENTI_ALIBABA_AUTO_SUBMIT_SAVED_LOGIN="true"
+# Login assist clicks Alibaba's Google login and the saved Google account button such as
+# "Continue as Musashi". If unavailable during `npm run agent:alibaba-login`, it can prompt
+# for one-time Alibaba email/password; credentials are not stored or logged.
+LAMBENTI_ALIBABA_LOGIN_ASSIST="true"
+LAMBENTI_ALIBABA_GOOGLE_CONTINUE_NAME="Musashi"
+LAMBENTI_ALIBABA_GOOGLE_CONTINUE_TIMEOUT_MS="12000"
+LAMBENTI_ALIBABA_ACCOUNT_CONFIRM_EMAIL="team@lambenti.com"
+LAMBENTI_ALIBABA_ACCOUNT_CONFIRM_TIMEOUT_MS="8000"
+LAMBENTI_ALIBABA_PROMPT_CREDENTIALS="true"
 LAMBENTI_ALIBABA_AUTH_SETTLE_MS="2000"
 LAMBENTI_ALIBABA_BROWSER_STARTUP_SETTLE_MS="2000"
 LAMBENTI_ALIBABA_LOGIN_SETTLE_MS="5000"
@@ -155,7 +186,7 @@ If `LAMBENTI_EMAIL_SYNC_SECRET` or `LAMBENTI_ALIBABA_AGENT_SECRET` is set, inclu
 
 After each manual run:
 
-1. Open the dashboard and check **Human approval queue**.
+1. Open the Order Email Agent, invoice ledger, accounting workbench, and automation pages as needed.
 2. Review any imported orders or unmatched lines.
 3. Approve/pay invoices only after verifying the supplier document.
 4. Receive physical stock only after the shipment arrives and you have counted it.

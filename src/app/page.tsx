@@ -26,7 +26,7 @@ export default async function DashboardPage() {
           label="Build capacity"
           value={summary.buildCapacity.finishedBuildCapacity}
           helperText={summary.buildCapacity.finishedSku
-            ? `${summary.buildCapacity.finishedSku} · ${summary.buildCapacity.componentsRequiredPerBuild} components required per finished build${summary.buildCapacity.bottleneckSku ? ` · bottleneck ${summary.buildCapacity.bottleneckSku}` : ""}`
+            ? `${summary.buildCapacity.finishedSku}${summary.buildCapacity.bottleneckSku ? ` · bottleneck ${summary.buildCapacity.bottleneckSku}` : ""}`
             : "No active finished-good BOM with component requirements."}
         />
         <StatCard label="Assembled packages" value={summary.assembledPackages} helperText="Total assembled packages currently on hand from finished-build inventory." />

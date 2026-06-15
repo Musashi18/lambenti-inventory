@@ -40,7 +40,9 @@ The database is the system of record. Inventory state is never stored as mutable
 
 ## Local Setup
 
-1. Copy `.env.example` to `.env`.
+1. Copy `.env.example` to `.env`. By default local PostgreSQL is published on
+   host port `55432`; keep `LAMBENTI_DB_HOST_PORT` and `DATABASE_URL` aligned if
+   you change it.
 2. Start PostgreSQL:
 
 ```bash

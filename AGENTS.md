@@ -29,10 +29,12 @@ This repository is Lambenti's operational inventory, purchasing, landed-cost, su
 - After schema changes, run:
   - `npx prisma migrate deploy`
   - `npx prisma generate`
-- For app verification, run:
-  - `npm run test -- --run`
+- For app verification, run from the current tree:
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm run test -- --run --no-file-parallelism` or `npm run test:serial`
   - `npm run build`
-- Browser-test changed flows at `http://127.0.0.1:5173` when UI/actions are touched.
+- Browser-test changed flows at `http://127.0.0.1:5173` when UI/actions are touched; for production smoke use `npm run start:local` and check rendered content plus console errors.
 - Use the local scripts:
   - `npm run dev:local` for development server
   - `npm run start:local` for production smoke testing
@@ -52,7 +54,14 @@ This repository is Lambenti's operational inventory, purchasing, landed-cost, su
 ## Preferred Hermes workflow
 
 - Load the `lambenti-tracking-app-development` skill before modifying this app.
+- For broad, continuation, recovery, or multi-domain work, also load `lambenti-parallel-engineering-operator`.
+- This repo uses the Lambenti two-tier orchestration default: Hermes/GPT-5.5 stays the controller/senior reviewer, and low-risk bounded `delegate_task` children default to local Qwen2.5-Coder through LM Studio.
+- Use local Qwen delegates for read-only audits, file summaries, small draft plans, targeted test triage, and narrow low-risk code-review passes; keep accounting/ledger/migration/security/production/destructive decisions under Hermes/GPT-5.5 control.
+- Treat delegate summaries as advisory self-reports; verify claimed file changes, test results, and runtime behavior yourself before finalizing.
+- Keep local delegates leaf/bounded: pass small context bundles and narrow toolsets, and avoid sending secrets or raw private data to remote models.
+- Before planning continuation work, read `HERMES_STATE.md`, `TASK_QUEUE.md`, `DECISIONS.md`, and `ISSUES.md` when they exist.
 - Use `systematic-debugging` for regressions and production-only errors.
 - Use `test-driven-development` when adding business logic or bugfix coverage.
 - Keep durable procedures in skills; keep operational facts in the database.
 - Use session search for prior conversation context instead of asking the user to repeat old decisions.
+- See `docs/hermes-two-tier-orchestration.md` for the local-worker diagnostics and routing details.

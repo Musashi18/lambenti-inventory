@@ -34,7 +34,6 @@ describe("MovementsPage item-level movement source contract", () => {
   it("uses a client form with hidden lot controls, optional reason, and a BUILD movement option", () => {
     const source = readFileSync(join(__dirname, "movement-form.tsx"), "utf8");
 
-    expect(source).toMatch(/useActionState/);
     expect(source).toMatch(/selectedItemId/);
     expect(source).toMatch(/"BUILD"/);
     expect(source).toMatch(/Reason <span[^>]*>optional/);
@@ -43,6 +42,18 @@ describe("MovementsPage item-level movement source contract", () => {
     expect(source).not.toMatch(/name="stockLotId"/);
     expect(source).not.toMatch(/name="newLotCode"/);
     expect(source).not.toMatch(/name="newLotUnitCost"/);
+  });
+
+  it("submits movement records through an explicit client handler that refreshes the list after success", () => {
+    const source = readFileSync(join(__dirname, "movement-form.tsx"), "utf8");
+
+    expect(source).toMatch(/FormEvent<HTMLFormElement>/);
+    expect(source).toMatch(/event\.preventDefault\(\)/);
+    expect(source).toMatch(/await createMovementAction\(undefined, new FormData\(form\)\)/);
+    expect(source).toMatch(/setActionState\(result\)/);
+    expect(source).toMatch(/router\.refresh\(\)/);
+    expect(source).toMatch(/window\.location\.reload\(\)/);
+    expect(source).not.toMatch(/useActionState/);
   });
 
   it("filters BUILD item choices down to active finished BOM parent items only", () => {

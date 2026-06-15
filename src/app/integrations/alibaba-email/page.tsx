@@ -74,7 +74,7 @@ export default async function EmailImportPage({
                 : `Not connected yet. Missing: ${mailbox.missing.join(", ")}.`}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              Sync searches recent supplier order/invoice/payment/shipping messages, including forwarded .eml/text attachments. It imports each message once by content hash and now tries to split multi-item emails into separate editable rows.
+              Sync searches recent supplier order/invoice/payment/shipping messages, including forwarded .eml/text attachments. It imports each message once by content hash, splits multi-item emails into separate editable rows, and saves tracking numbers found in shipment notifications without receiving stock.
             </p>
             {mailbox.retry.status !== "idle" ? (
               <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

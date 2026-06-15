@@ -7,7 +7,8 @@ describe("Alibaba portal snapshots", () => {
     const rawText = portalSnapshotToImportText({
       sourceUrl: "https://biz.alibaba.com/order/detail.htm?orderId=304447618001023166",
       capturedAt: "2026-06-06T12:00:00.000Z",
-      subject: "Alibaba portal order detail",
+      supplierName: "Mark Tang",
+      trackingNumbers: ["UPS 1Z999AA10123456784"],
       text: `
         Trade Assurance Order no. 304447618001023166
         Supplier: Mark Tang
@@ -42,6 +43,7 @@ describe("Alibaba portal snapshots", () => {
 
     expect(rawText).toContain("Source: Alibaba portal");
     expect(rawText).toContain("Invoice No: INV-304447618001023166");
+    expect(rawText).toContain("Tracking Number: UPS 1Z999AA10123456784");
     expect(rawText).toContain("Local invoice path: var/alibaba-invoices/invoice-304447618001023166.pdf");
 
     const parsed = parseAlibabaEmail(rawText);
@@ -71,5 +73,29 @@ describe("Alibaba portal snapshots", () => {
       sourceDocumentHash: "deadbeef",
       externalSourceUrl: "https://biz.alibaba.com/invoice/download?id=INV-42"
     });
+  });
+
+  it("persists extracted message-conversation context in the importable portal evidence text", () => {
+    const rawText = portalSnapshotToImportText({
+      sourceUrl: "https://message.alibaba.com/thread?orderId=304716450001023166",
+      capturedAt: "2026-06-14T12:00:00.000Z",
+      orderId: "304716450001023166",
+      orderStatus: "Completed",
+      orderDate: "2026-05-31T00:00:00.000Z",
+      subject: "Alibaba portal message conversation",
+      conversationContext: [
+        "Supplier: Winnie XU",
+        "Order Number: 304716450001023166",
+        "Supplier confirmed this completed order shipped.",
+        "Tracking Number: 888071620741"
+      ].join("\n"),
+      text: "Full message thread text with product chatter and tracking number 888071620741."
+    });
+
+    expect(rawText).toContain("Order Status: Completed");
+    expect(rawText).toContain("Order Date: 2026-05-31T00:00:00.000Z");
+    expect(rawText).toContain("Conversation context:");
+    expect(rawText).toContain("Supplier confirmed this completed order shipped.");
+    expect(rawText).toContain("Tracking Number: 888071620741");
   });
 });

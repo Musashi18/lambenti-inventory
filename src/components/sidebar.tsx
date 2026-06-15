@@ -8,6 +8,7 @@ import {
   Mail,
   PackageSearch,
   ReceiptText,
+  Route,
   ShoppingCart,
   Truck,
   Workflow
@@ -21,11 +22,12 @@ const links = [
   { href: "/purchasing/recommendations", label: "Recommendations", icon: ShoppingCart },
   { href: "/purchasing/requests", label: "Approvals", icon: ClipboardList },
   { href: "/integrations/email-import", label: "Order Agent", icon: Mail },
+  { href: "/tracking", label: "Tracking", icon: Route },
   { href: "/automation", label: "Automation", icon: Workflow },
   { href: "/boms", label: "BOMs", icon: ClipboardList },
-  { href: "/incoming", label: "Incoming", icon: Truck },
+  { href: "/incoming", label: "Receiving", icon: Truck },
   { href: "/inventory/valuation", label: "Valuation", icon: PackageSearch },
-  { href: "/accounting/invoices", label: "Invoices", icon: ReceiptText }
+  { href: "/accounting", label: "Accounting", icon: ReceiptText }
 ];
 
 export function Sidebar() {

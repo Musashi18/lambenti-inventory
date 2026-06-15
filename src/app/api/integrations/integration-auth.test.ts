@@ -87,6 +87,71 @@ describe("integration route production authorization", () => {
     }));
   });
 
+  it("passes portal tracking-number provenance through request validation", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LAMBENTI_ALIBABA_AGENT_SECRET", "s");
+
+    const response = await portalRoute.POST(nextRequest("http://127.0.0.1:5173/api/integrations/alibaba-portal/import", {
+      method: "POST",
+      body: JSON.stringify({
+        snapshots: [{
+          sourceUrl: "https://example.test/order",
+          text: "Alibaba Trade Assurance order with supplier shipment tracking details.",
+          trackingNumbers: ["UPS 1Z999AA10123456784"],
+          orderStatus: "Completed",
+          orderDate: "2026-05-31T00:00:00.000Z",
+          conversationContext: "Supplier confirmed shipment and tracking number UPS 1Z999AA10123456784."
+        }]
+      }),
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer s"
+      }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(importAlibabaPortalSnapshots).toHaveBeenCalledWith(expect.objectContaining({
+      snapshots: [expect.objectContaining({
+        trackingNumbers: ["UPS 1Z999AA10123456784"],
+        orderStatus: "Completed",
+        orderDate: "2026-05-31T00:00:00.000Z",
+        conversationContext: "Supplier confirmed shipment and tracking number UPS 1Z999AA10123456784."
+      })]
+    }));
+  });
+
+  it("accepts a deep tracking capture batch large enough for visible Alibaba message threads", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LAMBENTI_ALIBABA_AGENT_SECRET", "s");
+    vi.mocked(importAlibabaPortalSnapshots).mockClear();
+
+    const snapshots = Array.from({ length: 75 }, (_, index) => ({
+      sourceUrl: `https://message.alibaba.com/message/messenger.htm#thread-${index}`,
+      subject: `Alibaba portal message thread ${index}`,
+      messageId: `<alibaba-portal:message:TEST-${index}>`,
+      text: `Supplier message section ${index}: Will ship out your order soon. Tracking number 8880716207${String(index).padStart(2, "0")} is pending.`
+    }));
+
+    const response = await portalRoute.POST(nextRequest("http://127.0.0.1:5173/api/integrations/alibaba-portal/import", {
+      method: "POST",
+      body: JSON.stringify({ snapshots, autoApply: false, autoCreateInvoices: false }),
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer s"
+      }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(importAlibabaPortalSnapshots).toHaveBeenCalledWith(expect.objectContaining({
+      snapshots: expect.arrayContaining([
+        expect.objectContaining({ sourceUrl: "https://message.alibaba.com/message/messenger.htm#thread-0" }),
+        expect.objectContaining({ sourceUrl: "https://message.alibaba.com/message/messenger.htm#thread-74" })
+      ]),
+      autoApply: false,
+      autoCreateInvoices: false
+    }));
+  });
+
   it("rejects Alibaba portal query-string secrets and requires bearer auth", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("LAMBENTI_ALIBABA_AGENT_SECRET", "s");

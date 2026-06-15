@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { InvoiceStatus } from "@prisma/client";
+import { InvoiceStatus, GLAccountType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { normalizeInvoiceNumberKey } from "@/modules/accounting/invoices";
+import { upsertGLAccount, upsertGLMapping } from "@/modules/accounting/gl";
 import { updateInvoiceStatusAction } from "./actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -19,8 +21,11 @@ async function cleanupTestData() {
     select: { id: true }
   });
   const supplierIds = suppliers.map((supplier) => supplier.id);
+  const accountIds = (await prisma.gLAccount.findMany({ where: { code: { startsWith: TEST_PREFIX } }, select: { id: true } })).map((account) => account.id);
 
   if (invoiceIds.length > 0) {
+    await prisma.journalEntryLine.deleteMany({ where: { journalEntry: { supplierInvoiceId: { in: invoiceIds } } } });
+    await prisma.journalEntry.deleteMany({ where: { supplierInvoiceId: { in: invoiceIds } } });
     await prisma.auditLog.deleteMany({ where: { entityId: { in: invoiceIds } } });
     await prisma.supplierInvoiceLine.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await prisma.supplierInvoice.deleteMany({ where: { id: { in: invoiceIds } } });
@@ -33,6 +38,8 @@ async function cleanupTestData() {
     await prisma.supplier.deleteMany({ where: { id: { in: supplierIds } } });
   }
   await prisma.auditLog.deleteMany({ where: { actorId: { startsWith: TEST_PREFIX } } });
+  await prisma.gLAccountMapping.deleteMany({ where: { glAccountId: { in: accountIds } } });
+  if (accountIds.length > 0) await prisma.gLAccount.deleteMany({ where: { id: { in: accountIds } } });
 }
 
 async function createInvoice(status: InvoiceStatus = InvoiceStatus.RECEIVED) {
@@ -45,9 +52,11 @@ async function createInvoice(status: InvoiceStatus = InvoiceStatus.RECEIVED) {
       reliabilityScore: 0.9
     }
   });
+  const invoiceNumber = `${TEST_PREFIX}-${crypto.randomUUID().slice(0, 8)}`;
   return prisma.supplierInvoice.create({
     data: {
-      invoiceNumber: `${TEST_PREFIX}-${crypto.randomUUID().slice(0, 8)}`,
+      invoiceNumber,
+      invoiceNumberKey: normalizeInvoiceNumberKey(invoiceNumber),
       supplierId: supplier.id,
       status,
       currency: "USD",
@@ -68,6 +77,13 @@ function formDataFor(invoiceId: string, status: InvoiceStatus, extra?: Record<st
   formData.set("status", status);
   for (const [key, value] of Object.entries(extra ?? {})) formData.set(key, value);
   return formData;
+}
+
+async function configurePaymentAccounts() {
+  const ap = await upsertGLAccount({ code: `${TEST_PREFIX}-2000`, name: "Accounts payable", type: GLAccountType.LIABILITY, actorId: `${TEST_PREFIX}-accountant` });
+  const bank = await upsertGLAccount({ code: `${TEST_PREFIX}-1000`, name: "Operating bank", type: GLAccountType.ASSET, actorId: `${TEST_PREFIX}-accountant` });
+  await upsertGLMapping({ scopeType: "DEFAULT", purpose: "ACCOUNTS_PAYABLE", glAccountId: ap.id, actorId: `${TEST_PREFIX}-accountant` });
+  await upsertGLMapping({ scopeType: "DEFAULT", purpose: "BANK_CASH", glAccountId: bank.id, actorId: `${TEST_PREFIX}-accountant` });
 }
 
 describe("invoice server-action authorization and state machine", () => {
@@ -110,6 +126,7 @@ describe("invoice server-action authorization and state machine", () => {
     vi.stubEnv("LAMBENTI_DEV_USER_ROLE", "ACCOUNTING");
     vi.stubEnv("LAMBENTI_DEV_USER_ID", `${TEST_PREFIX}-accountant`);
     const invoice = await createInvoice(InvoiceStatus.APPROVED);
+    await configurePaymentAccounts();
 
     await updateInvoiceStatusAction(formDataFor(invoice.id, InvoiceStatus.PAID, { paymentReference: "WIRE-2026-001" }));
 

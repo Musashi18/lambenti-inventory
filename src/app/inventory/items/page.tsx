@@ -2,7 +2,8 @@ import { CostConfidence, ItemCategory, LifecycleStatus, Unit } from "@prisma/cli
 import { prisma } from "@/lib/prisma";
 import { getItems } from "@/modules/items/service";
 import { exportItemsToCsv } from "@/modules/items/import-export";
-import { getConfirmedSupplierOptions } from "@/modules/suppliers/service";
+import { getActiveSupplierOptions } from "@/modules/suppliers/service";
+import { getLeadTimeSummaryIndex } from "@/modules/tracking/service";
 import { requirePermission } from "@/modules/auth/permissions";
 import { ItemCreateForm } from "./item-create-form";
 import { ItemImportExportPanel } from "./item-import-export-panel";
@@ -18,10 +19,11 @@ export default async function ItemsPage({
   await requirePermission("item:view");
   const params = await searchParams;
   const showArchived = params?.archived === "1";
-  const [items, confirmedSupplierOptions, storageLocations] = await Promise.all([
+  const [items, supplierOptions, storageLocations, leadTimeSummaries] = await Promise.all([
     getItems({ archivedOnly: showArchived }),
-    getConfirmedSupplierOptions(),
-    prisma.storageLocation.findMany({ orderBy: { code: "asc" } })
+    getActiveSupplierOptions(),
+    prisma.storageLocation.findMany({ orderBy: { code: "asc" } }),
+    getLeadTimeSummaryIndex()
   ]);
 
   const defaultStorageLocationId = storageLocations[0]?.id;
@@ -68,7 +70,7 @@ export default async function ItemsPage({
             ) : (
               <ItemCreateForm
                 defaultStorageLocationId={defaultStorageLocationId}
-                suppliers={confirmedSupplierOptions}
+                suppliers={supplierOptions}
                 categories={Object.values(ItemCategory)}
                 units={Object.values(Unit)}
                 lifecycleStatuses={Object.values(LifecycleStatus)}
@@ -93,6 +95,8 @@ export default async function ItemsPage({
           reorderPoint: item.reorderPoint,
           targetStock: item.targetStock,
           leadTimeDays: item.leadTimeDays,
+          observedLeadTimeLabel: leadTimeSummaries.byItemId[item.id]?.label ?? "No completed tracking/receiving samples yet",
+          observedLeadTimeSampleCount: leadTimeSummaries.byItemId[item.id]?.sampleCount ?? 0,
           preferredSupplierId: item.preferredSupplierId ?? "",
           preferredSupplierName: item.preferredSupplier?.name ?? "",
           lifecycleStatus: item.lifecycleStatus,
@@ -101,7 +105,7 @@ export default async function ItemsPage({
           costConfidence: item.costConfidence,
           costSourceRef: item.costSourceRef ?? ""
         }))}
-        suppliers={confirmedSupplierOptions}
+        suppliers={supplierOptions}
         categories={Object.values(ItemCategory)}
         units={Object.values(Unit)}
         lifecycleStatuses={Object.values(LifecycleStatus)}

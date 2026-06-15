@@ -11,6 +11,8 @@ This project is ready to run after machine-level prerequisites are installed.
 
 ## One-Time Setup
 
+See `docs/local-runbook.md` for the verified Windows local run path, including the current PostgreSQL host-port default.
+
 ```powershell
 npm run setup
 ```
@@ -35,6 +37,10 @@ npx prisma migrate deploy
 npx prisma db seed
 npm run dev
 ```
+
+By default Docker Compose publishes PostgreSQL on host port `55432` and `.env.example`
+uses `localhost:55432`. If you change `LAMBENTI_DB_HOST_PORT`, update
+`DATABASE_URL` to the same host port before running migrations/tests.
 
 If port `3000` is blocked on Windows:
 

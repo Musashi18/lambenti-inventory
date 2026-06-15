@@ -1,7 +1,7 @@
 "use client";
 
 import { MovementType } from "@prisma/client";
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createMovementAction } from "./actions";
 import { initialMovementActionState } from "./state";
@@ -16,7 +16,8 @@ type ItemOption = {
 
 export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOption[]; buildableItemIds?: string[] }) {
   const router = useRouter();
-  const [actionState, formAction, pending] = useActionState(createMovementAction, initialMovementActionState);
+  const [actionState, setActionState] = useState(initialMovementActionState);
+  const [pending, setPending] = useState(false);
   const state = {
     ...initialMovementActionState,
     ...actionState,
@@ -44,14 +45,34 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
     }
   }, [filteredItems, selectedItemId]);
 
-  useEffect(() => {
-    if (!state.success) return;
-    router.refresh();
-    window.location.reload();
-  }, [router, state.message, state.success]);
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const form = event.currentTarget;
+    setPending(true);
+    try {
+      const result = await createMovementAction(undefined, new FormData(form));
+      setActionState(result);
+      if (result.success) {
+        router.refresh();
+        window.location.reload();
+        return;
+      }
+    } catch (caught) {
+      setActionState({
+        ...initialMovementActionState,
+        success: false,
+        message: caught instanceof Error ? caught.message : "Stock movement failed. Refresh and try again.",
+        domainErrorCode: "STOCK_MOVEMENT_REJECTED"
+      });
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <form action={formAction} className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
       {state.message ? (
         <div
           className={`rounded-md border px-3 py-2 text-sm xl:col-span-5 ${state.success ? "border-mint/40 bg-mint/10 text-emerald-800" : "border-coral/40 bg-coral/10 text-red-800"}`}

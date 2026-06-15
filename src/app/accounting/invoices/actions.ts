@@ -11,9 +11,20 @@ export async function createInvoiceFromPurchaseOrderAction(formData: FormData) {
     throw new Error("Missing purchase order id.");
   }
 
+  const invoiceNumber = optionalString(formData.get("invoiceNumber"));
+  const subtotal = optionalNumber(formData.get("subtotal"));
+  const taxCost = optionalNumber(formData.get("taxCost"));
+  const total = optionalNumber(formData.get("total"));
   const actor = await requirePermission("invoice:create");
-  await createInvoiceFromPurchaseOrder(purchaseOrderId, actor.id);
+  const invoice = await createInvoiceFromPurchaseOrder(purchaseOrderId, actor.id, {
+    invoiceNumber,
+    subtotal,
+    taxCost,
+    total,
+    notes: optionalString(formData.get("notes"))
+  });
   revalidateWorkspace();
+  return { ok: true, message: `Supplier invoice ${invoice.invoiceNumber} saved.` };
 }
 
 export async function updateInvoiceStatusAction(formData: FormData) {
@@ -30,7 +41,7 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const permission = targetStatus === InvoiceStatus.PAID ? "invoice:markPaid" : targetStatus === InvoiceStatus.APPROVED || targetStatus === InvoiceStatus.VOID ? "invoice:approve" : "invoice:create";
   const actor = await requirePermission(permission);
 
-  await updateInvoiceStatus({
+  const invoice = await updateInvoiceStatus({
     invoiceId,
     status: targetStatus,
     actor,
@@ -39,8 +50,16 @@ export async function updateInvoiceStatusAction(formData: FormData) {
     voidReason: optionalString(formData.get("voidReason"))
   });
   revalidateWorkspace();
+  return { ok: true, message: `Supplier invoice ${invoice.invoiceNumber} is now ${invoice.status}.` };
 }
 
 function optionalString(value: FormDataEntryValue | null) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function optionalNumber(value: FormDataEntryValue | null) {
+  const text = optionalString(value);
+  if (!text) return undefined;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

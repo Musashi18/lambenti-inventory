@@ -1,6 +1,7 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { recognizeImageText } from "@/modules/documents/ocr";
+import { captureManualTrackingNumbers, extractManualTrackingNumbersFromText } from "@/modules/tracking/service";
 import { importAlibabaEmailOrder } from "./alibaba-email";
 
 export type OcrImageTextInput = {
@@ -36,6 +37,8 @@ export type MailboxSyncResult = {
   duplicates: number;
   appliedOrAlreadyApplied: number;
   invoicesCreatedOrUpdated: number;
+  trackingSaved: number;
+  trackingUpdated: number;
   needsReview: number;
   skipped: number;
   errors: string[];
@@ -116,6 +119,8 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
       duplicates: 0,
       appliedOrAlreadyApplied: 0,
       invoicesCreatedOrUpdated: 0,
+      trackingSaved: 0,
+      trackingUpdated: 0,
       needsReview: 0,
       skipped: 0,
       errors: ["Mailbox is not configured. Set LAMBENTI_EMAIL_IMAP_HOST, LAMBENTI_EMAIL_IMAP_USER, and LAMBENTI_EMAIL_IMAP_PASSWORD in .env."]
@@ -131,6 +136,8 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
     duplicates: 0,
     appliedOrAlreadyApplied: 0,
     invoicesCreatedOrUpdated: 0,
+    trackingSaved: 0,
+    trackingUpdated: 0,
     needsReview: 0,
     skipped: 0,
     errors: []
@@ -246,6 +253,9 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
       if (imported.invoice) {
         result.invoicesCreatedOrUpdated += 1;
       }
+      const trackingCapture = await captureTrackingFromImportedShipmentEmail(rawText, imported, actorId);
+      result.trackingSaved += trackingCapture.saved;
+      result.trackingUpdated += trackingCapture.updated;
       if (!imported.purchaseOrder && imported.import.status === "NEEDS_REVIEW") {
         result.needsReview += 1;
       }
@@ -255,6 +265,29 @@ export async function syncAlibabaMailbox(actorId = "mailbox-automation"): Promis
   }
 
   return result;
+}
+
+type ImportedEmailOrderResult = Awaited<ReturnType<typeof importAlibabaEmailOrder>>;
+
+async function captureTrackingFromImportedShipmentEmail(rawText: string, imported: ImportedEmailOrderResult, actorId: string) {
+  if (!looksLikeShipmentNotificationEmail(rawText) || extractManualTrackingNumbersFromText(rawText).length === 0) {
+    return { saved: 0, updated: 0 };
+  }
+
+  const result = await captureManualTrackingNumbers({
+    rawText,
+    actorId,
+    externalOrderId: imported.import.externalOrderId,
+    purchaseOrderId: imported.purchaseOrder?.id ?? imported.import.purchaseOrderId,
+    supplierName: imported.import.supplierName,
+    sourceUrl: imported.import.sourceUrl,
+    source: imported.import.source || "SYNCED_EMAIL"
+  });
+  return { saved: result.saved, updated: result.updated };
+}
+
+function looksLikeShipmentNotificationEmail(rawText: string) {
+  return /\b(?:shipped|shipment|shipping|track\s*(?:package|shipment|order)?|tracking|logistics|waybill|carrier|delivery)\b/i.test(rawText);
 }
 
 async function runSyncAndScheduleBackoff(actorId: string): Promise<MailboxSyncResult> {
@@ -281,6 +314,8 @@ async function runSyncAndScheduleBackoff(actorId: string): Promise<MailboxSyncRe
       duplicates: 0,
       appliedOrAlreadyApplied: 0,
       invoicesCreatedOrUpdated: 0,
+      trackingSaved: 0,
+      trackingUpdated: 0,
       needsReview: 0,
       skipped: 0,
       errors: [error instanceof Error ? error.message : String(error)]
@@ -345,6 +380,8 @@ function emptyQueuedResult(message: string): MailboxSyncResult {
     duplicates: 0,
     appliedOrAlreadyApplied: 0,
     invoicesCreatedOrUpdated: 0,
+    trackingSaved: 0,
+    trackingUpdated: 0,
     needsReview: 0,
     skipped: 0,
     errors: [message]

@@ -1,6 +1,7 @@
-import { PurchaseOrderStatus, PurchaseRequestStatus } from "@prisma/client";
+import { ItemCategory, Prisma, PurchaseOrderStatus, PurchaseRequestStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
+import { assertPermission, type AuthenticatedActor } from "@/modules/auth/permissions";
 import { getStockSummaries } from "@/modules/inventory/service";
 
 const OPEN_PURCHASE_ORDER_STATUSES = [PurchaseOrderStatus.ORDERED, PurchaseOrderStatus.PARTIALLY_RECEIVED] as const;
@@ -11,7 +12,7 @@ export async function getPurchaseRecommendations() {
   const itemIds = stock.map((item) => item.itemId);
   const [recommendableItems, incomingByItemId, openRequestsByItemId] = await Promise.all([
     prisma.item.findMany({
-      where: { id: { in: itemIds }, lifecycleStatus: { not: "OBSOLETE" } },
+      where: { id: { in: itemIds }, lifecycleStatus: { not: "OBSOLETE" }, category: { not: ItemCategory.FINISHED_GOOD } },
       select: { id: true }
     }),
     getIncomingPurchaseOrderQuantityByItem(itemIds),
@@ -51,10 +52,11 @@ export async function createDraftPurchaseRequest(input: {
   return prisma.$transaction(async (tx) => {
     const item = await tx.item.findUnique({
       where: { id: input.itemId },
-      select: { id: true, lifecycleStatus: true, sku: true }
+      select: { id: true, lifecycleStatus: true, category: true, sku: true }
     });
     if (!item) throw new Error("Item does not exist for draft purchase request.");
     if (item.lifecycleStatus === "OBSOLETE") throw new Error("Obsolete items cannot be recommended for purchase.");
+    if (item.category === ItemCategory.FINISHED_GOOD) throw new Error("Finished goods are assembled internally and cannot be recommended for purchase.");
 
     const existingOpen = await tx.purchaseRequestLine.findFirst({
       where: {
@@ -95,6 +97,87 @@ export async function createDraftPurchaseRequest(input: {
     }, tx);
 
     return request;
+  });
+}
+
+export async function convertApprovedPurchaseRequestToDraftPurchaseOrder(input: {
+  requestId: string;
+  actor: AuthenticatedActor;
+  comment?: string;
+}) {
+  assertPermission(input.actor, "purchaseOrder:create");
+
+  return prisma.$transaction(async (tx) => {
+    const request = await tx.purchaseRequest.findUniqueOrThrow({
+      where: { id: input.requestId },
+      include: {
+        supplier: true,
+        purchaseOrder: { include: { lines: { include: { item: true } }, supplier: true } },
+        lines: { include: { item: true } }
+      }
+    });
+
+    if (request.purchaseOrder) {
+      return { purchaseRequest: request, purchaseOrder: request.purchaseOrder };
+    }
+
+    if (request.status !== PurchaseRequestStatus.APPROVED) {
+      throw new Error(`Cannot convert purchase request from ${request.status} to a draft purchase order.`);
+    }
+    if (!request.supplierId) {
+      throw new Error("Purchase request must have a supplier before it can be converted to a purchase order.");
+    }
+    if (request.lines.length === 0) {
+      throw new Error("Purchase request must have at least one line before conversion.");
+    }
+
+    const lines = request.lines.map((line) => {
+      if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+        throw new Error(`Purchase request line for ${line.item.sku} must have a positive whole-number quantity.`);
+      }
+      const unitPrice = line.targetUnitPrice ?? line.item.estimatedUnitCost;
+      if (!unitPrice || new Prisma.Decimal(unitPrice).lte(0)) {
+        throw new Error(`Purchase request line for ${line.item.sku} is missing unit price evidence.`);
+      }
+      return {
+        itemId: line.itemId,
+        quantity: line.quantity,
+        unitPrice: new Prisma.Decimal(unitPrice)
+      };
+    });
+
+    const purchaseOrder = await tx.purchaseOrder.create({
+      data: {
+        supplierId: request.supplierId,
+        purchaseRequestId: request.id,
+        status: PurchaseOrderStatus.DRAFT,
+        lines: { create: lines }
+      },
+      include: { lines: { include: { item: true } }, supplier: true }
+    });
+
+    const purchaseRequest = await tx.purchaseRequest.update({
+      where: { id: request.id },
+      data: { status: PurchaseRequestStatus.CONVERTED },
+      include: { lines: { include: { item: true } }, supplier: true, purchaseOrder: true }
+    });
+
+    await writeAuditLog({
+      actorType: input.actor.actorType,
+      actorId: input.actor.id,
+      action: "CONVERT_PURCHASE_REQUEST_TO_DRAFT_PO",
+      entityType: "PurchaseRequest",
+      entityId: request.id,
+      payload: {
+        fromStatus: request.status,
+        toStatus: PurchaseRequestStatus.CONVERTED,
+        purchaseOrderId: purchaseOrder.id,
+        comment: input.comment?.trim() || undefined,
+        note: "Created DRAFT purchase order for human review. Physical stock was not received into inventory."
+      }
+    }, tx);
+
+    return { purchaseRequest, purchaseOrder };
   });
 }
 

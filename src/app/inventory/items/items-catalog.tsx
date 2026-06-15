@@ -26,6 +26,8 @@ type EditableItem = {
   reorderPoint: number;
   targetStock: number;
   leadTimeDays: number;
+  observedLeadTimeLabel: string;
+  observedLeadTimeSampleCount: number;
   preferredSupplierId: string;
   preferredSupplierName: string;
   lifecycleStatus: string;
@@ -112,6 +114,7 @@ export function ItemsCatalog({
               <th className="px-4 py-3 font-medium">Description</th>
               <th className="px-4 py-3 font-medium">Category</th>
               <th className="px-4 py-3 font-medium">Unit price (USD)</th>
+              <th className="px-4 py-3 font-medium">Lead time</th>
               <th className="px-4 py-3 font-medium">Cost confidence</th>
               <th className="px-4 py-3 font-medium">Lifecycle</th>
               <th className="px-4 py-3 font-medium">Actions</th>
@@ -120,7 +123,7 @@ export function ItemsCatalog({
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-4 text-slate-500" colSpan={7}>
+                <td className="px-4 py-4 text-slate-500" colSpan={8}>
                   {archivedView ? "No archived items found." : "No active items found."}
                 </td>
               </tr>
@@ -131,6 +134,15 @@ export function ItemsCatalog({
                 const archiveBusy = busyKey === `archive:${item.id}`;
                 const unarchiveBusy = busyKey === `unarchive:${item.id}`;
                 const updateBusy = busyKey === `update:${item.id}`;
+                const supplierOptionsForItem = item.preferredSupplierId && !suppliers.some((supplier) => supplier.id === item.preferredSupplierId)
+                  ? [
+                      {
+                        id: item.preferredSupplierId,
+                        name: item.preferredSupplierName || "current preferred supplier"
+                      },
+                      ...suppliers
+                    ]
+                  : suppliers;
 
                 return (
                   <tr key={item.id} className="border-t border-slate-100">
@@ -138,6 +150,10 @@ export function ItemsCatalog({
                     <td className="px-4 py-3">{item.description}</td>
                     <td className="px-4 py-3">{item.category}</td>
                     <td className="px-4 py-3">{formatUsdUnitPrice(item)}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-900">{item.leadTimeDays}d current</div>
+                      <div className="text-xs text-slate-500">{item.observedLeadTimeLabel}</div>
+                    </td>
                     <td className="px-4 py-3">{item.costConfidence}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${isObsolete ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}`}>
@@ -263,10 +279,14 @@ export function ItemsCatalog({
                               <span>Preferred supplier</span>
                               <select name="preferredSupplierId" defaultValue={item.preferredSupplierId} className="w-full rounded-md border px-3 py-2 font-normal">
                                 <option value="">No preferred supplier</option>
-                                {suppliers.map((supplier) => (
+                                {supplierOptionsForItem.map((supplier) => (
                                   <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                                 ))}
                               </select>
+                            </label>
+                            <label className="space-y-1 text-sm font-medium">
+                              <span>Custom supplier</span>
+                              <input name="customSupplierName" placeholder="Type a new supplier if it is not listed" className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
                               <span>Lifecycle status</span>

@@ -32,6 +32,7 @@ async function cleanupTestData() {
     await prisma.item.deleteMany({ where: { id: { in: itemIds } } });
   }
 
+  await prisma.supplier.deleteMany({ where: { name: { startsWith: TEST_PREFIX } } });
   await prisma.storageLocation.deleteMany({ where: { code: { startsWith: TEST_PREFIX } } });
 }
 
@@ -105,6 +106,30 @@ describe("inventory item server-action contracts", () => {
     const duplicate = await createItemFormAction(EMPTY_STATE, firstForm);
     expect(duplicate).toMatchObject({ ok: false });
     expect(duplicate.message).toMatch(/sku already exists/i);
+  });
+
+  it("creates and assigns a custom preferred supplier from item forms", async () => {
+    const location = await createLocation("CUSTOM-SUPPLIER");
+    const customSupplierName = `${TEST_PREFIX} Custom Supplier`;
+    const form = itemForm({
+      sku: `${TEST_PREFIX}-CUSTOM-SUPPLIER`,
+      storageLocationId: location.id,
+      preferredSupplierId: "",
+      customSupplierName
+    });
+
+    const result = await createItemFormAction(EMPTY_STATE, form);
+
+    expect(result).toMatchObject({ ok: true });
+    const item = await prisma.item.findUniqueOrThrow({
+      where: { sku: `${TEST_PREFIX}-CUSTOM-SUPPLIER` },
+      include: { preferredSupplier: true }
+    });
+    expect(item.preferredSupplier).toMatchObject({
+      name: customSupplierName,
+      companyName: customSupplierName,
+      confirmedByHuman: true
+    });
   });
 
   it("uses the first available storage location when the hidden location field is missing", async () => {

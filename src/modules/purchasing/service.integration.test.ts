@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ItemCategory, LifecycleStatus, MovementType, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createStockMovement } from "@/modules/inventory/service";
-import { createDraftPurchaseRequest, getPurchaseRecommendations } from "./service";
+import { convertApprovedPurchaseRequestToDraftPurchaseOrder, createDraftPurchaseRequest, getPurchaseRecommendations } from "./service";
 
 const TEST_PREFIX = "TEST-PURCH-SVC";
 
@@ -38,7 +38,7 @@ async function cleanupTestData() {
   await prisma.storageLocation.deleteMany({ where: { code: { startsWith: TEST_PREFIX } } });
 }
 
-async function createFixture(options: { sku: string; reorderPoint?: number; targetStock?: number; status?: LifecycleStatus }) {
+async function createFixture(options: { sku: string; reorderPoint?: number; targetStock?: number; status?: LifecycleStatus; category?: ItemCategory }) {
   const location = await prisma.storageLocation.create({
     data: { code: `${options.sku}-LOC`, name: `${options.sku} location` }
   });
@@ -46,7 +46,7 @@ async function createFixture(options: { sku: string; reorderPoint?: number; targ
     data: {
       sku: options.sku,
       description: `${options.sku} item`,
-      category: ItemCategory.COMPONENT,
+      category: options.category ?? ItemCategory.COMPONENT,
       unit: Unit.EACH,
       reorderPoint: options.reorderPoint ?? 5,
       targetStock: options.targetStock ?? 20,
@@ -85,6 +85,28 @@ async function receive(itemId: string, quantity: number) {
 describe("purchase recommendation and draft request service", () => {
   beforeEach(cleanupTestData);
   afterAll(cleanupTestData);
+
+  it("excludes finished goods from purchase recommendations and draft purchase requests", async () => {
+    const { item, supplier } = await createFixture({
+      sku: `${TEST_PREFIX}-FINISHED-GOOD`,
+      reorderPoint: 10,
+      targetStock: 50,
+      category: ItemCategory.FINISHED_GOOD
+    });
+
+    const recommendations = await getPurchaseRecommendations();
+
+    expect(recommendations.some((row) => row.itemId === item.id)).toBe(false);
+    await expect(createDraftPurchaseRequest({
+      itemId: item.id,
+      quantity: 5,
+      rationale: "Finished goods are assembled internally, not purchased",
+      requestedBy: `${TEST_PREFIX}-agent`,
+      supplierId: supplier.id,
+      actorType: "AGENT",
+      actorId: `${TEST_PREFIX}-agent`
+    })).rejects.toThrow(/finished goods are assembled/i);
+  });
 
   it("excludes obsolete items and items whose available stock is at or above reorder point", async () => {
     const active = await createFixture({ sku: `${TEST_PREFIX}-ACTIVE`, reorderPoint: 5, targetStock: 20 });
@@ -147,5 +169,77 @@ describe("purchase recommendation and draft request service", () => {
       actorType: "AGENT",
       actorId: `${TEST_PREFIX}-agent`
     })).rejects.toThrow(/open draft|pending purchase request/i);
+  });
+
+  it("converts an approved purchase request into a draft purchase order without receiving stock", async () => {
+    const { item, supplier } = await createFixture({ sku: `${TEST_PREFIX}-CONVERT`, reorderPoint: 10, targetStock: 20 });
+    await prisma.item.update({ where: { id: item.id }, data: { estimatedUnitCost: 2.75 } });
+    const request = await prisma.purchaseRequest.create({
+      data: {
+        supplierId: supplier.id,
+        status: "APPROVED",
+        rationale: "Approved low-stock replenishment",
+        requestedBy: `${TEST_PREFIX}-buyer`,
+        approvedBy: `${TEST_PREFIX}-approver`,
+        approvedAt: new Date("2026-06-13T00:00:00.000Z"),
+        lines: { create: [{ itemId: item.id, quantity: 6 }] }
+      }
+    });
+
+    const result = await convertApprovedPurchaseRequestToDraftPurchaseOrder({
+      requestId: request.id,
+      actor: { id: `${TEST_PREFIX}-buyer`, type: "HUMAN", role: "PURCHASING", actorType: "USER" },
+      comment: "Draft PO for operator review before ordering."
+    });
+
+    expect(result.purchaseRequest.status).toBe("CONVERTED");
+    expect(result.purchaseOrder).toMatchObject({
+      purchaseRequestId: request.id,
+      supplierId: supplier.id,
+      status: "DRAFT"
+    });
+    expect(result.purchaseOrder.lines).toHaveLength(1);
+    expect(Number(result.purchaseOrder.lines[0].unitPrice)).toBe(2.75);
+    await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(0);
+    await expect(prisma.auditLog.findFirstOrThrow({ where: { entityId: request.id, action: "CONVERT_PURCHASE_REQUEST_TO_DRAFT_PO" } })).resolves.toMatchObject({
+      actorId: `${TEST_PREFIX}-buyer`
+    });
+  });
+
+  it("blocks conversion when supplier or unit price evidence is missing", async () => {
+    const missingSupplier = await createFixture({ sku: `${TEST_PREFIX}-NO-SUPPLIER`, reorderPoint: 10, targetStock: 20 });
+    const noSupplierRequest = await prisma.purchaseRequest.create({
+      data: {
+        status: "APPROVED",
+        rationale: "No supplier selected",
+        requestedBy: `${TEST_PREFIX}-buyer`,
+        approvedBy: `${TEST_PREFIX}-approver`,
+        approvedAt: new Date("2026-06-13T00:00:00.000Z"),
+        lines: { create: [{ itemId: missingSupplier.item.id, quantity: 2, targetUnitPrice: 1.25 }] }
+      }
+    });
+
+    await expect(convertApprovedPurchaseRequestToDraftPurchaseOrder({
+      requestId: noSupplierRequest.id,
+      actor: { id: `${TEST_PREFIX}-buyer`, type: "HUMAN", role: "PURCHASING", actorType: "USER" }
+    })).rejects.toThrow(/supplier/i);
+
+    const missingPrice = await createFixture({ sku: `${TEST_PREFIX}-NO-PRICE`, reorderPoint: 10, targetStock: 20 });
+    const noPriceRequest = await prisma.purchaseRequest.create({
+      data: {
+        supplierId: missingPrice.supplier.id,
+        status: "APPROVED",
+        rationale: "No price evidence",
+        requestedBy: `${TEST_PREFIX}-buyer`,
+        approvedBy: `${TEST_PREFIX}-approver`,
+        approvedAt: new Date("2026-06-13T00:00:00.000Z"),
+        lines: { create: [{ itemId: missingPrice.item.id, quantity: 2 }] }
+      }
+    });
+
+    await expect(convertApprovedPurchaseRequestToDraftPurchaseOrder({
+      requestId: noPriceRequest.id,
+      actor: { id: `${TEST_PREFIX}-buyer`, type: "HUMAN", role: "PURCHASING", actorType: "USER" }
+    })).rejects.toThrow(/unit price/i);
   });
 });

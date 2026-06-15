@@ -12,6 +12,8 @@ type MailboxActionResult = void | {
     fetchedMessages?: number;
     imported?: number;
     duplicates?: number;
+    trackingSaved?: number;
+    trackingUpdated?: number;
     errors?: string[];
   };
 };
@@ -110,7 +112,7 @@ function describeReassessResult(result: MailboxActionResult) {
   if (!result || typeof result !== "object") return "Recent imports reassessed with the latest multi-item parser.";
   const sync = result.sync;
   const syncSummary = sync?.configured
-    ? `Mailbox checked (${sync.fetchedMessages ?? 0} fetched, ${sync.imported ?? 0} new, ${sync.duplicates ?? 0} refreshed/duplicates).`
+    ? `Mailbox checked (${sync.fetchedMessages ?? 0} fetched, ${sync.imported ?? 0} new, ${sync.duplicates ?? 0} refreshed/duplicates, ${sync.trackingSaved ?? 0} tracking saved, ${sync.trackingUpdated ?? 0} tracking updated).`
     : "Mailbox not configured; reassessed stored imports only.";
   const errorSummary = sync?.errors?.length ? ` Sync notes: ${sync.errors.join("; ")}` : "";
   return `${syncSummary} Reassessed ${result.scanned ?? 0} recent imports; updated ${result.refreshed ?? 0}; skipped ${result.skippedManual ?? 0} manually edited.${errorSummary}`;

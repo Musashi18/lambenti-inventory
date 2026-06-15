@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { CostConfidence, ItemCategory, LifecycleStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { archiveSupplierProfile, deleteArchivedSupplier, getArchivedSupplierProfiles, getConfirmedSupplierOptions, getItemSupplierEntries, getUniqueSupplierProfiles, unarchiveSupplierProfile, updateItemSupplierEntry } from "./service";
+import { archiveSupplierProfile, deleteArchivedSupplier, getActiveSupplierOptions, getArchivedSupplierProfiles, getItemSupplierEntries, getUniqueSupplierProfiles, unarchiveSupplierProfile, updateItemSupplierEntry } from "./service";
 
 const TEST_PREFIX = "QA-SUPPLIER-ENTRIES";
 
@@ -87,8 +87,8 @@ describe("item-derived supplier entries", () => {
   beforeEach(cleanup);
   afterAll(cleanup);
 
-  it("only returns explicitly human-confirmed suppliers for item dropdowns", async () => {
-    await prisma.supplier.create({
+  it("returns every active supplier profile displayed on the suppliers page for item dropdowns", async () => {
+    const confirmed = await prisma.supplier.create({
       data: {
         name: `${TEST_PREFIX} Confirmed Supplier`,
         confirmedByHuman: true,
@@ -100,7 +100,7 @@ describe("item-derived supplier entries", () => {
         reliabilityScore: 4.5
       }
     });
-    await prisma.supplier.create({
+    const unconfirmed = await prisma.supplier.create({
       data: {
         name: `${TEST_PREFIX} Unconfirmed Supplier`,
         confirmedByHuman: false,
@@ -112,11 +112,31 @@ describe("item-derived supplier entries", () => {
         reliabilityScore: 4.5
       }
     });
+    await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Archived Supplier`,
+        confirmedByHuman: true,
+        companyName: `${TEST_PREFIX} Archived Co`,
+        contactEmail: "archived@example.com",
+        archivedAt: new Date(),
+        archivedBy: `${TEST_PREFIX}-setup`,
+        archiveReason: "Hidden from active dropdowns",
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 4.5
+      }
+    });
 
-    const names = (await getConfirmedSupplierOptions()).map((option) => option.name);
+    const displayedSupplierIds = (await getUniqueSupplierProfiles()).map((profile) => profile.id);
+    const options = await getActiveSupplierOptions();
+    const optionIds = options.map((option) => option.id);
+    const optionNames = options.map((option) => option.name);
 
-    expect(names).toContain(`${TEST_PREFIX} Confirmed Co`);
-    expect(names).not.toContain(`${TEST_PREFIX} Unconfirmed Co`);
+    expect(displayedSupplierIds).toEqual(expect.arrayContaining([confirmed.id, unconfirmed.id]));
+    expect(optionIds).toEqual(expect.arrayContaining([confirmed.id, unconfirmed.id]));
+    expect(optionNames).toEqual(expect.arrayContaining([`${TEST_PREFIX} Confirmed Co`, `${TEST_PREFIX} Unconfirmed Co`]));
+    expect(optionNames).not.toContain(`${TEST_PREFIX} Archived Co`);
   });
 
   it("creates supplier rows from every active item type even when no SupplierOffer exists", async () => {
@@ -174,6 +194,36 @@ describe("item-derived supplier entries", () => {
     })).resolves.toBe(1);
   });
 
+  it("creates and assigns a custom supplier from item sourcing rows", async () => {
+    const { rawMaterial } = await createFixtures();
+    const customSupplierName = `${TEST_PREFIX} Custom Row Supplier`;
+
+    await updateItemSupplierEntry({
+      itemId: rawMaterial.id,
+      preferredSupplierId: "",
+      customSupplierName,
+      supplierSku: "CUSTOM-ROW-SKU",
+      estimatedUnitCost: 1.5,
+      costConfidence: CostConfidence.CONFIRMED,
+      costSourceRef: "Custom supplier row",
+      actorId: `${TEST_PREFIX}-custom-actor`
+    });
+
+    const updated = await prisma.item.findUniqueOrThrow({
+      where: { id: rawMaterial.id },
+      include: { preferredSupplier: true }
+    });
+    expect(updated.preferredSupplier).toMatchObject({
+      name: customSupplierName,
+      companyName: customSupplierName,
+      confirmedByHuman: true
+    });
+    expect(updated.supplierSku).toBe("CUSTOM-ROW-SKU");
+    await expect(prisma.auditLog.count({
+      where: { actorId: `${TEST_PREFIX}-custom-actor`, action: "CREATE_CUSTOM_SUPPLIER", entityId: updated.preferredSupplierId ?? undefined }
+    })).resolves.toBe(1);
+  });
+
   it("archives supplier profiles so they disappear from active lists and confirmed dropdowns", async () => {
     const supplier = await prisma.supplier.create({
       data: {
@@ -199,7 +249,7 @@ describe("item-derived supplier entries", () => {
       archiveReason: "No longer relevant"
     });
     const activeProfileIds = (await getUniqueSupplierProfiles()).map((profile) => profile.id);
-    const optionIds = (await getConfirmedSupplierOptions()).map((option) => option.id);
+    const optionIds = (await getActiveSupplierOptions()).map((option) => option.id);
     expect(activeProfileIds).not.toContain(supplier.id);
     expect(optionIds).not.toContain(supplier.id);
     await expect(prisma.auditLog.count({
@@ -231,7 +281,7 @@ describe("item-derived supplier entries", () => {
 
     const activeProfileIds = (await getUniqueSupplierProfiles()).map((profile) => profile.id);
     const archivedProfileIds = (await getArchivedSupplierProfiles()).map((profile) => profile.id);
-    const optionIds = (await getConfirmedSupplierOptions()).map((option) => option.id);
+    const optionIds = (await getActiveSupplierOptions()).map((option) => option.id);
     expect(activeProfileIds).toContain(supplier.id);
     expect(archivedProfileIds).not.toContain(supplier.id);
     expect(optionIds).toContain(supplier.id);

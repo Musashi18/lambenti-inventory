@@ -44,7 +44,7 @@ async function cleanupTestData() {
   await prisma.auditLog.deleteMany({ where: { actorId: { startsWith: TEST_PREFIX } } });
 }
 
-async function createItemFixture(suffix: string, overrides: Partial<{ reorderPoint: number; targetStock: number; lifecycleStatus: LifecycleStatus; preferredSupplierId: string | null }> = {}) {
+async function createItemFixture(suffix: string, overrides: Partial<{ reorderPoint: number; targetStock: number; lifecycleStatus: LifecycleStatus; preferredSupplierId: string | null; category: ItemCategory }> = {}) {
   const location = await prisma.storageLocation.create({
     data: { code: `${TEST_PREFIX}-${suffix}-LOC`, name: `Automation ${suffix}` }
   });
@@ -52,7 +52,7 @@ async function createItemFixture(suffix: string, overrides: Partial<{ reorderPoi
     data: {
       sku: `${TEST_PREFIX}-${suffix}-ITEM`,
       description: `Automation test item ${suffix}`,
-      category: ItemCategory.COMPONENT,
+      category: overrides.category ?? ItemCategory.COMPONENT,
       unit: Unit.EACH,
       reorderPoint: overrides.reorderPoint ?? 5,
       targetStock: overrides.targetStock ?? 20,
@@ -87,6 +87,19 @@ describe("automation runs and findings", () => {
       suggestedActionType: "DRAFT_PURCHASE_REQUEST"
     });
     expect(findings[0].suggestedActionJson).toMatchObject({ itemId: item.id, suggestedQuantity: 25 });
+  });
+
+  it("does not create reorder findings for finished goods because they are assembled internally", async () => {
+    const item = await createItemFixture("FINISHED-GOOD", {
+      reorderPoint: 5,
+      targetStock: 25,
+      category: ItemCategory.FINISHED_GOOD
+    });
+
+    const scan = await runStockReorderScan({ actorType: "AGENT", actorId: `${TEST_PREFIX}-agent` });
+
+    expect(scan.findings.some((row) => row.entityId === item.id && row.category === "REORDER_SHORTAGE")).toBe(false);
+    await expect(prisma.automationFinding.count({ where: { entityId: item.id, category: "REORDER_SHORTAGE" } })).resolves.toBe(0);
   });
 
   it("does not create reorder findings when incoming supply covers the shortage", async () => {

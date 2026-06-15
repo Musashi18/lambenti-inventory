@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemCategory, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { approvePurchaseRequestAction, rejectPurchaseRequestAction } from "./actions";
+import { approvePurchaseRequestAction, convertApprovedPurchaseRequestAction, rejectPurchaseRequestAction } from "./actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -23,6 +23,21 @@ async function cleanupTestData() {
     select: { id: true }
   });
   const supplierIds = suppliers.map((supplier) => supplier.id);
+  const orderFilters = [
+    ...(requestIds.length > 0 ? [{ purchaseRequestId: { in: requestIds } }] : []),
+    ...(supplierIds.length > 0 ? [{ supplierId: { in: supplierIds } }] : [])
+  ];
+  const orders = orderFilters.length > 0
+    ? await prisma.purchaseOrder.findMany({ where: { OR: orderFilters }, select: { id: true } })
+    : [];
+  const orderIds = orders.map((order) => order.id);
+
+  if (orderIds.length > 0) {
+    await prisma.supplierInvoiceLine.deleteMany({ where: { invoice: { purchaseOrderId: { in: orderIds } } } });
+    await prisma.supplierInvoice.deleteMany({ where: { purchaseOrderId: { in: orderIds } } });
+    await prisma.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: { in: orderIds } } });
+    await prisma.purchaseOrder.deleteMany({ where: { id: { in: orderIds } } });
+  }
 
   if (requestIds.length > 0) {
     await prisma.auditLog.deleteMany({ where: { entityId: { in: requestIds } } });
@@ -75,7 +90,7 @@ async function createFixture(status: "DRAFT" | "PENDING_APPROVAL" | "APPROVED" |
       lines: { create: [{ itemId: item.id, quantity: 3 }] }
     }
   });
-  return { request };
+  return { request, item, supplier };
 }
 
 function formDataFor(requestId: string, extra?: Record<string, string>) {
@@ -135,6 +150,44 @@ describe("purchase request server-action authorization and state machine", () =>
 
     await expect(prisma.purchaseRequest.findUniqueOrThrow({ where: { id: request.id } })).resolves.toMatchObject({
       status: "APPROVED"
+    });
+  });
+
+  it("blocks AGENT from converting approved purchase requests into purchase orders", async () => {
+    vi.stubEnv("LAMBENTI_DEV_USER_ROLE", "AGENT");
+    vi.stubEnv("LAMBENTI_DEV_USER_ID", `${TEST_PREFIX}-agent`);
+    const { request, item } = await createFixture("APPROVED");
+    await prisma.item.update({ where: { id: item.id }, data: { estimatedUnitCost: 1.5 } });
+
+    await expect(convertApprovedPurchaseRequestAction(formDataFor(request.id))).rejects.toThrow(/permission/i);
+
+    await expect(prisma.purchaseOrder.count({ where: { purchaseRequestId: request.id } })).resolves.toBe(0);
+    await expect(prisma.purchaseRequest.findUniqueOrThrow({ where: { id: request.id } })).resolves.toMatchObject({
+      status: "APPROVED"
+    });
+  });
+
+  it("converts an approved request into a draft PO through the server action without receiving stock", async () => {
+    vi.stubEnv("LAMBENTI_DEV_USER_ROLE", "PURCHASING");
+    vi.stubEnv("LAMBENTI_DEV_USER_ID", `${TEST_PREFIX}-buyer`);
+    const { request, item, supplier } = await createFixture("APPROVED");
+    await prisma.item.update({ where: { id: item.id }, data: { estimatedUnitCost: 1.5 } });
+
+    await convertApprovedPurchaseRequestAction(formDataFor(request.id, { comment: "Ready to draft PO." }));
+
+    await expect(prisma.purchaseRequest.findUniqueOrThrow({ where: { id: request.id } })).resolves.toMatchObject({
+      status: "CONVERTED"
+    });
+    const order = await prisma.purchaseOrder.findFirstOrThrow({
+      where: { purchaseRequestId: request.id },
+      include: { lines: true }
+    });
+    expect(order).toMatchObject({ supplierId: supplier.id, status: "DRAFT" });
+    expect(order.lines).toHaveLength(1);
+    expect(Number(order.lines[0].unitPrice)).toBe(1.5);
+    await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(0);
+    await expect(prisma.auditLog.findFirstOrThrow({ where: { entityId: request.id, action: "CONVERT_PURCHASE_REQUEST_TO_DRAFT_PO" } })).resolves.toMatchObject({
+      actorId: `${TEST_PREFIX}-buyer`
     });
   });
 });

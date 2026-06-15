@@ -11,6 +11,12 @@ describe("Accounting invoice page action controls", () => {
 
     expect(pageSource).toContain("invoice.status === InvoiceStatus.RECEIVED");
     expect(pageSource).toContain("invoice.status === InvoiceStatus.APPROVED");
+    expect(pageSource).toContain("Evidence bundle");
+    expect(pageSource).toContain("Existing invoices:");
+    expect(pageSource).toContain("invoiceNumber");
+    expect(pageSource).toContain("paymentAllocations");
+    expect(pageSource).toContain("accountingDocuments");
+    expect(pageSource).toContain("Download");
     expect(pageSource).toContain('name="paymentReference"');
     expect(pageSource).toContain("required");
     expect(pageSource).not.toContain("invoice.status !== InvoiceStatus.PAID ?");

@@ -1,7 +1,8 @@
 import { CostConfidence } from "@prisma/client";
-import { getArchivedSupplierProfiles, getConfirmedSupplierOptions, getItemSupplierEntries, getUniqueSupplierProfiles, type SupplierProfile } from "@/modules/suppliers/service";
+import { getActiveSupplierOptions, getArchivedSupplierProfiles, getItemSupplierEntries, getUniqueSupplierProfiles, type ItemSupplierEntry, type SupplierProfile } from "@/modules/suppliers/service";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
 import { requirePermission } from "@/modules/auth/permissions";
+import { getLeadTimeSummaryIndex } from "@/modules/tracking/service";
 import { archiveSupplierAction, deleteArchivedSupplierAction, unarchiveSupplierAction, updateItemSupplierEntryAction, updateSupplierContactAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +11,12 @@ type ContactFieldName = "companyName" | "contactEmail" | "contactName" | "compan
 
 export default async function SuppliersPage() {
   await requirePermission("supplier:view");
-  const [supplierEntries, supplierProfiles, archivedSupplierProfiles, supplierOptions] = await Promise.all([
+  const [supplierEntries, supplierProfiles, archivedSupplierProfiles, supplierOptions, leadTimeSummaries] = await Promise.all([
     getItemSupplierEntries(),
     getUniqueSupplierProfiles(),
     getArchivedSupplierProfiles(),
-    getConfirmedSupplierOptions()
+    getActiveSupplierOptions(),
+    getLeadTimeSummaryIndex()
   ]);
   const costConfidences = Object.values(CostConfidence);
 
@@ -52,9 +54,12 @@ export default async function SuppliersPage() {
                     <div className="font-medium">{supplier.displayName}</div>
                     <div className="text-xs text-slate-500">Source: {supplier.sourceLabel}</div>
                     <div className="text-xs text-slate-500">Item types supplied: {itemTypes}</div>
+                    <div className="text-xs text-slate-500">
+                      Lead time: {supplier.leadTimeDays}d current · {leadTimeSummaries.bySupplierId[supplier.id]?.label ?? "No completed tracking/receiving samples yet"}
+                    </div>
                   </div>
                   <span className={supplier.confirmedByHuman ? "rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700" : "rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"}>
-                    {supplier.confirmedByHuman ? "Confirmed for item dropdown" : "Not confirmed for item dropdown"}
+                    {supplier.confirmedByHuman ? "Human-confirmed supplier record" : "Active supplier record"}
                   </span>
                 </div>
 
@@ -68,6 +73,8 @@ export default async function SuppliersPage() {
             );
           })}
         </div>
+
+        <AddNewSupplierSection supplierEntries={supplierEntries} costConfidences={costConfidences} />
 
         <details className="border-t border-slate-200 px-4 py-3">
           <summary className="cursor-pointer text-sm font-medium text-slate-700">Archived suppliers ({archivedSupplierProfiles.length})</summary>
@@ -115,7 +122,7 @@ export default async function SuppliersPage() {
                       <div className="text-xs text-slate-500">{entry.description}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <select form={formId} name="preferredSupplierId" defaultValue={entry.supplierId} className="min-w-44 rounded-md border px-2 py-1.5">
+                      <select form={formId} name="preferredSupplierId" defaultValue={entry.supplierId} className="min-w-56 rounded-md border px-2 py-1.5">
                         <option value="">Unassigned</option>
                         {options.map((supplier) => (
                           <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
@@ -155,6 +162,54 @@ export default async function SuppliersPage() {
   );
 }
 
+function AddNewSupplierSection({ supplierEntries, costConfidences }: { supplierEntries: ItemSupplierEntry[]; costConfidences: CostConfidence[] }) {
+  const defaultConfidence = costConfidences.includes(CostConfidence.UNKNOWN) ? CostConfidence.UNKNOWN : costConfidences[0];
+  const hasItems = supplierEntries.length > 0;
+
+  return (
+    <details className="border-t border-slate-200 px-4 py-3">
+      <summary className="cursor-pointer text-sm font-medium text-blue-700">Add new supplier</summary>
+      <RefreshingActionForm action={updateItemSupplierEntryAction} className="mt-3 grid gap-2 xl:grid-cols-[minmax(14rem,1.4fr)_minmax(12rem,1.2fr)_minmax(8rem,0.8fr)_minmax(7rem,0.6fr)_minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] xl:items-end">
+        <input type="hidden" name="preferredSupplierId" value="" />
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Item
+          <select name="itemId" required disabled={!hasItems} className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100 disabled:text-slate-400">
+            <option value="">{hasItems ? "Choose item" : "No active items"}</option>
+            {supplierEntries.map((entry) => (
+              <option key={entry.itemId} value={entry.itemId}>{entry.sku} — {entry.description}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Supplier
+          <input name="customSupplierName" required disabled={!hasItems} placeholder="New supplier name" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Supplier SKU
+          <input name="supplierSku" disabled={!hasItems} placeholder="Optional" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Unit price
+          <input name="estimatedUnitCost" type="number" min="0" step="0.01" disabled={!hasItems} placeholder="USD" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Confidence
+          <select name="costConfidence" defaultValue={defaultConfidence} disabled={!hasItems} className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100 disabled:text-slate-400">
+            {costConfidences.map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Source
+          <input name="costSourceRef" disabled={!hasItems} placeholder="Quote/order/ref" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
+        </label>
+        <button disabled={!hasItems} className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300">Add supplier</button>
+      </RefreshingActionForm>
+    </details>
+  );
+}
+
 function SupplierAdditionalContactDetails({ supplier }: { supplier: SupplierProfile }) {
   return (
     <details className="rounded-md border border-slate-100 bg-slate-50 p-3 text-sm">
@@ -172,15 +227,15 @@ function SupplierAdditionalContactDetails({ supplier }: { supplier: SupplierProf
 
 function ArchiveSupplierControl({ supplier }: { supplier: SupplierProfile }) {
   return (
-    <details className="inline-block max-w-full rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs">
-      <summary className="inline-flex w-fit cursor-pointer list-none rounded border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Archive supplier</summary>
-      <RefreshingActionForm action={archiveSupplierAction} className="mt-2 flex flex-col gap-2 md:flex-row md:items-end">
+    <details className="inline-block max-w-full text-xs text-slate-600">
+      <summary className="inline-flex w-fit cursor-pointer list-none rounded px-0 py-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-800">Archive supplier</summary>
+      <RefreshingActionForm action={archiveSupplierAction} className="mt-2 flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-2 md:flex-row md:items-end">
         <input type="hidden" name="supplierId" value={supplier.id} />
-        <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-amber-900">
+        <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-600">
           Archive reason
-          <input name="archiveReason" placeholder="Duplicate, test row, no longer used..." className="rounded-md border border-amber-200 bg-white px-2 py-1.5 text-sm text-slate-900" />
+          <input name="archiveReason" placeholder="Duplicate, test row, no longer used..." className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900" />
         </label>
-        <button className="self-start rounded border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Archive</button>
+        <button className="self-start rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">Archive</button>
       </RefreshingActionForm>
     </details>
   );
@@ -251,18 +306,18 @@ function SupplierContactField({
 function SupplierConfirmationField({ supplier }: { supplier: SupplierProfile }) {
   return (
     <div className="rounded-md border border-slate-100 bg-slate-50 p-3 text-sm md:col-span-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">dropdown confirmation</div>
-      <div className="mt-1 text-slate-900">{supplier.confirmedByHuman ? "Confirmed supplier for item dropdown" : "Not confirmed for item dropdown"}</div>
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">human confirmation</div>
+      <div className="mt-1 text-slate-900">{supplier.confirmedByHuman ? "Human-confirmed supplier record" : "Active supplier record, not yet marked human-confirmed"}</div>
       <details className="mt-2">
-        <summary className="cursor-pointer text-xs font-medium text-blue-700">Edit dropdown confirmation</summary>
+        <summary className="cursor-pointer text-xs font-medium text-blue-700">Edit human confirmation</summary>
         <RefreshingActionForm action={updateSupplierContactAction} className="mt-2 flex flex-col gap-2">
           <input type="hidden" name="supplierId" value={supplier.id} />
           <SupplierContactHiddenFields supplier={supplier} exclude="confirmedByHuman" />
           <label className="flex items-center gap-2">
             <input type="checkbox" name="confirmedByHuman" defaultChecked={supplier.confirmedByHuman} className="h-4 w-4 rounded border-slate-300" />
-            <span>Confirmed supplier for item dropdown</span>
+            <span>Human-confirmed supplier record</span>
           </label>
-          <button className="self-start rounded-md bg-ink px-3 py-1.5 text-xs font-medium text-white">Save dropdown confirmation</button>
+          <button className="self-start rounded-md bg-ink px-3 py-1.5 text-xs font-medium text-white">Save human confirmation</button>
         </RefreshingActionForm>
       </details>
     </div>

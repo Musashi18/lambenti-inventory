@@ -21,13 +21,17 @@ const snapshotSchema = z.object({
   subject: z.string().optional(),
   messageId: z.string().optional(),
   orderId: z.string().optional(),
+  orderStatus: z.string().optional(),
+  orderDate: z.string().optional(),
   supplierName: z.string().optional(),
+  trackingNumbers: z.array(z.string()).optional(),
+  conversationContext: z.string().optional(),
   text: z.string().min(20),
   invoiceDocuments: z.array(invoiceDocumentSchema).optional()
 });
 
 const bodySchema = z.object({
-  snapshots: z.array(snapshotSchema).min(1).max(50),
+  snapshots: z.array(snapshotSchema).min(1).max(200),
   autoApply: z.boolean().optional(),
   autoCreateInvoices: z.boolean().optional(),
   actorId: z.string().optional()

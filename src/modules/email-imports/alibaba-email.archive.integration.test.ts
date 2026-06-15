@@ -1,10 +1,67 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { CostConfidence, ItemCategory, LifecycleStatus, Prisma, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+
+import { normalizeInvoiceNumberKey } from "@/modules/accounting/invoices";
 import { archiveEmailOrderImport, applyAlibabaEmailOrderImport, deleteArchivedEmailOrderImport, getEmailOrderImports, importAlibabaEmailOrder, reassessRecentEmailOrderImports, unarchiveEmailOrderImport, updateEmailOrderImportLine } from "./alibaba-email";
 
 const TEST_PREFIX = "TEST-EMAIL-ARCHIVE";
+const PROTECTED_ITEM_SKUS = ["LED-COB-12V-3000K", "LED-COB-12V-6500K"] as const;
+
+type ProtectedItemSnapshot = {
+  id: string;
+  sku: string;
+  manufacturerPartNo: string | null;
+  supplierSku: string | null;
+  preferredSupplierId: string | null;
+  estimatedUnitCost: Prisma.Decimal | null;
+  costCurrency: string;
+  costConfidence: CostConfidence;
+  costSourceRef: string | null;
+};
+
+let protectedItemSnapshots: ProtectedItemSnapshot[] = [];
+
+async function captureProtectedItemSnapshots() {
+  protectedItemSnapshots = await prisma.item.findMany({
+    where: { sku: { in: [...PROTECTED_ITEM_SKUS] } },
+    select: {
+      id: true,
+      sku: true,
+      manufacturerPartNo: true,
+      supplierSku: true,
+      preferredSupplierId: true,
+      estimatedUnitCost: true,
+      costCurrency: true,
+      costConfidence: true,
+      costSourceRef: true
+    }
+  });
+}
+
+async function restoreProtectedItemSnapshots() {
+  for (const item of protectedItemSnapshots) {
+    const preferredSupplierStillExists = item.preferredSupplierId
+      ? await prisma.supplier.findUnique({ where: { id: item.preferredSupplierId }, select: { id: true } })
+      : null;
+
+    await prisma.item.updateMany({
+      where: { id: item.id },
+      data: {
+        manufacturerPartNo: item.manufacturerPartNo,
+        supplierSku: item.supplierSku,
+        preferredSupplierId: preferredSupplierStillExists ? item.preferredSupplierId : null,
+        estimatedUnitCost: item.estimatedUnitCost,
+        costCurrency: item.costCurrency,
+        costConfidence: item.costConfidence,
+        costSourceRef: item.costSourceRef
+      }
+    });
+  }
+}
 
 async function cleanup() {
+  await restoreProtectedItemSnapshots();
   const suppliers = await prisma.supplier.findMany({
     where: {
       OR: [
@@ -53,7 +110,22 @@ async function cleanup() {
     await prisma.purchaseOrder.deleteMany({ where: { id: { in: purchaseOrderIds } } });
   }
 
+  const testItems = await prisma.item.findMany({
+    where: { sku: { startsWith: TEST_PREFIX } },
+    select: { id: true }
+  });
+  const itemIds = testItems.map((item) => item.id);
+  if (itemIds.length > 0) {
+    await prisma.supplierOffer.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.stockMovement.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.stockLot.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.purchaseOrderLine.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.purchaseRequestLine.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.item.deleteMany({ where: { id: { in: itemIds } } });
+  }
+
   await prisma.auditLog.deleteMany({ where: { actorId: { startsWith: TEST_PREFIX } } });
+  await prisma.storageLocation.deleteMany({ where: { code: { startsWith: TEST_PREFIX } } });
   await prisma.supplier.deleteMany({
     where: {
       OR: [
@@ -65,8 +137,11 @@ async function cleanup() {
   });
 }
 
+
 describe("email order import archive and dedupe workflow", () => {
+  beforeAll(captureProtectedItemSnapshots);
   beforeEach(cleanup);
+  afterEach(cleanup);
   afterAll(cleanup);
 
   it("hides ignored archived order emails by default while keeping them accessible", async () => {
@@ -188,6 +263,42 @@ LED-COB-12V-3000K, LED strip warm white, 3, 2.00, 6.00
     expect(csv.import.source).toBe("MANUAL_CSV_IMPORT");
   });
 
+  it("keeps tracking-only Alibaba portal message snapshots out of the active Order Email Agent queue", async () => {
+    const suffix = `${Date.now()}`;
+    const actionableOrderId = `${TEST_PREFIX}-VISIBLE-${suffix}`;
+    const hidden = await prisma.emailOrderImport.create({
+      data: {
+        source: "ALIBABA_PORTAL",
+        sourceHash: `${TEST_PREFIX}-TRACKING-ONLY-${suffix}`,
+        sourceMessageId: `<alibaba-portal:message:${TEST_PREFIX}-${suffix}>`,
+        sourceUrl: `https://message.alibaba.com/message/messenger.htm?thread=${TEST_PREFIX}-${suffix}`,
+        subject: `Alibaba portal message thread ${TEST_PREFIX}`,
+        rawText: `Source: Alibaba portal\nSubject: Alibaba portal message thread ${TEST_PREFIX}\nTracking Number: 7321315589070429\nConversation context: shipment started`,
+        supplierName: "Send order request",
+        confidence: "ESTIMATED",
+        status: "NEEDS_REVIEW",
+        lines: {
+          create: [{ lineNo: 1, rawDescription: "Unparsed order email line", quantity: 1, currency: "USD", matchConfidence: "UNMATCHED" }]
+        }
+      }
+    });
+    const actionable = await importAlibabaEmailOrder({
+      actorId: `${TEST_PREFIX}-actor`,
+      autoApply: false,
+      rawText: `
+Subject: Supplier order ${actionableOrderId}
+Order ID: ${actionableOrderId}
+Supplier: ${TEST_PREFIX} Visible Supplier
+Product: LED-COB-12V-3000K qty 2 unit price USD 1.25 total USD 2.50
+Total: USD 2.50
+`
+    });
+
+    const visible = await getEmailOrderImports();
+    expect(visible.some((item) => item.id === hidden.id)).toBe(false);
+    expect(visible.some((item) => item.id === actionable.import.id)).toBe(true);
+  });
+
   it("keeps partially matched auto-applied multi-line emails editable instead of creating partial purchase orders", async () => {
     const orderId = `${TEST_PREFIX}-PARTIAL-${Date.now()}`;
 
@@ -291,11 +402,151 @@ Total: USD 2.50
 
     const purchaseOrders = await prisma.purchaseOrder.findMany({
       where: { supplierId: applied.supplierId! },
-      include: { invoice: true }
+      include: { invoices: true }
     });
     expect(purchaseOrders).toHaveLength(1);
     expect(purchaseOrders[0].id).toBe(applied.purchaseOrderId);
     expect(await prisma.supplierInvoice.count({ where: { purchaseOrderId: applied.purchaseOrderId! } })).toBe(1);
+  });
+
+  it("preserves a manually selected preferred supplier when applying an email order from another supplier", async () => {
+    const suffix = Date.now();
+    const orderId = `${TEST_PREFIX}-PRESERVE-MANUAL-SUPPLIER-${suffix}`;
+    const storageLocation = await prisma.storageLocation.create({
+      data: { code: `${TEST_PREFIX}-PRESERVE-${suffix}`, name: `${TEST_PREFIX} preserve supplier fixture` }
+    });
+    const manualSupplier = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Manual Preferred Supplier ${suffix}`,
+        companyName: `${TEST_PREFIX} Manual Preferred Supplier ${suffix}`,
+        confirmedByHuman: true,
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 4.5
+      }
+    });
+    const emailSupplierName = `${TEST_PREFIX} Email Order Supplier ${suffix}`;
+    const item = await prisma.item.create({
+      data: {
+        sku: `${TEST_PREFIX}-PRESERVE-SUPPLIER-ITEM-${suffix}`,
+        description: "Test-only LED strip whose manually selected supplier must survive email apply",
+        category: ItemCategory.COMPONENT,
+        unit: Unit.EACH,
+        reorderPoint: 0,
+        targetStock: 0,
+        leadTimeDays: 0,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        storageLocationId: storageLocation.id,
+        preferredSupplierId: manualSupplier.id,
+        estimatedUnitCost: 1.11,
+        costCurrency: "USD",
+        costConfidence: CostConfidence.CONFIRMED,
+        costSourceRef: "Manual operator supplier assignment"
+      }
+    });
+
+    const imported = await importAlibabaEmailOrder({
+      actorId: `${TEST_PREFIX}-actor`,
+      autoApply: true,
+      autoCreateInvoice: false,
+      rawText: `
+Subject: Supplier order ${orderId}
+Order ID: ${orderId}
+Supplier: ${emailSupplierName}
+Product: ${item.sku} qty 2 unit price USD 1.25 total USD 2.50
+Total: USD 2.50
+`
+    });
+
+    expect(imported.purchaseOrder?.supplierId).not.toBe(manualSupplier.id);
+    const updated = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.preferredSupplierId).toBe(manualSupplier.id);
+    expect(updated.costSourceRef).toContain(orderId);
+  });
+
+  it("preserves a manually selected preferred supplier when reassessing an already-applied email order", async () => {
+    const suffix = Date.now();
+    const orderId = `${TEST_PREFIX}-PRESERVE-REASSESS-SUPPLIER-${suffix}`;
+    const storageLocation = await prisma.storageLocation.create({
+      data: { code: `${TEST_PREFIX}-PRESERVE-REASSESS-${suffix}`, name: `${TEST_PREFIX} preserve reassess supplier fixture` }
+    });
+    const manualSupplier = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Manual Reassess Supplier ${suffix}`,
+        companyName: `${TEST_PREFIX} Manual Reassess Supplier ${suffix}`,
+        confirmedByHuman: true,
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 4.5
+      }
+    });
+    const emailSupplier = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Applied Reassess Supplier ${suffix}`,
+        moq: 1,
+        leadTimeDays: 21,
+        shippingCost: 0,
+        reliabilityScore: 3
+      }
+    });
+    const item = await prisma.item.create({
+      data: {
+        sku: `${TEST_PREFIX}-PRESERVE-REASSESS-ITEM-${suffix}`,
+        description: "Test-only LED strip whose manual supplier must survive reassessment",
+        category: ItemCategory.COMPONENT,
+        unit: Unit.EACH,
+        reorderPoint: 0,
+        targetStock: 0,
+        leadTimeDays: 0,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        storageLocationId: storageLocation.id,
+        preferredSupplierId: manualSupplier.id,
+        estimatedUnitCost: 1.11,
+        costCurrency: "USD",
+        costConfidence: CostConfidence.CONFIRMED,
+        costSourceRef: "Manual operator supplier assignment"
+      }
+    });
+    const purchaseOrder = await prisma.purchaseOrder.create({
+      data: {
+        supplierId: emailSupplier.id,
+        status: "ORDERED",
+        lines: { create: [{ itemId: item.id, quantity: 1, unitPrice: 1.1 }] }
+      }
+    });
+    await prisma.emailOrderImport.create({
+      data: {
+        sourceHash: `${TEST_PREFIX}-${orderId}-stale-applied`,
+        subject: `Supplier order ${orderId}`,
+        rawText: `
+Subject: Supplier order ${orderId}
+Order ID: ${orderId}
+Supplier: ${emailSupplier.name}
+Product: ${item.sku} qty 3 unit price USD 1.25 total USD 3.75
+Total: USD 3.75
+`,
+        externalOrderId: orderId,
+        supplierName: emailSupplier.name,
+        supplierId: emailSupplier.id,
+        purchaseOrderId: purchaseOrder.id,
+        currency: "USD",
+        totalCost: 3.75,
+        confidence: CostConfidence.CONFIRMED,
+        status: "APPLIED",
+        lines: {
+          create: [{ lineNo: 1, rawDescription: item.sku, quantity: 1, unitPrice: 1.1, lineTotal: 1.1, currency: "USD", matchedItemId: item.id, matchConfidence: "SKU" }]
+        }
+      }
+    });
+
+    const result = await reassessRecentEmailOrderImports(`${TEST_PREFIX}-actor`);
+
+    expect(result.refreshed).toBeGreaterThanOrEqual(1);
+    const updated = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
+    expect(updated.preferredSupplierId).toBe(manualSupplier.id);
+    expect(updated.costSourceRef).toContain(orderId);
   });
 
   it("keeps auto-applied imports with unsupported currencies in review instead of storing them as USD", async () => {
@@ -484,9 +735,11 @@ Order summary (2 items) View details Item subtotal USD 136.00 Shipping fee USD 3
         lines: { create: [{ itemId: warmItem.id, quantity: 50, unitPrice: 0.7 }] }
       }
     });
+    const invoiceNumber = `${TEST_PREFIX}-LED-${Date.now()}`;
     await prisma.supplierInvoice.create({
       data: {
-        invoiceNumber: `${TEST_PREFIX}-LED-${Date.now()}`,
+        invoiceNumber,
+        invoiceNumberKey: normalizeInvoiceNumberKey(invoiceNumber),
         supplierId: supplier.id,
         purchaseOrderId: purchaseOrder.id,
         status: "RECEIVED",
@@ -537,7 +790,7 @@ Order summary (2 items) View details Item subtotal USD 136.00 Shipping fee USD 3
       include: { item: true },
       orderBy: { item: { sku: "asc" } }
     });
-    const invoice = await prisma.supplierInvoice.findUniqueOrThrow({
+    const invoice = await prisma.supplierInvoice.findFirstOrThrow({
       where: { purchaseOrderId: purchaseOrder.id },
       include: { lines: { include: { item: true }, orderBy: { description: "asc" } } }
     });

@@ -13,7 +13,9 @@ describe("DashboardPage source contract", () => {
     expect(source).toContain("summary.stockItems");
     expect(source).toContain("Components on hand");
     expect(source).toContain("Build capacity");
-    expect(source).toContain("components required per finished build");
+    expect(source).toContain("bottleneck");
+    expect(source).not.toContain("total BOM quantity per assembled package");
+    expect(source).not.toContain("componentsRequiredPerBuild");
     expect(source).toContain("Assembled packages");
     expect(source).toContain("USD $");
     expect(source).not.toContain("Total available");

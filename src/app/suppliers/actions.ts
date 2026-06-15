@@ -20,6 +20,7 @@ const supplierContactSchema = z.object({
 const itemSupplierEntrySchema = z.object({
   itemId: z.string().min(1),
   preferredSupplierId: optionalString(),
+  customSupplierName: optionalString(),
   supplierSku: optionalString(),
   estimatedUnitCost: optionalNumber(),
   costConfidence: z.nativeEnum(CostConfidence),
@@ -68,6 +69,7 @@ export async function updateItemSupplierEntryAction(formData: FormData) {
   const parsed = itemSupplierEntrySchema.safeParse({
     itemId: getString(formData, "itemId"),
     preferredSupplierId: getString(formData, "preferredSupplierId"),
+    customSupplierName: getString(formData, "customSupplierName"),
     supplierSku: getString(formData, "supplierSku"),
     estimatedUnitCost: getString(formData, "estimatedUnitCost"),
     costConfidence: getString(formData, "costConfidence"),

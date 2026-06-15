@@ -1,5 +1,6 @@
 import { createInvoiceFromPurchaseOrder } from "@/modules/accounting/invoices";
 import { importAlibabaEmailOrder } from "@/modules/email-imports/alibaba-email";
+import { captureTrackingNumbersFromPortalSnapshot } from "@/modules/tracking/service";
 import {
   AlibabaPortalInvoiceDocument,
   AlibabaPortalSnapshot,
@@ -48,7 +49,13 @@ export async function importAlibabaPortalSnapshot(input: AlibabaPortalImportInpu
       })
     : null;
 
-  return { ...imported, invoice };
+  const tracking = await captureTrackingNumbersFromPortalSnapshot({
+    snapshot: input.snapshot,
+    actorId: input.actorId,
+    emailOrderImportId: imported.import.id
+  });
+
+  return { ...imported, invoice, tracking };
 }
 
 export async function importAlibabaPortalSnapshots(input: AlibabaPortalBatchImportInput) {
