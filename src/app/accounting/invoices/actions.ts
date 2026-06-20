@@ -3,7 +3,7 @@
 import { InvoiceStatus } from "@prisma/client";
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import { requirePermission } from "@/modules/auth/permissions";
-import { createInvoiceFromPurchaseOrder, updateInvoiceStatus } from "@/modules/accounting/invoices";
+import { createInvoiceFromPurchaseOrder, updateInvoiceStatus, updateSupplierInvoiceTerms, voidDuplicateInvoiceCluster } from "@/modules/accounting/invoices";
 
 export async function createInvoiceFromPurchaseOrderAction(formData: FormData) {
   const purchaseOrderId = formData.get("purchaseOrderId");
@@ -53,6 +53,34 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   return { ok: true, message: `Supplier invoice ${invoice.invoiceNumber} is now ${invoice.status}.` };
 }
 
+export async function updateInvoiceTermsAction(formData: FormData) {
+  const invoiceId = optionalString(formData.get("invoiceId"));
+  if (!invoiceId) throw new Error("Missing invoice id.");
+  const dueDateText = optionalString(formData.get("dueDate"));
+  if (!dueDateText) throw new Error("Due date is required.");
+  const dueDate = parseDateField(dueDateText, "Due date");
+  const actor = await requirePermission("invoice:create");
+  const invoice = await updateSupplierInvoiceTerms({ invoiceId, dueDate, actor, notes: optionalString(formData.get("notes")) });
+  revalidateWorkspace(["/accounting", "/accounting/invoices", "/accounting/payments"]);
+  return { ok: true, message: `Supplier invoice ${invoice.invoiceNumber} due date saved.` };
+}
+
+export async function voidDuplicateInvoiceClusterAction(formData: FormData) {
+  const clusterKey = optionalString(formData.get("clusterKey"));
+  const keepInvoiceId = optionalString(formData.get("keepInvoiceId"));
+  if (!clusterKey) throw new Error("Missing duplicate invoice cluster key.");
+  if (!keepInvoiceId) throw new Error("Missing invoice to keep.");
+  const actor = await requirePermission("invoice:approve");
+  const result = await voidDuplicateInvoiceCluster({
+    clusterKey,
+    keepInvoiceId,
+    actor,
+    voidReason: optionalString(formData.get("voidReason"))
+  });
+  revalidateWorkspace(["/accounting", "/accounting/invoices", "/accounting/payments"]);
+  return { ok: true, message: `Voided ${result.voidedCount} duplicate supplier invoice(s); kept ${result.keptInvoiceId}.` };
+}
+
 function optionalString(value: FormDataEntryValue | null) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
@@ -62,4 +90,10 @@ function optionalNumber(value: FormDataEntryValue | null) {
   if (!text) return undefined;
   const parsed = Number(text);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseDateField(value: string, label: string) {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`${label} is invalid.`);
+  return parsed;
 }

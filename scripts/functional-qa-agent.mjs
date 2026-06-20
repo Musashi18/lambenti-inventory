@@ -44,19 +44,28 @@ let trackingItemSnapshot = null;
 let finalExitCode = 0;
 
 const pageRoutes = [
-  ["/", "Operations dashboard"],
-  ["/", "Human approval queue"],
-  ["/inventory/items", "Inventory items"],
-  ["/inventory/movements", "Stock movement history"],
+  ["/", "Operations Dashboard"],
+  ["/", "Human Approval Queue"],
+  ["/inventory/items", "Inventory Items"],
+  ["/inventory/movements", "Stock Movement History"],
+  ["/inventory/valuation", "Inventory Valuation"],
   ["/suppliers", "Suppliers"],
-  ["/purchasing/recommendations", "Purchase recommendations"],
-  ["/purchasing/requests", "Purchase request approvals"],
-  ["/boms", "BOM builder"],
-  ["/incoming", "Incoming inventory tracker"],
-  ["/inventory/valuation", "Inventory valuation"],
-  ["/accounting/invoices", "Accounting invoices"],
+  ["/purchasing/recommendations", "Purchase Recommendations"],
+  ["/purchasing/requests", "Purchase Request Approvals"],
+  ["/boms", "BOM Builder"],
+  ["/incoming", "Incoming / Receiving"],
   ["/integrations/email-import", "Order Email Agent"],
-  ["/integrations/alibaba-email", "Order Email Agent"]
+  ["/integrations/alibaba-email", "Order Email Agent"],
+  ["/automation", "Manual Safe Automation"],
+  ["/tracking", "Tracking Workbench"],
+  ["/accounting", "Accounting Workbench"],
+  ["/accounting/accounts", "GL Account Mapping"],
+  ["/accounting/customer-invoices", "Customer Invoices / AR"],
+  ["/accounting/exports", "GST/HST Exports"],
+  ["/accounting/invoices", "Accounting Invoices"],
+  ["/accounting/journals", "Journal Entries"],
+  ["/accounting/landed-cost", "Landed-Cost Allocation"],
+  ["/accounting/payments", "Payment Reconciliation"]
 ];
 
 const apiRoutes = [
@@ -384,7 +393,7 @@ async function waitForDb(predicate, timeoutMs = 10000) {
 }
 
 async function fillCreateItemForm(page, sku, description) {
-  const form = page.locator("form", { has: page.getByRole("button", { name: /Create item/i }) }).first();
+  const form = page.locator("form", { has: page.getByRole("button", { name: /Create Item/i }) }).first();
   await form.locator('input[name="sku"]').fill(sku);
   await form.locator('input[name="manufacturerPartNo"]').fill("TEST-MPN");
   await form.locator('input[name="supplierSku"]').fill("TEST-SUPPLIER-SKU");
@@ -418,17 +427,17 @@ async function verifyItemCreateDuplicateEditFlow(baseUrl) {
   const editedDescription = `${initialDescription} edited`;
 
   await page.goto(routeUrl(baseUrl, "/inventory/items"), { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: /Inventory items/i }).waitFor({ timeout: 10000 });
+  await page.getByRole("heading", { name: /Inventory Items/i }).waitFor({ timeout: 10000 });
 
   await fillCreateItemForm(page, createdSku, initialDescription);
-  await page.getByRole("button", { name: /Create item/i }).click();
+  await page.getByRole("button", { name: /Create Item/i }).click();
   await page.getByText(`Created item ${createdSku}`, { exact: false }).waitFor({ timeout: 15000 });
 
   const created = await waitForDb(() => getPrisma().item.findUnique({ where: { sku: createdSku } }));
   createdItemId = created.id;
 
   await fillCreateItemForm(page, createdSku, initialDescription);
-  await page.getByRole("button", { name: /Create item/i }).click();
+  await page.getByRole("button", { name: /Create Item/i }).click();
   await page.getByText(/That SKU already exists/i).waitFor({ timeout: 15000 });
   const duplicateCount = await getPrisma().item.count({ where: { sku: createdSku } });
   if (duplicateCount !== 1) throw new Error(`Duplicate SKU flow created ${duplicateCount} records instead of 1.`);
@@ -438,7 +447,7 @@ async function verifyItemCreateDuplicateEditFlow(baseUrl) {
   const dialog = page.locator("dialog[open]").first();
   await dialog.waitFor({ timeout: 10000 });
   await dialog.locator('input[name="description"]').fill(editedDescription);
-  await dialog.getByRole("button", { name: /Save changes/i }).click();
+  await dialog.getByRole("button", { name: /Save Changes/i }).click();
 
   const edited = await waitForDb(async () => {
     const item = await getPrisma().item.findUnique({ where: { sku: createdSku } });

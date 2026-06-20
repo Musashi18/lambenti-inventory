@@ -37,8 +37,8 @@ const receiveIncomingSchema = z.object({
   lotCode: requiredString("Enter the lot or packing slip code."),
   receivedAt: requiredString("Enter the physical receipt date."),
   unitCost: z.coerce.number({ invalid_type_error: "Enter a numeric unit cost." })
-    .finite("Unit cost must be a finite number.")
-    .nonnegative("Unit cost cannot be negative."),
+    .finite("Unit Cost must be a finite number.")
+    .nonnegative("Unit Cost cannot be negative."),
   currency: z.preprocess(
     (value) => (typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "USD"),
     z.string().regex(/^[A-Z]{3}$/, "Use a 3-letter currency code such as USD or CAD.")

@@ -63,5 +63,6 @@ This repository is Lambenti's operational inventory, purchasing, landed-cost, su
 - Use `systematic-debugging` for regressions and production-only errors.
 - Use `test-driven-development` when adding business logic or bugfix coverage.
 - Keep durable procedures in skills; keep operational facts in the database.
+- For durable Lambenti knowledge/rationale that should be retrievable but not always injected, use the local memory vault at `C:/Users/musas/LambentiMemoryVault` via the `lambenti-memory-vault-operator` skill and `scripts/search_memory.py`.
 - Use session search for prior conversation context instead of asking the user to repeat old decisions.
 - See `docs/hermes-two-tier-orchestration.md` for the local-worker diagnostics and routing details.

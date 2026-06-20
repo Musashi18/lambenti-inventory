@@ -27,7 +27,7 @@ export function AutomationScanControls({
       await action();
       router.refresh();
       window.location.reload();
-      setMessage("Scan complete. Recent automation runs and findings were refreshed.");
+      setMessage("Scan complete. Recent Automation Runs and findings were refreshed.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Scan failed. Refresh and try again.");
     } finally {
@@ -39,7 +39,7 @@ export function AutomationScanControls({
     <div className="mt-4 space-y-3">
       <div className="flex flex-wrap gap-3">
         <ScanButton
-          label="Run reorder scan"
+          label="Run Reorder Scan"
           pendingLabel="Scanning reorder…"
           variant="primary"
           pending={runningScan === "reorder"}
@@ -47,7 +47,7 @@ export function AutomationScanControls({
           onClick={() => void runScan("reorder", runStockReorderScanAction)}
         />
         <ScanButton
-          label="Run anomaly scan"
+          label="Run Anomaly Scan"
           pendingLabel="Scanning anomalies…"
           pending={runningScan === "anomaly"}
           disabled={runningScan !== null}

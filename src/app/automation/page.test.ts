@@ -11,8 +11,8 @@ describe("Automation page refresh source contract", () => {
     const controlsSource = readFileSync(join(__dirname, "automation-scan-controls.tsx"), "utf8");
 
     expect(pageSource).toContain("AutomationScanControls");
-    expect(pageSource).toContain("Create draft PR");
-    expect(pageSource).toContain("Dismiss finding");
+    expect(pageSource).toContain("Create Draft PR");
+    expect(pageSource).toContain("Dismiss Finding");
     expect(pageSource).toContain("Open item");
     expect(controlsSource).toContain("useRouter");
     expect(controlsSource).toContain("router.refresh()");

@@ -9,6 +9,7 @@ vi.mock("@/modules/auth/permissions", () => ({
 }));
 
 vi.mock("@/modules/suppliers/service", () => ({
+  archiveSupplierCleanupCandidates: vi.fn(async () => ({ archivedCount: 2, candidates: [] })),
   archiveSupplierProfile: vi.fn(),
   deleteArchivedSupplier: vi.fn(async () => {
     throw new Error("Archived supplier has historical purchasing or email records and cannot be hard-deleted. Keep it archived instead.");
@@ -18,7 +19,7 @@ vi.mock("@/modules/suppliers/service", () => ({
   updateSupplierContactProfile: vi.fn()
 }));
 
-import { deleteArchivedSupplierAction } from "./actions";
+import { archiveSupplierCleanupCandidatesAction, deleteArchivedSupplierAction } from "./actions";
 
 describe("supplier server actions", () => {
   it("returns an inline failure instead of throwing a production server-component digest when archived delete is blocked", async () => {
@@ -29,5 +30,12 @@ describe("supplier server actions", () => {
 
     expect(result).toMatchObject({ success: false });
     expect(result.message).toMatch(/historical purchasing or email records/i);
+  });
+
+  it("archives cleanup candidates through a human-gated supplier edit action", async () => {
+    const result = await archiveSupplierCleanupCandidatesAction();
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.message).toMatch(/Archived 2 supplier cleanup candidate/);
   });
 });

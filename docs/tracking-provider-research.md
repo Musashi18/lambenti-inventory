@@ -33,7 +33,7 @@ Why Ship24 fits Lambenti now:
 
 ```bash
 LAMBENTI_TRACKING_STATUS_PROVIDER="SHIP24"
-LAMBENTI_TRACKING_STATUS_AUTH_TOKEN="<ship24-api-key>"
+LAMBENTI_TRACKING_STATUS_AUTH_TOKEN=<ship24-api-key>
 LAMBENTI_TRACKING_SHIP24_BASE_URL="https://api.ship24.com"
 LAMBENTI_TRACKING_DESTINATION_COUNTRY_CODE="CA"
 LAMBENTI_TRACKING_REFRESH_INTERVAL_MINUTES="240"
@@ -42,7 +42,7 @@ LAMBENTI_TRACKING_REFRESH_INTERVAL_MINUTES="240"
 Optional non-loopback scheduler/API secret:
 
 ```bash
-LAMBENTI_TRACKING_AGENT_SECRET="<random-local-secret>"
+LAMBENTI_TRACKING_AGENT_SECRET=<random-local-secret>
 ```
 
 5. Restart the local app so env changes are loaded.

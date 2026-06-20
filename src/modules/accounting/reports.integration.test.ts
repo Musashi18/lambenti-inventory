@@ -1,14 +1,18 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { GLAccountType, InvoiceStatus, ItemCategory, Unit } from "@prisma/client";
+import { AccountingDocumentStatus, GLAccountType, InvoiceStatus, ItemCategory, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeInvoiceNumberKey } from "./invoices";
 import { formatGstHstCsv, getGstHstExportRows } from "./tax";
-import { getLandedCostRows, formatLandedCostCsv } from "./landed-cost";
+import { getLandedCostRows, formatLandedCostCsv, getItemLandedCostIndex } from "./landed-cost";
 import { resolveInvoiceLineAccount, upsertGLAccount, upsertGLMapping } from "./gl";
 
 const TEST_PREFIX = "TEST-ACCOUNTING-REPORT";
 
 async function cleanupTestData() {
+  const documents = await prisma.accountingDocument.findMany({ where: { originalFileName: { startsWith: TEST_PREFIX } }, select: { id: true } });
+  const documentIds = documents.map((document) => document.id);
+  if (documentIds.length > 0) await prisma.accountingDocument.deleteMany({ where: { id: { in: documentIds } } });
+
   const invoices = await prisma.supplierInvoice.findMany({ where: { invoiceNumber: { startsWith: TEST_PREFIX } }, select: { id: true } });
   const invoiceIds = invoices.map((invoice) => invoice.id);
   const accounts = await prisma.gLAccount.findMany({ where: { code: { startsWith: TEST_PREFIX } }, select: { id: true } });
@@ -176,7 +180,37 @@ describe("accounting GST/HST export, GL mapping, and landed-cost reporting", () 
   });
 
   it("reports landed-cost allocations while excluding recoverable GST/HST from inventory cost", async () => {
-    const { invoice } = await createInvoiceFixture("LANDED", { recoverableTax: 5, nonRecoverableTax: 2 });
+    const { invoice, firstItem } = await createInvoiceFixture("LANDED", { recoverableTax: 5, nonRecoverableTax: 2 });
+    await prisma.accountingDocument.create({
+      data: {
+        source: "TEST",
+        sourceKind: "PDF",
+        originalFileName: `${TEST_PREFIX}-LANDED-CUSTOMS.pdf`,
+        storedPath: `var/accounting-documents/${TEST_PREFIX}-LANDED-CUSTOMS.pdf`,
+        sha256: `${TEST_PREFIX}-LANDED-CUSTOMS-HASH`,
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        extractedText: "Payment Receipt\nWe have charged 80.74 CAD to your account.\nCanada Customs FEE AMOUNT (CAD) CUSTOMS DUTIES 24.63 FedEx Clearance Service Fees 43.23 TOTAL 80.74",
+        analysisJson: {
+          schemaVersion: "accounting-document-v1",
+          classification: "PAYMENT_RECEIPT",
+          direction: "AP",
+          currency: "CAD",
+          lineCount: 0,
+          lines: [],
+          confidence: "MEDIUM",
+          requiredReview: [],
+          suggestedActions: [],
+          sourceDocumentRequirements: [],
+          canadianAccountingNotes: [],
+          duplicateKeys: []
+        },
+        status: AccountingDocumentStatus.ATTACHED,
+        supplierId: invoice.supplierId,
+        purchaseOrderId: invoice.purchaseOrderId,
+        supplierInvoiceId: invoice.id
+      }
+    });
     const stockMovementCountBefore = await prisma.stockMovement.count();
 
     const rows = await getLandedCostRows({ from: new Date("2026-06-01T00:00:00.000Z"), to: new Date("2026-06-30T23:59:59.999Z") });
@@ -188,14 +222,21 @@ describe("accounting GST/HST export, GL mapping, and landed-cost reporting", () 
     const allocatedDuty = invoiceRows.reduce((total, row) => total + row.allocatedDuty, 0);
     const allocatedBrokerage = invoiceRows.reduce((total, row) => total + row.allocatedBrokerage, 0);
     const allocatedNonRecoverableTax = invoiceRows.reduce((total, row) => total + row.allocatedNonRecoverableTax, 0);
+    const allocatedAttachedEvidence = invoiceRows.reduce((total, row) => total + row.allocatedAttachedLandedCostEvidence, 0);
+    const landedTotal = invoiceRows.reduce((total, row) => total + row.landedTotal, 0);
     const recoverableExcluded = invoiceRows.reduce((total, row) => total + row.recoverableTaxExcluded, 0);
 
     expect(allocatedShipping).toBeCloseTo(20, 2);
     expect(allocatedDuty).toBeCloseTo(6, 2);
     expect(allocatedBrokerage).toBeCloseTo(4, 2);
     expect(allocatedNonRecoverableTax).toBeCloseTo(2, 2);
+    expect(allocatedAttachedEvidence).toBeCloseTo(60.55, 2);
+    expect(landedTotal).toBeCloseTo(192.55, 2);
+    expect(invoiceRows[0].attachedLandedCostEvidenceRefs.join(" ")).toContain("LANDED-CUSTOMS");
+    const itemCostIndex = await getItemLandedCostIndex({ from: new Date("2026-06-01T00:00:00.000Z"), to: new Date("2026-06-30T23:59:59.999Z") });
+    expect(itemCostIndex.get(firstItem.id)?.landedUnitCost).toBeCloseTo(invoiceRows.find((row) => row.itemId === firstItem.id)!.landedUnitCost, 4);
     expect(recoverableExcluded).toBeCloseTo(5, 2);
-    expect(csv).toContain("landedUnitCost");
+    expect(csv).toContain("allocatedAttachedLandedCostEvidence");
     await expect(prisma.stockMovement.count()).resolves.toBe(stockMovementCountBefore);
   });
 });

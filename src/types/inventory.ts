@@ -2,6 +2,7 @@ export type StockSummary = {
   itemId: string;
   sku: string;
   description: string;
+  category?: string | null;
   reorderPoint: number;
   targetStock: number;
   onHand: number;
@@ -12,6 +13,8 @@ export type StockSummary = {
 export type ShortageSummary = {
   itemId: string;
   sku: string;
+  description: string;
+  category?: string | null;
   demand: number;
   available: number;
   shortage: number;

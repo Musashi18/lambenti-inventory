@@ -37,6 +37,268 @@ export function normalizeInvoiceNumberKey(invoiceNumber: string) {
   return invoiceNumber.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
+export type InvoiceWorkQueueInput = {
+  id: string;
+  invoiceNumber: string;
+  status: InvoiceStatus | string;
+  currency: string;
+  total: Prisma.Decimal.Value | number;
+  dueDate: Date | null;
+  invoiceDate: Date;
+  supplier: { name: string };
+  sourceDocumentPath?: string | null;
+  sourceDocumentHash?: string | null;
+  externalSourceUrl?: string | null;
+  accountingDocuments?: Array<{ id: string }>;
+  paymentAllocations?: Array<{ amount: Prisma.Decimal.Value | number }>;
+  journalEntries?: Array<{ id: string }>;
+};
+
+export type InvoiceWorkQueueRow = {
+  id: string;
+  invoiceNumber: string;
+  supplierName: string;
+  status: string;
+  currency: string;
+  openBalance: number;
+  dueDate: string | null;
+  dueLabel: string;
+  evidenceCount: number;
+  evidenceReady: boolean;
+  journalCount: number;
+  nextAction: string;
+  warnings: string[];
+};
+
+export type InvoiceWorkQueueSummary = {
+  openCount: number;
+  receivedCount: number;
+  approvalReadyCount: number;
+  approvalBlockedCount: number;
+  missingEvidenceCount: number;
+  missingDueDateCount: number;
+  approvedAwaitingPaymentCount: number;
+  paidCount: number;
+  openTotal: number;
+  rows: InvoiceWorkQueueRow[];
+  approvalQueue: InvoiceWorkQueueRow[];
+  approvalReadyQueue: InvoiceWorkQueueRow[];
+  approvalBlockedQueue: InvoiceWorkQueueRow[];
+  paymentQueue: InvoiceWorkQueueRow[];
+};
+
+export type InvoiceDuplicateClusterInput = {
+  id: string;
+  invoiceNumber: string;
+  supplierId: string;
+  supplier: { name: string };
+  purchaseOrderId: string | null;
+  status: InvoiceStatus | string;
+  currency: string;
+  total: Prisma.Decimal.Value | number;
+  createdAt: Date;
+  sourceDocumentHash?: string | null;
+  externalSourceUrl?: string | null;
+  paymentAllocations?: Array<{ id?: string }>;
+  journalEntries?: Array<{ id?: string }>;
+  accountingDocuments?: Array<{ id?: string }>;
+};
+
+export type InvoiceDuplicateCluster = {
+  key: string;
+  supplierName: string;
+  purchaseOrderId: string | null;
+  status: string;
+  currency: string;
+  total: number;
+  invoiceCount: number;
+  duplicateCount: number;
+  canonicalInvoiceId: string;
+  invoiceNumbers: string[];
+  duplicateInvoiceIds: string[];
+  canVoidDuplicates: boolean;
+  blockReason: string | null;
+  amountAtRisk: number;
+};
+
+export function summarizeInvoiceWorkQueue(invoices: InvoiceWorkQueueInput[], now = new Date()): InvoiceWorkQueueSummary {
+  const rows = invoices.map((invoice) => invoiceWorkQueueRow(invoice, now));
+  const openRows = rows.filter((row) => row.status === InvoiceStatus.RECEIVED || row.status === InvoiceStatus.APPROVED);
+  const receivedRows = rows.filter((row) => row.status === InvoiceStatus.RECEIVED);
+  const approvedRows = rows.filter((row) => row.status === InvoiceStatus.APPROVED);
+  const sortedReceivedRows = [...receivedRows].sort(compareInvoiceWorkRows);
+  const approvalReadyRows = sortedReceivedRows.filter((row) => row.warnings.length === 0);
+  const approvalBlockedRows = sortedReceivedRows.filter((row) => row.warnings.length > 0);
+
+  return {
+    openCount: openRows.length,
+    receivedCount: receivedRows.length,
+    approvalReadyCount: approvalReadyRows.length,
+    approvalBlockedCount: approvalBlockedRows.length,
+    missingEvidenceCount: receivedRows.filter((row) => !row.evidenceReady).length,
+    missingDueDateCount: openRows.filter((row) => row.dueDate == null).length,
+    approvedAwaitingPaymentCount: approvedRows.length,
+    paidCount: rows.filter((row) => row.status === InvoiceStatus.PAID).length,
+    openTotal: roundMoney(openRows.reduce((total, row) => total + row.openBalance, 0)),
+    rows,
+    approvalQueue: sortedReceivedRows.slice(0, 8),
+    approvalReadyQueue: approvalReadyRows.slice(0, 8),
+    approvalBlockedQueue: approvalBlockedRows.slice(0, 8),
+    paymentQueue: [...approvedRows].sort(compareInvoiceWorkRows).slice(0, 8)
+  };
+}
+
+export function summarizeInvoiceDuplicateClusters(invoices: InvoiceDuplicateClusterInput[]): InvoiceDuplicateCluster[] {
+  const groups = new Map<string, InvoiceDuplicateClusterInput[]>();
+  for (const invoice of invoices) {
+    if (invoice.status === InvoiceStatus.VOID) continue;
+    const key = invoiceDuplicateClusterKey(invoice);
+    const group = groups.get(key) ?? [];
+    group.push(invoice);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.entries())
+    .filter(([, group]) => group.length > 1)
+    .map(([key, group]) => invoiceDuplicateCluster(key, group))
+    .sort((a, b) => b.amountAtRisk - a.amountAtRisk || b.duplicateCount - a.duplicateCount || a.supplierName.localeCompare(b.supplierName));
+}
+
+export async function voidDuplicateInvoiceCluster(input: {
+  clusterKey: string;
+  keepInvoiceId: string;
+  actor: AuthenticatedActor;
+  voidReason?: string;
+}) {
+  assertPermission(input.actor, "invoice:approve");
+  const invoices = await prisma.supplierInvoice.findMany({
+    where: { status: { not: InvoiceStatus.VOID } },
+    include: {
+      supplier: true,
+      paymentAllocations: { select: { id: true } },
+      journalEntries: { select: { id: true } },
+      accountingDocuments: { select: { id: true } }
+    }
+  });
+  const cluster = summarizeInvoiceDuplicateClusters(invoices).find((candidate) => candidate.key === input.clusterKey);
+  if (!cluster) throw new Error("Duplicate invoice cluster is no longer present.");
+  if (cluster.canonicalInvoiceId !== input.keepInvoiceId && !cluster.invoiceNumbers.length) {
+    throw new Error("Duplicate invoice cluster keep invoice is invalid.");
+  }
+  const keepInvoice = invoices.find((invoice) => invoice.id === input.keepInvoiceId);
+  if (!keepInvoice || invoiceDuplicateClusterKey(keepInvoice) !== input.clusterKey) {
+    throw new Error("Selected keep invoice is not part of this duplicate cluster.");
+  }
+  if (!cluster.canVoidDuplicates) throw new Error(cluster.blockReason ?? "Duplicate cluster cannot be auto-voided.");
+
+  const duplicateInvoices = invoices.filter((invoice) => invoice.id !== input.keepInvoiceId && invoiceDuplicateClusterKey(invoice) === input.clusterKey);
+  if (duplicateInvoices.length === 0) throw new Error("No duplicate invoices remain after selecting the keeper.");
+  const unsafeDuplicate = duplicateInvoices.find((invoice) => !isAutoVoidableDuplicateInvoice(invoice));
+  if (unsafeDuplicate) {
+    throw new Error(`Invoice ${unsafeDuplicate.invoiceNumber} has journals, payments, or an advanced status; review manually.`);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const reason = input.voidReason?.trim() || `Duplicate of supplier invoice ${keepInvoice.invoiceNumber}; operator kept ${keepInvoice.id}.`;
+    const updated = [];
+    for (const invoice of duplicateInvoices) {
+      const voided = await tx.supplierInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: InvoiceStatus.VOID,
+          voidReason: reason
+        }
+      });
+      await writeAuditLog({
+        actorType: input.actor.actorType,
+        actorId: input.actor.id,
+        action: "VOID_DUPLICATE_SUPPLIER_INVOICE",
+        entityType: "SupplierInvoice",
+        entityId: invoice.id,
+        payload: {
+          fromStatus: invoice.status,
+          toStatus: InvoiceStatus.VOID,
+          keptInvoiceId: keepInvoice.id,
+          keptInvoiceNumber: keepInvoice.invoiceNumber,
+          clusterKey: input.clusterKey,
+          voidReason: reason,
+          voidedAt: now.toISOString(),
+          note: "Duplicate invoice voiding does not receive stock, approve payment, or post payment journals."
+        }
+      }, tx);
+      updated.push(voided);
+    }
+    return { voidedCount: updated.length, keptInvoiceId: keepInvoice.id, voidedInvoiceIds: updated.map((invoice) => invoice.id) };
+  });
+}
+
+function invoiceDuplicateClusterKey(invoice: InvoiceDuplicateClusterInput) {
+  if (invoice.purchaseOrderId) {
+    return [
+      invoice.supplierId,
+      `ORDER:${invoice.purchaseOrderId}`
+    ].join("::");
+  }
+
+  return [
+    invoice.supplierId,
+    invoice.purchaseOrderId ?? "NO_PURCHASE_ORDER",
+    String(invoice.status),
+    invoice.currency.trim().toUpperCase(),
+    numberValue(invoice.total).toFixed(2)
+  ].join("::");
+}
+
+function invoiceDuplicateCluster(key: string, group: InvoiceDuplicateClusterInput[]): InvoiceDuplicateCluster {
+  const sorted = [...group].sort(compareCanonicalInvoiceCandidate);
+  const canonical = sorted[0];
+  const duplicateInvoices = sorted.slice(1);
+  const unsafeDuplicate = duplicateInvoices.find((invoice) => !isAutoVoidableDuplicateInvoice(invoice));
+  return {
+    key,
+    supplierName: canonical.supplier.name,
+    purchaseOrderId: canonical.purchaseOrderId,
+    status: String(canonical.status),
+    currency: canonical.currency,
+    total: roundMoney(numberValue(canonical.total)),
+    invoiceCount: group.length,
+    duplicateCount: duplicateInvoices.length,
+    canonicalInvoiceId: canonical.id,
+    invoiceNumbers: sorted.map((invoice) => invoice.invoiceNumber),
+    duplicateInvoiceIds: duplicateInvoices.map((invoice) => invoice.id),
+    canVoidDuplicates: !unsafeDuplicate,
+    blockReason: unsafeDuplicate ? "One or more duplicates has journals, payments, evidence, or an advanced status; review manually before voiding." : null,
+    amountAtRisk: roundMoney(numberValue(canonical.total) * duplicateInvoices.length)
+  };
+}
+
+function compareCanonicalInvoiceCandidate(a: InvoiceDuplicateClusterInput, b: InvoiceDuplicateClusterInput) {
+  return invoiceCanonicalScore(b) - invoiceCanonicalScore(a)
+    || a.createdAt.getTime() - b.createdAt.getTime()
+    || a.invoiceNumber.localeCompare(b.invoiceNumber);
+}
+
+function invoiceCanonicalScore(invoice: InvoiceDuplicateClusterInput) {
+  let score = 0;
+  score += (invoice.journalEntries?.length ?? 0) * 100;
+  score += (invoice.paymentAllocations?.length ?? 0) * 100;
+  score += (invoice.accountingDocuments?.length ?? 0) * 20;
+  if (invoice.sourceDocumentHash) score += 15;
+  if (invoice.externalSourceUrl) score += 10;
+  if (invoice.status === InvoiceStatus.APPROVED) score += 8;
+  if (invoice.status === InvoiceStatus.PAID) score += 12;
+  return score;
+}
+
+function isAutoVoidableDuplicateInvoice(invoice: InvoiceDuplicateClusterInput) {
+  return (invoice.status === InvoiceStatus.DRAFT || invoice.status === InvoiceStatus.RECEIVED)
+    && (invoice.paymentAllocations?.length ?? 0) === 0
+    && (invoice.journalEntries?.length ?? 0) === 0
+    && (invoice.accountingDocuments?.length ?? 0) === 0
+    && !invoice.sourceDocumentHash;
+}
+
 function invoiceNumberForPurchaseOrder(order: {
   id: string;
   supplier: { name: string };
@@ -107,11 +369,13 @@ export async function createInvoiceFromPurchaseOrder(purchaseOrderId: string, ac
     const existingByHash = await prisma.supplierInvoice.findFirst({ where: { sourceDocumentHash: sourceHash } });
     if (existingByHash) return updateExistingInvoiceFromSource(existingByHash.id, source);
   }
-
-  const hasExplicitInvoiceIdentity = Boolean(source?.invoiceNumber?.trim() || sourceHash || source?.externalSourceUrl?.trim());
-  if (!hasExplicitInvoiceIdentity && order.invoices.length > 0) {
-    return order.invoices[0];
+  const externalSourceUrl = source?.externalSourceUrl?.trim();
+  if (externalSourceUrl) {
+    const existingByExternalSource = await prisma.supplierInvoice.findFirst({ where: { externalSourceUrl } });
+    if (existingByExternalSource) return updateExistingInvoiceFromSource(existingByExternalSource.id, source);
   }
+
+  const existingOrderInvoice = order.invoices.find((invoice) => invoice.status !== InvoiceStatus.VOID);
 
   const importRecord = order.emailOrderImports[0];
   const lineSubtotal = order.lines.reduce(
@@ -140,6 +404,10 @@ export async function createInvoiceFromPurchaseOrder(purchaseOrderId: string, ac
   });
   if (existingBySupplierInvoiceNumber) return updateExistingInvoiceFromSource(existingBySupplierInvoiceNumber.id, source);
 
+  if (existingOrderInvoice) {
+    return updateExistingInvoiceFromSource(existingOrderInvoice.id, source);
+  }
+
   let invoice;
   try {
     invoice = await prisma.supplierInvoice.create({
@@ -167,7 +435,7 @@ export async function createInvoiceFromPurchaseOrder(purchaseOrderId: string, ac
         dueDate: source?.dueDate,
         sourceDocumentPath: source?.sourceDocumentPath,
         sourceDocumentHash: source?.sourceDocumentHash,
-        externalSourceUrl: source?.externalSourceUrl,
+        externalSourceUrl,
         notes: source?.notes ?? (importRecord?.externalOrderId
           ? `Auto-created from Email Import order ${importRecord.externalOrderId}. Verify against supplier invoice before marking paid.`
           : "Auto-created from incoming purchase order. Verify against supplier invoice before marking paid."),
@@ -208,15 +476,24 @@ export async function createInvoiceFromPurchaseOrder(purchaseOrderId: string, ac
 }
 
 async function updateExistingInvoiceFromSource(invoiceId: string, source?: InvoiceSourceProvenance) {
-  if (!source) return prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  const existing = await prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoiceId } });
+  if (!source) return existing;
   const data: Prisma.SupplierInvoiceUpdateInput = {
-    sourceDocumentPath: source.sourceDocumentPath ?? undefined,
-    sourceDocumentHash: source.sourceDocumentHash ?? undefined,
-    externalSourceUrl: source.externalSourceUrl ?? undefined,
-    dueDate: source.dueDate ?? undefined,
-    notes: source.notes ?? undefined
+    sourceDocumentPath: existing.sourceDocumentPath ? undefined : source.sourceDocumentPath ?? undefined,
+    sourceDocumentHash: existing.sourceDocumentHash ? undefined : source.sourceDocumentHash ?? undefined,
+    externalSourceUrl: existing.externalSourceUrl ? undefined : source.externalSourceUrl ?? undefined,
+    dueDate: existing.dueDate ? undefined : source.dueDate ?? undefined,
+    notes: mergeInvoiceNotes(existing.notes, source.notes)
   };
   return prisma.supplierInvoice.update({ where: { id: invoiceId }, data });
+}
+
+function mergeInvoiceNotes(existingNotes: string | null, sourceNotes?: string) {
+  const trimmedSource = sourceNotes?.trim();
+  if (!trimmedSource) return undefined;
+  if (!existingNotes?.trim()) return trimmedSource;
+  if (existingNotes.includes(trimmedSource)) return undefined;
+  return `${existingNotes}\n\nMerged source: ${trimmedSource}`;
 }
 
 type InvoiceTransitionInput = {
@@ -227,6 +504,38 @@ type InvoiceTransitionInput = {
   paymentReference?: string;
   voidReason?: string;
 };
+
+export async function updateSupplierInvoiceTerms(input: { invoiceId: string; actor: AuthenticatedActor; dueDate?: Date | null; invoiceDate?: Date; notes?: string }) {
+  assertPermission(input.actor, "invoice:create");
+  return prisma.$transaction(async (tx) => {
+    const invoice = await tx.supplierInvoice.findUniqueOrThrow({ where: { id: input.invoiceId } });
+    if (invoice.status === InvoiceStatus.VOID) throw new Error("Cannot update terms on a void supplier invoice.");
+
+    const updated = await tx.supplierInvoice.update({
+      where: { id: invoice.id },
+      data: {
+        ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+        ...(input.invoiceDate ? { invoiceDate: input.invoiceDate } : {}),
+        ...(input.notes?.trim() ? { notes: input.notes.trim() } : {})
+      }
+    });
+
+    await writeAuditLog({
+      actorType: input.actor.actorType,
+      actorId: input.actor.id,
+      action: "UPDATE_SUPPLIER_INVOICE_TERMS",
+      entityType: "SupplierInvoice",
+      entityId: invoice.id,
+      payload: {
+        dueDate: updated.dueDate?.toISOString() ?? null,
+        invoiceDate: updated.invoiceDate?.toISOString() ?? null,
+        notesUpdated: Boolean(input.notes?.trim())
+      }
+    }, tx);
+
+    return updated;
+  });
+}
 
 const INVOICE_TRANSITIONS: Record<InvoiceStatus, Set<InvoiceStatus>> = {
   [InvoiceStatus.DRAFT]: new Set([InvoiceStatus.RECEIVED, InvoiceStatus.VOID]),
@@ -249,11 +558,17 @@ export async function updateInvoiceStatus(input: InvoiceTransitionInput) {
   return prisma.$transaction(async (tx) => {
     const current = await tx.supplierInvoice.findUniqueOrThrow({
       where: { id: input.invoiceId },
-      include: { paymentAllocations: true }
+      include: {
+        paymentAllocations: true,
+        accountingDocuments: { select: { id: true } }
+      }
     });
 
     if (!INVOICE_TRANSITIONS[current.status].has(input.status)) {
       throw new Error(`Cannot transition supplier invoice from ${current.status} to ${input.status}.`);
+    }
+    if (input.status === InvoiceStatus.APPROVED && !invoiceHasSourceEvidence(current)) {
+      throw new Error("Source evidence is required before approving a supplier invoice.");
     }
 
     const now = new Date();
@@ -323,6 +638,87 @@ export async function updateInvoiceStatus(input: InvoiceTransitionInput) {
 
     return invoice;
   });
+}
+
+function invoiceHasSourceEvidence(invoice: {
+  sourceDocumentHash?: string | null;
+  sourceDocumentPath?: string | null;
+  externalSourceUrl?: string | null;
+  accountingDocuments?: Array<{ id?: string }>;
+}) {
+  return Boolean(invoice.sourceDocumentHash || invoice.sourceDocumentPath || invoice.externalSourceUrl || (invoice.accountingDocuments?.length ?? 0) > 0);
+}
+
+function invoiceWorkQueueRow(invoice: InvoiceWorkQueueInput, now: Date): InvoiceWorkQueueRow {
+  const openBalance = Math.max(0, numberValue(invoice.total) - (invoice.paymentAllocations ?? []).reduce((total, allocation) => total + numberValue(allocation.amount), 0));
+  const evidenceCount = invoice.accountingDocuments?.length ?? 0;
+  const evidenceReady = invoiceHasSourceEvidence(invoice);
+  const dueDate = invoice.dueDate ? startOfUtcDay(invoice.dueDate) : null;
+  const warnings = [
+    !evidenceReady && invoice.status === InvoiceStatus.RECEIVED ? "No source evidence bundle" : undefined,
+    !dueDate && (invoice.status === InvoiceStatus.RECEIVED || invoice.status === InvoiceStatus.APPROVED) ? "Due date not set" : undefined
+  ].filter((warning): warning is string => Boolean(warning));
+
+  return {
+    id: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    supplierName: invoice.supplier.name,
+    status: String(invoice.status),
+    currency: invoice.currency,
+    openBalance: roundMoney(openBalance),
+    dueDate: dueDate ? dueDate.toISOString().slice(0, 10) : null,
+    dueLabel: dueDateLabel(dueDate, now),
+    evidenceCount,
+    evidenceReady,
+    journalCount: invoice.journalEntries?.length ?? 0,
+    nextAction: invoiceNextAction(String(invoice.status), evidenceReady),
+    warnings
+  };
+}
+
+function invoiceNextAction(status: string, evidenceReady: boolean) {
+  if (status === InvoiceStatus.RECEIVED) return evidenceReady ? "Approve & post AP journal" : "Attach or verify source evidence";
+  if (status === InvoiceStatus.APPROVED) return "Reconcile payment evidence";
+  if (status === InvoiceStatus.PAID) return "Retain audit evidence";
+  if (status === InvoiceStatus.VOID) return "Voided";
+  return "Review invoice";
+}
+
+function compareInvoiceWorkRows(a: InvoiceWorkQueueRow, b: InvoiceWorkQueueRow) {
+  return dueRank(a.dueLabel) - dueRank(b.dueLabel)
+    || Number(a.evidenceReady) - Number(b.evidenceReady)
+    || (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31")
+    || b.openBalance - a.openBalance
+    || a.invoiceNumber.localeCompare(b.invoiceNumber);
+}
+
+function dueRank(label: string) {
+  if (label.endsWith("overdue")) return 0;
+  if (label === "Due today") return 1;
+  if (label.startsWith("Due in")) return 2;
+  if (label === "No due date") return 3;
+  return 4;
+}
+
+function dueDateLabel(dueDate: Date | null, now: Date) {
+  if (!dueDate) return "No due date";
+  const today = startOfUtcDay(now);
+  const days = Math.round((dueDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Due today";
+  return `Due in ${days}d`;
+}
+
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function numberValue(value: Prisma.Decimal.Value | number) {
+  return typeof value === "number" ? value : Number(value.toString());
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function assertInvoicePermission(actor: AuthenticatedActor, status: InvoiceStatus) {

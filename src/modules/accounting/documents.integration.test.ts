@@ -7,6 +7,7 @@ import {
   attachAccountingDocumentEvidence,
   deleteAccountingDocumentSource,
   ingestAccountingDocumentUpload,
+  retryAccountingDocumentExtraction,
   updateAccountingDocumentExtractedText
 } from "./documents";
 
@@ -205,7 +206,7 @@ describe("accounting document ingestion and invoice application", () => {
         "Credit/debit card Shipping fee USD 95.50",
         "Paid on 2026-06-08 18:31:58",
         "Subtotal USD 145.50",
-        "supplier details Supplier Contact name Company phone Company email",
+        "supplier details Supplier Contact Name Company phone Company email",
         "Huizhou Shengye Winnie XU shengyehz@163.com"
       ].join("\n"),
       originalFileName: `${TEST_PREFIX}-ALIBABA-ORDER.pdf`,
@@ -220,6 +221,28 @@ describe("accounting document ingestion and invoice application", () => {
       subtotal: 50,
       shippingCost: 95.5,
       total: 145.5
+    });
+  });
+
+  it("classifies customs payment receipts and reads number-then-currency charged totals", async () => {
+    const analysis = await analyzeAccountingDocumentText({
+      text: [
+        "Payment Receipt / Reçu du paiement",
+        "Please be advised that your payment transaction was successful.",
+        "We have charged 80.74 CAD to your account and it will be applied as follows:",
+        "Canada Customs FEE AMOUNT (CAD)",
+        "Fees CUSTOMS DUTIES 24.63",
+        "FedEx Clearance Service Fees SPECIAL ASSESSMENT 43.23",
+        "TOTAL 80.74"
+      ].join("\n"),
+      originalFileName: "PaymentReceipt.pdf",
+      sha256: `${TEST_PREFIX}-CUSTOMS-RECEIPT-HASH`
+    });
+
+    expect(analysis).toMatchObject({
+      classification: "CUSTOMS_DOCUMENT",
+      currency: "CAD",
+      total: 80.74
     });
   });
 
@@ -321,6 +344,40 @@ describe("accounting document ingestion and invoice application", () => {
     })).rejects.toThrow(/attached or applied accounting documents/i);
 
     await expect(prisma.accountingDocument.count({ where: { id: applied.document.id } })).resolves.toBe(1);
+    await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(stockMovementCountBefore);
+  });
+
+  it("locks retry OCR and manual text edits once a source document is attached to accounting evidence", async () => {
+    const { supplier, item, order } = await createPurchaseOrderFixture("RETRYLOCKED");
+    const document = await ingestAccountingDocumentUpload({
+      file: uploadFile(`${TEST_PREFIX}-RETRYLOCKED.txt`, "text/plain", invoiceText("RETRYLOCKED", supplier.name, item.sku)),
+      actorId: accountingActor.id
+    });
+    const applied = await applyAccountingDocumentAnalysis({
+      documentId: document.document.id,
+      purchaseOrderId: order.id,
+      actor: accountingActor
+    });
+    const stockMovementCountBefore = await prisma.stockMovement.count({ where: { itemId: item.id } });
+    const before = await prisma.accountingDocument.findUniqueOrThrow({ where: { id: applied.document.id } });
+
+    await expect(retryAccountingDocumentExtraction({
+      documentId: applied.document.id,
+      actor: accountingActor
+    })).rejects.toThrow(/linked accounting evidence cannot be re-analyzed/i);
+    await expect(updateAccountingDocumentExtractedText({
+      documentId: applied.document.id,
+      text: invoiceText("RETRYLOCKED-CHANGED", supplier.name, item.sku),
+      actor: accountingActor
+    })).rejects.toThrow(/linked accounting evidence cannot be re-analyzed/i);
+
+    const after = await prisma.accountingDocument.findUniqueOrThrow({ where: { id: applied.document.id } });
+    expect(after).toMatchObject({
+      status: AccountingDocumentStatus.APPLIED,
+      supplierInvoiceId: before.supplierInvoiceId,
+      extractedText: before.extractedText,
+      analysisJson: before.analysisJson
+    });
     await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(stockMovementCountBefore);
   });
 

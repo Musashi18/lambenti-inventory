@@ -65,15 +65,19 @@ export function inferAccountingDocumentMimeType(fileName: string, providedType?:
   return MIME_BY_EXTENSION[extname(fileName).toLowerCase()] ?? "application/octet-stream";
 }
 
+export function isSupportedAccountingDocumentFileName(fileName: string, providedType?: string | null) {
+  const inferred = inferAccountingDocumentMimeType(fileName, providedType);
+  const extensionSupported = Boolean(MIME_BY_EXTENSION[extname(fileName).toLowerCase()]);
+  return SUPPORTED_MIME_TYPES.has(inferred) || extensionSupported;
+}
+
 export function assertSupportedAccountingDocumentFile(input: { originalFileName: string; mimeType: string; sizeBytes: number }) {
   if (input.sizeBytes <= 0) throw new Error("Accounting document is empty.");
   if (input.sizeBytes > ACCOUNTING_DOCUMENT_MAX_BYTES) {
     throw new Error(`Accounting document is too large. Limit is ${Math.round(ACCOUNTING_DOCUMENT_MAX_BYTES / 1_000_000)} MB.`);
   }
 
-  const inferred = inferAccountingDocumentMimeType(input.originalFileName, input.mimeType);
-  const extensionSupported = Boolean(MIME_BY_EXTENSION[extname(input.originalFileName).toLowerCase()]);
-  if (!SUPPORTED_MIME_TYPES.has(inferred) && !extensionSupported) {
+  if (!isSupportedAccountingDocumentFileName(input.originalFileName, input.mimeType)) {
     throw new Error("Unsupported accounting document type. Upload PDF, EML/email, text/HTML/CSV, or common image screenshots.");
   }
 }

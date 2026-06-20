@@ -3,6 +3,8 @@
 import { MovementType } from "@prisma/client";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ItemSelectOptions } from "@/components/item-select-options";
+import { sortItemsByUseGroup } from "@/modules/inventory/item-option-groups";
 import { createMovementAction } from "./actions";
 import { initialMovementActionState } from "./state";
 
@@ -12,10 +14,12 @@ type ItemOption = {
   id: string;
   sku: string;
   description: string;
+  category: string;
 };
 
 export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOption[]; buildableItemIds?: string[] }) {
   const router = useRouter();
+  const sortedItems = useMemo(() => sortItemsByUseGroup(items), [items]);
   const [actionState, setActionState] = useState(initialMovementActionState);
   const [pending, setPending] = useState(false);
   const state = {
@@ -26,13 +30,13 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
       ...(actionState?.values ?? {})
     }
   };
-  const initialItemId = state.values.itemId || items[0]?.id || "";
+  const initialItemId = state.values.itemId || sortedItems[0]?.id || "";
   const [selectedItemId, setSelectedItemId] = useState(initialItemId);
   const [movementType, setMovementType] = useState<string>(state.values.movementType || MovementType.RECEIVE);
   const buildableItemIdSet = useMemo(() => new Set(buildableItemIds), [buildableItemIds]);
   const filteredItems = useMemo(
-    () => movementType === "BUILD" ? items.filter((item) => buildableItemIdSet.has(item.id)) : items,
-    [buildableItemIdSet, items, movementType]
+    () => movementType === "BUILD" ? sortedItems.filter((item) => buildableItemIdSet.has(item.id)) : sortedItems,
+    [buildableItemIdSet, sortedItems, movementType]
   );
 
   useEffect(() => {
@@ -93,11 +97,9 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
         >
           {filteredItems.length === 0 ? (
             <option value="">No active finished BOM unit is available for build movements</option>
-          ) : filteredItems.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.sku} — {item.description}
-            </option>
-          ))}
+          ) : (
+            <ItemSelectOptions items={filteredItems} />
+          )}
         </select>
         {movementType === "BUILD" ? (
           <p className="text-xs text-slate-500">Build movements only show active finished goods with an active BOM. Component/raw items are hidden for this movement type.</p>
@@ -139,7 +141,7 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
       </label>
 
       <label className="space-y-1 text-sm">
-        <span className="font-medium text-slate-700">Reason <span className="font-normal text-slate-400">optional</span></span>
+        <span className="font-medium text-slate-700">Reason <span className="font-normal text-slate-400">Optional</span></span>
         <input
           name="reason"
           placeholder="Optional operator note"
@@ -149,9 +151,10 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
         <FieldErrors errors={state.fieldErrors.reason} />
       </label>
 
-      <label className="space-y-1 text-sm xl:col-span-4">
-        <span className="font-medium text-slate-700">Reference</span>
+      <div className="space-y-1 text-sm xl:col-span-4">
+        <label htmlFor="movement-reference" className="font-medium text-slate-700">Reference</label>
         <input
+          id="movement-reference"
           name="reference"
           placeholder="PO/build/reservation/audit reference"
           className="w-full rounded-md border px-3 py-2"
@@ -159,10 +162,10 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
         />
         <p className="text-xs text-slate-500">Movements are item-level only for now. Lots are intentionally hidden.</p>
         <FieldErrors errors={state.fieldErrors.reference} />
-      </label>
+      </div>
 
       <button className="rounded-md bg-ink px-4 py-2 text-white disabled:opacity-60 xl:col-span-5" disabled={pending}>
-        {pending ? "Recording…" : "Record movement"}
+        {pending ? "Recording…" : "Record Movement"}
       </button>
     </form>
   );

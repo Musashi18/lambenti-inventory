@@ -40,6 +40,7 @@ export async function getStockSummaries(options: { includeObsolete?: boolean } =
       itemId: item.id,
       sku: item.sku,
       description: item.description,
+      category: item.category,
       reorderPoint: item.reorderPoint,
       targetStock: item.targetStock,
       onHand: stockPosition.onHand,

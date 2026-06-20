@@ -21,16 +21,17 @@ describe("ItemsCatalog client interaction source contract", () => {
   it("renders blank unit costs as an em dash instead of USD 0.00", () => {
     const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
 
-    expect(source).toContain('const rawUnitCost = item.estimatedUnitCost.trim();');
+    expect(source).toContain('const rawUnitCost = (item.displayUnitCost ?? item.estimatedUnitCost).trim();');
     expect(source).toContain('if (rawUnitCost === "") return "—";');
     expect(source).toContain("Number(rawUnitCost)");
+    expect(source).toContain("displayCostSource");
   });
 
   it("exposes a custom supplier name input in the edit modal", () => {
     const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
 
     expect(source).toContain('name="customSupplierName"');
-    expect(source).toContain("Custom supplier");
+    expect(source).toContain("Custom Supplier");
   });
 
   it("keeps the current preferred supplier option available when active supplier filtering omits it", () => {
@@ -40,5 +41,9 @@ describe("ItemsCatalog client interaction source contract", () => {
     expect(source).toContain("current preferred supplier");
     expect(source).toContain("item.preferredSupplierId");
     expect(source).toContain("item.preferredSupplierName");
+    expect(source).toContain("getStockHealth");
+    expect(source).toContain("No Supplier");
+    expect(source).toContain("Below Reorder");
+    expect(source).toContain("Needs Cost");
   });
 });

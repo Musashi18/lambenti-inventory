@@ -8,6 +8,11 @@
     "build": "next build",
     "start": "next start",
     "start:local": "node scripts/start-local.mjs",
+    "runtime:status": "node scripts/lambenti-runtime.mjs status",
+    "runtime:ensure": "node scripts/lambenti-runtime.mjs start --routes=/,/inventory/movements",
+    "runtime:stop": "node scripts/lambenti-runtime.mjs stop",
+    "lambenti:serve:verified": "node scripts/lambenti-runtime.mjs ensure --build --restart --routes=/,/inventory/movements",
+    "context:snapshot": "node scripts/context-snapshot.mjs",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:serial": "vitest run --no-file-parallelism",
@@ -28,6 +33,9 @@
     "agent:local-worker-smoke": "node scripts/hermes-local-worker-smoke.mjs",
     "qa:functional": "node scripts/functional-qa-agent.mjs --skip-quality-gates",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:browser": "node scripts/browser-section-smoke.mjs",
+    "smoke:ui-contracts": "node scripts/ui-contract-smoke.mjs",
+    "verify:tiny-ui": "npm run test -- src/components/sidebar.test.ts src/app/inventory/movements/page.test.ts scripts/smoke.test.mjs -- --run --no-file-parallelism && npm run typecheck && npm run lint && npm run runtime:ensure && npm run smoke:ui-contracts",
     "test": "vitest run"
   },
   "dependencies": {
@@ -36,7 +44,7 @@
     "imapflow": "^1.3.6",
     "lucide-react": "^0.511.0",
     "mailparser": "^3.9.9",
-    "next": "^15.3.2",
+    "next": "15.5.19",
     "pdf-parse": "^2.4.5",
     "playwright-core": "^1.60.0",
     "react": "^19.1.0",
@@ -52,12 +60,18 @@
     "autoprefixer": "^10.4.21",
     "dotenv": "^16.5.0",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^15.5.18",
+    "eslint-config-next": "15.5.19",
     "postcss": "^8.5.3",
     "prisma": "^6.8.2",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.15"
+    },
+    "esbuild": "^0.28.1"
   }
 }

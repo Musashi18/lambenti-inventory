@@ -146,6 +146,25 @@ async function configureJournalAccounts() {
   return { inventory, tax, ap, bank };
 }
 
+async function withRequiredDefaultMappingsTemporarilyDisabled<T>(callback: () => Promise<T>) {
+  const activeMappings = await prisma.gLAccountMapping.findMany({
+    where: {
+      active: true,
+      scopeType: "DEFAULT",
+      scopeId: null,
+      purpose: { in: ["INVENTORY_ASSET", "TAX_RECOVERABLE", "ACCOUNTS_PAYABLE"] }
+    },
+    select: { id: true }
+  });
+  const mappingIds = activeMappings.map((mapping) => mapping.id);
+  if (mappingIds.length > 0) await prisma.gLAccountMapping.updateMany({ where: { id: { in: mappingIds } }, data: { active: false } });
+  try {
+    return await callback();
+  } finally {
+    if (mappingIds.length > 0) await prisma.gLAccountMapping.updateMany({ where: { id: { in: mappingIds } }, data: { active: true } });
+  }
+}
+
 describe("balanced accounting journals", () => {
   beforeEach(cleanupTestData);
   afterAll(cleanupTestData);
@@ -180,7 +199,9 @@ describe("balanced accounting journals", () => {
     const { invoice } = await createInvoiceFixture("MISSING-MAPPING");
     await upsertGLAccount({ code: `${TEST_PREFIX}-ONLY`, name: "Only inventory", type: GLAccountType.ASSET, actorId: accountingActor.id });
 
-    await expect(updateInvoiceStatus({ invoiceId: invoice.id, status: InvoiceStatus.APPROVED, actor: accountingActor })).rejects.toThrow(/ACCOUNTS_PAYABLE|TAX_RECOVERABLE|INVENTORY_ASSET/i);
+    await withRequiredDefaultMappingsTemporarilyDisabled(async () => {
+      await expect(updateInvoiceStatus({ invoiceId: invoice.id, status: InvoiceStatus.APPROVED, actor: accountingActor })).rejects.toThrow(/ACCOUNTS_PAYABLE|TAX_RECOVERABLE|INVENTORY_ASSET/i);
+    });
     await expect(prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).resolves.toMatchObject({ status: InvoiceStatus.RECEIVED });
     await expect(prismaWithJournals.journalEntry.count({ where: { supplierInvoiceId: invoice.id } })).resolves.toBe(0);
   });

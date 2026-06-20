@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ItemCategory, LifecycleStatus, MovementType, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { visibleStockMovementWhere } from "./data";
+import { visibleStockMovementWhere, getMovementPageData } from "./data";
 
 const TEST_PREFIX = "TEST-MOVEMENT-DATA";
 
@@ -102,5 +102,75 @@ describe("inventory movement page data", () => {
     expect(visibleIds).toContain(normalReference.id);
     expect(visibleIds).not.toContain(voidedOriginal.id);
     expect(visibleIds).not.toContain(reversal.id);
+  });
+
+  it("adds signed ledger impact and per-item balance-after-entry values to recent rows", async () => {
+    const item = await createItem("RUNNING-BALANCE");
+    const otherItem = await createItem("RUNNING-BALANCE-OTHER");
+
+    const first = await prisma.stockMovement.create({
+      data: {
+        itemId: item.id,
+        movementType: MovementType.RECEIVE,
+        quantity: 10,
+        reason: "Initial receipt for running balance test",
+        reference: "PO-RUNNING-BALANCE-1",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-operator`
+      }
+    });
+    const reserve = await prisma.stockMovement.create({
+      data: {
+        itemId: item.id,
+        movementType: MovementType.RESERVE,
+        quantity: 3,
+        reason: "Reserve stock for running balance test",
+        reference: "build-running-balance",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-operator`
+      }
+    });
+    const consume = await prisma.stockMovement.create({
+      data: {
+        itemId: item.id,
+        movementType: MovementType.CONSUME,
+        quantity: 4,
+        reason: "Consume stock for running balance test",
+        reference: "BUILD-RUNNING-BALANCE",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-operator`
+      }
+    });
+    const other = await prisma.stockMovement.create({
+      data: {
+        itemId: otherItem.id,
+        movementType: MovementType.RECEIVE,
+        quantity: 2,
+        reason: "Other item balance should stay separate",
+        reference: "PO-RUNNING-BALANCE-OTHER",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-operator`
+      }
+    });
+
+    const data = await getMovementPageData();
+    const byId = new Map(data.movements.map((movement) => [movement.id, movement]));
+
+    expect(byId.get(first.id)).toMatchObject({
+      signedQuantity: 10,
+      balanceAfter: { onHand: 10, reserved: 0, available: 10 }
+    });
+    expect(byId.get(reserve.id)).toMatchObject({
+      signedQuantity: 0,
+      balanceAfter: { onHand: 10, reserved: 3, available: 7 }
+    });
+    expect(byId.get(consume.id)).toMatchObject({
+      signedQuantity: -4,
+      balanceAfter: { onHand: 6, reserved: 3, available: 3 }
+    });
+    expect(byId.get(other.id)).toMatchObject({
+      signedQuantity: 2,
+      balanceAfter: { onHand: 2, reserved: 0, available: 2 }
+    });
   });
 });

@@ -4,7 +4,7 @@ import { CostConfidence } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/modules/auth/permissions";
-import { archiveSupplierProfile, deleteArchivedSupplier, unarchiveSupplierProfile, updateItemSupplierEntry, updateSupplierContactProfile } from "@/modules/suppliers/service";
+import { archiveSupplierCleanupCandidates, archiveSupplierProfile, deleteArchivedSupplier, unarchiveSupplierProfile, updateItemSupplierEntry, updateSupplierContactProfile } from "@/modules/suppliers/service";
 
 const supplierContactSchema = z.object({
   supplierId: z.string().min(1),
@@ -107,6 +107,26 @@ export async function archiveSupplierAction(formData: FormData) {
     actorId: actor.id
   });
   revalidatePath("/suppliers");
+}
+
+export async function archiveSupplierCleanupCandidatesAction(): Promise<SupplierActionState> {
+  try {
+    const actor = await requirePermission("supplier:edit");
+    const result = await archiveSupplierCleanupCandidates({
+      actorType: actor.actorType === "AGENT" ? "AGENT" : "USER",
+      actorId: actor.id
+    });
+    revalidatePath("/suppliers");
+    revalidatePath("/inventory/items");
+    return {
+      success: true,
+      message: result.archivedCount === 0
+        ? "No supplier cleanup candidates were eligible for quarantine."
+        : `Archived ${result.archivedCount} supplier cleanup candidate(s).`
+    };
+  } catch (error) {
+    return supplierActionFailure(error);
+  }
 }
 
 export async function unarchiveSupplierAction(formData: FormData): Promise<SupplierActionState> {

@@ -274,11 +274,19 @@ function localProductionAppAuthAllowed(headers: Headers, env: ResolveEnv) {
 }
 
 function headerHostIsLoopback(headers: Headers) {
-  const hostCandidates = [headers.get("host"), headers.get("x-forwarded-host"), headers.get("origin")];
-  return hostCandidates.some((value) => {
-    const hostname = hostnameFromHeader(value);
-    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-  });
+  const host = hostnameFromHeader(headers.get("host"));
+  if (!isLoopbackHost(host)) return false;
+
+  for (const headerName of ["x-forwarded-host", "origin"] as const) {
+    const headerHost = hostnameFromHeader(headers.get(headerName));
+    if (headerHost && !isLoopbackHost(headerHost)) return false;
+  }
+
+  return true;
+}
+
+function isLoopbackHost(hostname: string | undefined) {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 function hostnameFromHeader(value: string | null) {

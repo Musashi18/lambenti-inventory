@@ -22,22 +22,22 @@ export default async function AccountingJournalsPage({ searchParams }: { searchP
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Journal entries</h1>
+          <h1 className="text-2xl font-semibold">Journal Entries</h1>
           <p className="max-w-4xl text-sm text-slate-600">
             Posted ledger view: posted balanced journals are created only from explicit human accounting actions: AP invoice approval and AP payment reconciliation.
             Journal posting does not receive stock, change PO received quantities, import bank rows by itself, or replace source-document review.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/accounting/accounts" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Configure GL mappings</Link>
-          <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to accounting</Link>
+          <Link href="/accounting/accounts" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Configure GL Mappings</Link>
+          <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to Accounting</Link>
         </div>
       </div>
 
       <section className="grid gap-4 md:grid-cols-4">
-        <SummaryCard label="Posted journals" value={entries.filter((entry) => entry.status === "POSTED").length.toString()} subtext="Immutable source-linked entries" />
-        <SummaryCard label="Trial balance debit" value={money(trialBalance.totalDebit)} subtext="Posted entries only" />
-        <SummaryCard label="Trial balance credit" value={money(trialBalance.totalCredit)} subtext="Must match debit" />
+        <SummaryCard label="Posted Journals" value={entries.filter((entry) => entry.status === "POSTED").length.toString()} subtext="Immutable source-linked entries" />
+        <SummaryCard label="Trial Balance debit" value={money(trialBalance.totalDebit)} subtext="Posted entries only" />
+        <SummaryCard label="Trial Balance credit" value={money(trialBalance.totalCredit)} subtext="Must match debit" />
         <SummaryCard label="Out of balance" value={money(Math.abs(trialBalance.outOfBalance))} subtext={trialBalance.outOfBalance === 0 ? "Balanced" : "Needs investigation"} tone={trialBalance.outOfBalance === 0 ? "good" : "warn"} />
       </section>
 
@@ -46,13 +46,13 @@ export default async function AccountingJournalsPage({ searchParams }: { searchP
           <label className="grid gap-1 text-sm">From<input name="from" type="date" defaultValue={params.from} className="rounded-md border border-slate-300 px-2 py-1" /></label>
           <label className="grid gap-1 text-sm">To<input name="to" type="date" defaultValue={params.to} className="rounded-md border border-slate-300 px-2 py-1" /></label>
           <button className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Filter</button>
-          <Link href={`/api/accounting/exports/journals?${query.toString()}`} className="rounded-md bg-ink px-3 py-2 text-center text-sm font-medium text-white">Download journal CSV</Link>
+          <Link href={`/api/accounting/exports/journals?${query.toString()}`} className="rounded-md bg-ink px-3 py-2 text-center text-sm font-medium text-white">Download Journal CSV</Link>
           <p className="text-xs text-slate-500">CSV includes entry numbers, line accounts, debit/credit, source reference, and memo for accountant review.</p>
         </form>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="font-medium">Posting controls and setup</h2>
+        <h2 className="font-medium">Posting Controls and Setup</h2>
         <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-3">
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <div className="font-medium">AP invoice approval</div>
@@ -64,14 +64,14 @@ export default async function AccountingJournalsPage({ searchParams }: { searchP
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <div className="font-medium">Required mappings</div>
-            <p className="mt-1 text-xs text-slate-600">Configure INVENTORY_ASSET, TAX_RECOVERABLE, ACCOUNTS_PAYABLE, and BANK_CASH on the GL mapping page before posting journals.</p>
+            <p className="mt-1 text-xs text-slate-600">Configure INVENTORY_ASSET, TAX_RECOVERABLE, ACCOUNTS_PAYABLE, and BANK_CASH on the GL Mapping page before posting journals.</p>
           </div>
         </div>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="font-medium">Trial balance</h2>
+          <h2 className="font-medium">Trial Balance</h2>
           <p className="text-xs text-slate-500">Posted journal lines grouped by account snapshot so account renames do not rewrite old entries.</p>
         </div>
         <div className="overflow-x-auto">
@@ -94,7 +94,7 @@ export default async function AccountingJournalsPage({ searchParams }: { searchP
 
       <section className="rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="font-medium">Posted entry ledger</h2>
+          <h2 className="font-medium">Posted Entry Ledger</h2>
         </div>
         <div className="divide-y divide-slate-100">
           {entries.length === 0 ? <p className="px-4 py-6 text-sm text-slate-500">No journal entries in this range.</p> : entries.map((entry) => (

@@ -129,7 +129,7 @@ describe("integration route production authorization", () => {
       sourceUrl: `https://message.alibaba.com/message/messenger.htm#thread-${index}`,
       subject: `Alibaba portal message thread ${index}`,
       messageId: `<alibaba-portal:message:TEST-${index}>`,
-      text: `Supplier message section ${index}: Will ship out your order soon. Tracking number 8880716207${String(index).padStart(2, "0")} is pending.`
+      text: `Supplier message section ${index}: Will ship out your order soon. Tracking Number 8880716207${String(index).padStart(2, "0")} is pending.`
     }));
 
     const response = await portalRoute.POST(nextRequest("http://127.0.0.1:5173/api/integrations/alibaba-portal/import", {

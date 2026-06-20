@@ -31,10 +31,15 @@ type EditableItem = {
   preferredSupplierId: string;
   preferredSupplierName: string;
   lifecycleStatus: string;
+  onHand: number;
+  available: number;
+  reserved: number;
   estimatedUnitCost: string;
   costCurrency: string;
   costConfidence: string;
   costSourceRef: string;
+  displayUnitCost?: string;
+  displayCostSource?: string;
 };
 
 const emptyActionState: ItemActionState = { ok: false, message: "" };
@@ -43,18 +48,31 @@ function statusClass(ok: boolean) {
   return ok ? "border-mint/40 bg-mint/10 text-emerald-800" : "border-coral/40 bg-coral/10 text-red-800";
 }
 
-function formatUsdUnitPrice(item: Pick<EditableItem, "estimatedUnitCost" | "costCurrency">) {
-  const rawUnitCost = item.estimatedUnitCost.trim();
+function formatUsdUnitPrice(item: Pick<EditableItem, "estimatedUnitCost" | "costCurrency" | "displayUnitCost">) {
+  const rawUnitCost = (item.displayUnitCost ?? item.estimatedUnitCost).trim();
   if (rawUnitCost === "") return "—";
 
   const unitCost = Number(rawUnitCost);
   if (!Number.isFinite(unitCost)) return "—";
 
-  const currency = item.costCurrency.trim().toUpperCase() || "USD";
+  const currency = item.displayUnitCost ? "USD" : item.costCurrency.trim().toUpperCase() || "USD";
   return `USD ${convertToUsd(unitCost, currency).toFixed(2)}`;
 }
 
 type ItemFormAction = (_previous: ItemActionState, formData: FormData) => Promise<ItemActionState>;
+
+function getStockHealth(item: Pick<EditableItem, "available" | "reorderPoint" | "preferredSupplierId" | "preferredSupplierName" | "estimatedUnitCost">) {
+  if (!item.preferredSupplierId && !item.preferredSupplierName) {
+    return { label: "No Supplier", className: "border-amber-200 bg-amber-50 text-amber-800", nextAction: "Assign source before reorder." };
+  }
+  if (item.estimatedUnitCost.trim() === "") {
+    return { label: "Needs Cost", className: "border-blue-200 bg-blue-50 text-blue-800", nextAction: "Add landed/quoted cost." };
+  }
+  if (item.available < item.reorderPoint) {
+    return { label: "Below Reorder", className: "border-red-200 bg-red-50 text-red-800", nextAction: "Draft purchase request." };
+  }
+  return { label: "OK", className: "border-emerald-200 bg-emerald-50 text-emerald-800", nextAction: "No immediate stock action." };
+}
 
 export function ItemsCatalog({
   title = "Item catalog",
@@ -111,11 +129,12 @@ export function ItemsCatalog({
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
               <th className="px-4 py-3 font-medium">SKU</th>
+              <th className="px-4 py-3 font-medium">Stock Health</th>
               <th className="px-4 py-3 font-medium">Description</th>
               <th className="px-4 py-3 font-medium">Category</th>
-              <th className="px-4 py-3 font-medium">Unit price (USD)</th>
-              <th className="px-4 py-3 font-medium">Lead time</th>
-              <th className="px-4 py-3 font-medium">Cost confidence</th>
+              <th className="px-4 py-3 font-medium">Unit Price (USD)</th>
+              <th className="px-4 py-3 font-medium">Lead Time</th>
+              <th className="px-4 py-3 font-medium">Cost Confidence</th>
               <th className="px-4 py-3 font-medium">Lifecycle</th>
               <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
@@ -123,7 +142,7 @@ export function ItemsCatalog({
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-4 text-slate-500" colSpan={8}>
+                <td className="px-4 py-4 text-slate-500" colSpan={9}>
                   {archivedView ? "No archived items found." : "No active items found."}
                 </td>
               </tr>
@@ -134,6 +153,7 @@ export function ItemsCatalog({
                 const archiveBusy = busyKey === `archive:${item.id}`;
                 const unarchiveBusy = busyKey === `unarchive:${item.id}`;
                 const updateBusy = busyKey === `update:${item.id}`;
+                const stockHealth = getStockHealth(item);
                 const supplierOptionsForItem = item.preferredSupplierId && !suppliers.some((supplier) => supplier.id === item.preferredSupplierId)
                   ? [
                       {
@@ -147,9 +167,18 @@ export function ItemsCatalog({
                 return (
                   <tr key={item.id} className="border-t border-slate-100">
                     <td className="px-4 py-3 font-medium">{item.sku}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${stockHealth.className}`}>{stockHealth.label}</span>
+                      <div className="mt-1 text-xs text-slate-500">On Hand {item.onHand} · Available {item.available}</div>
+                      <div className="text-xs text-slate-500">Supplier {item.preferredSupplierName || "—"}</div>
+                      <div className="text-[11px] text-slate-400">{stockHealth.nextAction}</div>
+                    </td>
                     <td className="px-4 py-3">{item.description}</td>
                     <td className="px-4 py-3">{item.category}</td>
-                    <td className="px-4 py-3">{formatUsdUnitPrice(item)}</td>
+                    <td className="px-4 py-3">
+                      <div>{formatUsdUnitPrice(item)}</div>
+                      {item.displayCostSource ? <div className="mt-1 text-[11px] text-slate-500">{item.displayCostSource}</div> : null}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-slate-900">{item.leadTimeDays}d current</div>
                       <div className="text-xs text-slate-500">{item.observedLeadTimeLabel}</div>
@@ -216,7 +245,7 @@ export function ItemsCatalog({
                         >
                           <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-3">
                             <div>
-                              <h3 className="text-lg font-semibold">Edit item</h3>
+                              <h3 className="text-lg font-semibold">Edit Item</h3>
                               <p className="text-sm text-slate-500">Update any item field. Location is intentionally hidden for now.</p>
                             </div>
                             <button
@@ -240,7 +269,7 @@ export function ItemsCatalog({
                               <input name="description" defaultValue={item.description} className="w-full rounded-md border px-3 py-2 font-normal" required />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Manufacturer part no.</span>
+                              <span>Manufacturer Part No.</span>
                               <input name="manufacturerPartNo" defaultValue={item.manufacturerPartNo} className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
@@ -264,15 +293,15 @@ export function ItemsCatalog({
                               </select>
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Reorder point</span>
+                              <span>Reorder Point</span>
                               <input name="reorderPoint" type="number" defaultValue={item.reorderPoint} className="w-full rounded-md border px-3 py-2 font-normal" required />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Target stock</span>
+                              <span>Target Stock</span>
                               <input name="targetStock" type="number" defaultValue={item.targetStock} className="w-full rounded-md border px-3 py-2 font-normal" required />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Lead time days</span>
+                              <span>Lead Time Days</span>
                               <input name="leadTimeDays" type="number" defaultValue={item.leadTimeDays} className="w-full rounded-md border px-3 py-2 font-normal" required />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
@@ -285,7 +314,7 @@ export function ItemsCatalog({
                               </select>
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Custom supplier</span>
+                              <span>Custom Supplier</span>
                               <input name="customSupplierName" placeholder="Type a new supplier if it is not listed" className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
@@ -297,7 +326,7 @@ export function ItemsCatalog({
                               </select>
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Unit cost</span>
+                              <span>Unit Cost</span>
                               <input name="estimatedUnitCost" type="number" step="0.01" defaultValue={item.estimatedUnitCost} className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
@@ -305,7 +334,7 @@ export function ItemsCatalog({
                               <input name="costCurrency" defaultValue={item.costCurrency} className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
-                              <span>Cost confidence</span>
+                              <span>Cost Confidence</span>
                               <select name="costConfidence" defaultValue={item.costConfidence} className="w-full rounded-md border px-3 py-2 font-normal">
                                 {costConfidences.map((value) => (
                                   <option key={value} value={value}>{value}</option>
@@ -313,7 +342,7 @@ export function ItemsCatalog({
                               </select>
                             </label>
                             <label className="space-y-1 text-sm font-medium md:col-span-2">
-                              <span>Cost source / quote ref</span>
+                              <span>Cost Source / Quote Ref</span>
                               <input name="costSourceRef" defaultValue={item.costSourceRef} className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                           </div>
@@ -327,7 +356,7 @@ export function ItemsCatalog({
                               Cancel
                             </button>
                             <button className="rounded-md bg-ink px-4 py-2 text-white disabled:opacity-60" disabled={Boolean(busyKey)} type="submit">
-                              {updateBusy ? "Saving changes…" : "Save changes"}
+                              {updateBusy ? "Saving changes…" : "Save Changes"}
                             </button>
                           </div>
                         </form>

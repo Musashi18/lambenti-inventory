@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getInvoiceDashboard } from "@/modules/accounting/invoices";
+import { getInvoiceDashboard, summarizeInvoiceWorkQueue } from "@/modules/accounting/invoices";
 import { getAccountingWorkbench, type AccountingDocumentAnalysis } from "@/modules/accounting/documents";
+import { getAccountingCommandCenter } from "@/modules/accounting/overview";
 import { hasPermission, requirePermission } from "@/modules/auth/permissions";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
 import { AccountingDocumentDropzone } from "./accounting-document-dropzone";
@@ -53,6 +54,13 @@ function documentIsReadyToApply(document: AccountingDocumentRow, analysis?: Acco
     && !documentNeedsManualReview(document, analysis);
 }
 
+function documentCanBeReanalyzed(document: AccountingDocumentRow) {
+  return document.status !== "APPLIED"
+    && document.status !== "ATTACHED"
+    && document.status !== "ARCHIVED"
+    && !document.supplierInvoiceId;
+}
+
 function getDocumentTriageSummary(documents: AccountingDocumentRow[]): DocumentTriageSummary {
   return documents.reduce<DocumentTriageSummary>((summary, document) => {
     const analysis = analysisFrom(document.analysisJson);
@@ -78,10 +86,10 @@ function documentReadiness(document: AccountingDocumentRow, analysis?: Accountin
     return { label: "Attached evidence", className: "border-blue-200 bg-blue-50 text-blue-800", helper: "Supporting document is bundled with invoice/PO evidence." };
   }
   if (documentIsReadyToApply(document, analysis)) {
-    return { label: "Ready to apply", className: "border-emerald-200 bg-emerald-50 text-emerald-800", helper: "Clean supplier invoice extraction; review PO selection before creating/updating AP." };
+    return { label: "Ready to Apply", className: "border-emerald-200 bg-emerald-50 text-emerald-800", helper: "Clean supplier invoice extraction; review PO selection before creating/updating AP." };
   }
   if (documentNeedsManualReview(document, analysis)) {
-    return { label: "Needs manual review", className: "border-amber-200 bg-amber-50 text-amber-800", helper: document.errorMessage ?? "Resolve extraction warnings, retry OCR, or paste source text before applying." };
+    return { label: "Needs Manual Review", className: "border-amber-200 bg-amber-50 text-amber-800", helper: document.errorMessage ?? "Resolve extraction warnings, retry OCR, or paste source text before applying." };
   }
   if (analysis?.classification && analysis.classification !== "SUPPLIER_INVOICE") {
     return { label: "Evidence only", className: "border-slate-200 bg-slate-50 text-slate-700", helper: "Attach as support; non-invoice evidence does not create AP, payment, or stock changes." };
@@ -92,79 +100,239 @@ function documentReadiness(document: AccountingDocumentRow, analysis?: Accountin
 export default async function AccountingWorkbenchPage() {
   const actor = await requirePermission("accounting:view");
   const canApplyDocuments = hasPermission(actor, "invoice:create");
-  const [{ invoices, uninvoicedPurchaseOrders, totalsByStatus }, { documents }] = await Promise.all([
+  const [{ invoices, uninvoicedPurchaseOrders, totalsByStatus }, { documents }, commandCenter] = await Promise.all([
     getInvoiceDashboard(),
-    getAccountingWorkbench()
+    getAccountingWorkbench(),
+    getAccountingCommandCenter()
   ]);
   const receivedTotal = totalsByStatus.RECEIVED?.toString() ?? "0";
   const approvedTotal = totalsByStatus.APPROVED?.toString() ?? "0";
   const paidTotal = totalsByStatus.PAID?.toString() ?? "0";
-  const receivedInvoices = invoices.filter((invoice) => invoice.status === "RECEIVED").length;
   const approvedInvoices = invoices.filter((invoice) => invoice.status === "APPROVED").length;
+  const invoiceWorkQueue = summarizeInvoiceWorkQueue(invoices);
   const documentTriage = getDocumentTriageSummary(documents);
   const attentionItems = [
     {
+      href: "#payables-aging",
+      count: commandCenter.payables.overdue.count,
+      label: "Overdue Supplier Payable(s)",
+      detail: "Handle Overdue Bills First, Then Due-This-Week and No-Due-Date Invoices.",
+      tone: "amber"
+    },
+    {
+      href: "/accounting/accounts",
+      count: commandCenter.glSetup.missingPurposes.length,
+      label: "Required default GL Mapping(s) missing",
+      detail: "Posting Setup Must Be Complete Before AP Approval/Payment Journals Can Post Cleanly.",
+      tone: "amber"
+    },
+    {
       href: "#source-document-review-queue",
       count: documentTriage.readyToApply,
-      label: "clean supplier invoice document(s) ready to apply",
-      detail: "Create/update AP only after reviewing the suggested PO/invoice links.",
+      label: "Clean Supplier Invoice Document(s) Ready to Apply",
+      detail: "Create/Update AP Only After Reviewing the Suggested PO/Invoice Links.",
       tone: "emerald"
     },
     {
       href: "#source-document-review-queue",
       count: documentTriage.needsManualReview,
-      label: "source document(s) need manual review",
-      detail: "Resolve OCR, missing invoice number, total, supplier, or classification warnings before applying.",
+      label: "Source Document(s) Need Manual Review",
+      detail: "Resolve OCR, Missing Invoice Number, Total, Supplier, or Classification Warnings Before Applying.",
       tone: "amber"
     },
     {
       href: "/accounting/invoices",
-      count: receivedInvoices,
-      label: "received invoice(s) waiting for approval",
-      detail: "Approval posts AP journals only when GL mappings and evidence are ready.",
+      count: invoiceWorkQueue.approvalBlockedCount,
+      label: "Invoice(s) Blocked Before Approval",
+      detail: "Set Due Dates or Attach Source Evidence Before Posting AP Journals.",
+      tone: "amber"
+    },
+    {
+      href: "/accounting/invoices",
+      count: invoiceWorkQueue.approvalReadyCount,
+      label: "Invoice(s) Ready for Approval",
+      detail: "Approval Still Requires Explicit Human Action and Posts AP Journals Only After Blockers Are Clear.",
       tone: "blue"
     },
     {
       href: "/accounting/payments",
       count: approvedInvoices,
-      label: "approved invoice(s) ready for payment reconciliation",
-      detail: "Payment still needs an explicit reference or bank allocation.",
+      label: "Approved Invoice(s) Ready for Payment Reconciliation",
+      detail: "Payment Still Needs an Explicit Reference or Bank Allocation.",
       tone: "blue"
     },
     {
       href: "#uninvoiced-purchase-orders",
       count: uninvoicedPurchaseOrders.length,
-      label: "incoming PO(s) still missing invoice evidence",
-      detail: "Upload supplier invoices or create them manually; physical receiving stays on /incoming.",
+      label: "Incoming PO(s) Still Missing Invoice Evidence",
+      detail: "Upload Supplier Invoices or Create Them Manually; Physical Receiving Stays on /incoming.",
       tone: "slate"
     }
   ].filter((item) => item.count > 0);
+  const bookkeepingSteps = [
+    {
+      label: "Capture",
+      value: "Drop Source Documents",
+      detail: "Keep PDFs/Emails/Screenshots Hashed and Private Before Any AP Action.",
+      href: "#drop-source-documents",
+      tone: "slate"
+    },
+    {
+      label: "Review",
+      value: `${documentTriage.readyToApply + documentTriage.needsManualReview} document(s)`,
+      detail: "Apply Clean Supplier Invoices; Retry OCR or Paste Text for Review Blockers.",
+      href: "#source-document-review-queue",
+      tone: documentTriage.needsManualReview > 0 ? "amber" : "emerald"
+    },
+    {
+      label: "Setup",
+      value: commandCenter.glSetup.readyForPosting ? "Posting Ready" : `${commandCenter.glSetup.missingPurposes.length} mapping(s) missing`,
+      detail: commandCenter.glSetup.readyForPosting ? "Default AP Journal Mappings Are Active." : `Missing ${commandCenter.glSetup.missingPurposes.join(", ")}.`,
+      href: "/accounting/accounts",
+      tone: commandCenter.glSetup.readyForPosting ? "emerald" : "amber"
+    },
+    {
+      label: "Approve",
+      value: `${invoiceWorkQueue.approvalReadyCount} ready · ${invoiceWorkQueue.approvalBlockedCount} blocked`,
+      detail: "Only Blocker-Free Received Invoices Can Be Approved from the Queue.",
+      href: "/accounting/invoices",
+      tone: invoiceWorkQueue.approvalBlockedCount > 0 ? "amber" : invoiceWorkQueue.approvalReadyCount > 0 ? "blue" : "slate"
+    },
+    {
+      label: "Pay",
+      value: `${approvedInvoices + commandCenter.bank.unmatchedCount} item(s)`,
+      detail: "Reconcile Approved Invoices to Bank/Payment Evidence; Imported Rows Stay Unmatched Until Allocated.",
+      href: "/accounting/payments",
+      tone: approvedInvoices + commandCenter.bank.unmatchedCount > 0 ? "blue" : "slate"
+    }
+  ];
+  const actionableBookkeepingIndex = bookkeepingSteps.findIndex((step) => step.tone === "amber" || step.tone === "blue");
+  const nextBookkeepingIndex = actionableBookkeepingIndex >= 0 ? actionableBookkeepingIndex : 0;
+  const triageCards = [
+    { label: "Needs Manual Review", value: documentTriage.needsManualReview.toString(), text: "Warnings, OCR, or Missing Fields", tone: "amber" },
+    { label: "Unreadable/No Text", value: documentTriage.unreadable.toString(), text: "Retry OCR or Paste Text", tone: "red" },
+    { label: "Ready to Apply", value: documentTriage.readyToApply.toString(), text: "Clean Supplier Invoices", tone: "emerald" },
+    { label: "Attach Only", value: documentTriage.attachOnly.toString(), text: "Receipts, Packing, Customs, Quotes", tone: "slate" },
+    { label: "Linked Evidence", value: documentTriage.evidenceLinked.toString(), text: "Applied or Attached Bundles", tone: "blue" }
+  ];
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Accounting workbench</h1>
-          <p className="max-w-4xl text-sm text-slate-600">
-            Accounting documents do not receive stock, approve purchases, or mark invoices paid. This page preserves source document evidence,
-            extracts accounting fields, dedupes files, and prepares serious AP records for human review.
-          </p>
+          <h1 className="text-2xl font-semibold">Accounting Workbench</h1>
         </div>
-        <Link href="/accounting/invoices" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Open invoice ledger</Link>
+        <Link href="/accounting/invoices" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Open Invoice Ledger</Link>
       </div>
 
       <section className="grid gap-4 md:grid-cols-4">
-        <SummaryCard label="Supplier invoices" value={invoices.length.toString()} subtext="AP records in the app" />
+        <SummaryCard label="Supplier Invoices" value={invoices.length.toString()} subtext="AP records in the app" />
         <SummaryCard label="Received / unpaid" value={`USD${Number(receivedTotal).toFixed(2)}`} subtext="Needs approval/payment review" />
-        <SummaryCard label="Approved" value={`USD${Number(approvedTotal).toFixed(2)}`} subtext="Payment-ready with reference required" />
+        <SummaryCard label="Approved" value={`USD${Number(approvedTotal).toFixed(2)}`} subtext="Payment-Ready with reference required" />
         <SummaryCard label="Paid" value={`USD${Number(paidTotal).toFixed(2)}`} subtext="Immutable evidence retained" />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Bookkeeping Workflow Rail">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="font-medium">Daily Bookkeeping Routine</h2>
+            <p className="text-xs text-slate-500">Capture → Review → Setup → Approve → Pay, with the next actionable step highlighted.</p>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">Evidence Only Until Apply</span>
+        </div>
+        <ol className="mt-4 grid gap-3 md:grid-cols-5">
+          {bookkeepingSteps.map((step, index) => (
+            <li key={step.label}>
+              <Link href={step.href} className={workflowStepClass(step.tone, index === nextBookkeepingIndex)}>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-xs font-semibold ring-1 ring-current">{index + 1}</span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold uppercase tracking-wide opacity-75">{step.label}</span>
+                  <span className="mt-1 block text-sm font-semibold">{step.value}</span>
+                  <span className="mt-1 block text-xs leading-5 opacity-80">{step.detail}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section id="payables-aging" className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="font-medium">Command Center</h2>
+          </div>
+          <span className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600">{commandCenter.postedJournalCount} posted journal(s)</span>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <CommandMetric
+            title="Open payables"
+            value={money(commandCenter.payables.currency, commandCenter.payables.openTotal)}
+            detail={`${commandCenter.payables.openCount} open · ${commandCenter.payables.receivedCount} received · ${commandCenter.payables.approvedCount} approved`}
+            tone={commandCenter.payables.overdue.count > 0 ? "amber" : "slate"}
+          />
+          <CommandMetric
+            title="Overdue / Due Soon"
+            value={`${commandCenter.payables.overdue.count} / ${commandCenter.payables.dueNext7Days.count}`}
+            detail={`${money(commandCenter.payables.currency, commandCenter.payables.overdue.total)} overdue · ${money(commandCenter.payables.currency, commandCenter.payables.dueNext7Days.total)} due ≤7d`}
+            tone={commandCenter.payables.overdue.count > 0 ? "amber" : "blue"}
+          />
+          <CommandMetric
+            title="Bank Reconciliation"
+            value={`${commandCenter.bank.unmatchedCount} unmatched`}
+            detail={`${money("USD", commandCenter.bank.outgoingTotal)} outgoing · ${money("USD", commandCenter.bank.incomingTotal)} incoming`}
+            tone={commandCenter.bank.unmatchedCount > 0 ? "blue" : "emerald"}
+          />
+          <CommandMetric
+            title="Posting Setup"
+            value={commandCenter.glSetup.readyForPosting ? "Ready" : "Blocked"}
+            detail={commandCenter.glSetup.readyForPosting ? "All default mappings configured" : `${commandCenter.glSetup.missingPurposes.length} required mapping(s) missing`}
+            tone={commandCenter.glSetup.readyForPosting ? "emerald" : "amber"}
+          />
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
+          <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+            <h3 className="text-sm font-medium text-slate-900">Next Supplier Bills</h3>
+            <div className="mt-2 divide-y divide-slate-200 text-sm">
+              {commandCenter.payables.nextDueInvoices.length === 0 ? (
+                <p className="py-3 text-slate-500">No open supplier payables.</p>
+              ) : commandCenter.payables.nextDueInvoices.map((invoice) => (
+                <div key={invoice.id} className="grid gap-2 py-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                  <div>
+                    <div className="font-medium text-slate-900">{invoice.supplierName} · {invoice.invoiceNumber}</div>
+                    <div className="text-xs text-slate-500">{invoice.status} · {invoice.evidenceCount} evidence document(s) · due {invoice.dueDate ?? "not set"}</div>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <div className="font-medium">{money(invoice.currency, invoice.openBalance)}</div>
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${urgencyClass(invoice.urgency)}`}>{invoice.dueLabel}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-100 bg-slate-50 p-3">
+            <h3 className="text-sm font-medium text-slate-900">Bookkeeping Step Details</h3>
+            <ol className="mt-2 space-y-2">
+              {bookkeepingSteps.map((step, index) => (
+                <li key={step.label}>
+                  <Link href={step.href} className="grid grid-cols-[auto_1fr] gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm hover:bg-slate-50">
+                    <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${attentionToneClass(step.tone)}`}>{index + 1}</span>
+                    <span>
+                      <span className="block font-medium text-slate-900">{step.label}: {step.value}</span>
+                      <span className="block text-xs text-slate-500">{step.detail}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <div>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="font-medium">Attention queue</h2>
+              <h2 className="font-medium">Attention Queue</h2>
               <p className="text-xs text-slate-500">Prioritized exceptions and next accounting actions, surfaced before the feature grid.</p>
             </div>
             <span className="rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600">{attentionItems.length} active</span>
@@ -184,47 +352,35 @@ export default async function AccountingWorkbenchPage() {
             ))}
           </div>
         </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <h2 className="font-medium">Accounting control trail</h2>
-          <p className="mt-1 text-xs text-slate-500">Upload → review → apply/attach → approve/pay → post/export</p>
-          <ol className="mt-3 space-y-2 text-sm text-slate-700">
-            <li><span className="font-medium">1. Capture evidence:</span> private source file, hash, OCR/text, and upload actor.</li>
-            <li><span className="font-medium">2. Triage exceptions:</span> warnings stay visible until a human resolves or attaches them.</li>
-            <li><span className="font-medium">3. Act explicitly:</span> AP, approval, payment, and journals remain separate human-gated steps.</li>
-          </ol>
-        </div>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 className="font-medium">Source document triage</h2>
+            <h2 className="font-medium">Source Document Triage</h2>
             <p className="text-xs text-slate-500">Fast scan of saved documents so review starts with exceptions, not a raw table.</p>
           </div>
-          <Link href="#source-document-review-queue" className="text-xs font-medium text-blue-700 hover:underline">Jump to review queue</Link>
+          <Link href="#source-document-review-queue" className="text-xs font-medium text-blue-700 hover:underline">Jump to Review Queue</Link>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-5">
-          <MiniMetric label="Ready to apply" value={documentTriage.readyToApply.toString()} text="Clean supplier invoices" tone="emerald" />
-          <MiniMetric label="Needs manual review" value={documentTriage.needsManualReview.toString()} text="Warnings, OCR, or missing fields" tone="amber" />
-          <MiniMetric label="Attach only" value={documentTriage.attachOnly.toString()} text="Receipts, packing, customs, quotes" tone="slate" />
-          <MiniMetric label="Linked evidence" value={documentTriage.evidenceLinked.toString()} text="Applied or attached bundles" tone="blue" />
-          <MiniMetric label="Unreadable/no text" value={documentTriage.unreadable.toString()} text="Retry OCR or paste text" tone="red" />
+          {triageCards.map((card) => (
+            <MiniMetric key={card.label} href="#source-document-review-queue" label={card.label} value={card.value} text={card.text} tone={card.tone} />
+          ))}
         </div>
       </section>
 
       <section className="grid gap-3 md:grid-cols-6">
-        <AccountingLink href="/accounting/customer-invoices" title="Customer invoices / AR" text="Draft and track customer-facing invoices without stock mutation." />
-        <AccountingLink href="/accounting/payments" title="Payment reconciliation" text="Import bank transactions and reconcile approved invoices." />
-        <AccountingLink href="/accounting/journals" title="Posted journals" text="Review posted balanced journals from AP invoice approval and AP payment reconciliation." />
-        <AccountingLink href="/accounting/exports" title="GST/HST exports" text="Download accountant-review CSV with ITC evidence warnings." />
-        <AccountingLink href="/accounting/accounts" title="GL mapping" text="Maintain chart-of-accounts mappings used by posted journals and exports." />
-        <AccountingLink href="/accounting/landed-cost" title="Landed cost" text="Allocate freight/duty/non-recoverable tax without stock mutation." />
+        <AccountingLink href="/accounting/customer-invoices" title="Customer Invoices / AR" text="Draft and Track Customer-Facing Invoices Without Stock Mutation." />
+        <AccountingLink href="/accounting/payments" title="Payment Reconciliation" text="Import Bank Transactions and Reconcile Approved Invoices." />
+        <AccountingLink href="/accounting/journals" title="Posted Journals" text="Review Posted Balanced Journals from AP Invoice Approval and AP Payment Reconciliation." />
+        <AccountingLink href="/accounting/exports" title="GST/HST Exports" text="Download Accountant-Review CSV with ITC Evidence Warnings." />
+        <AccountingLink href="/accounting/accounts" title="GL Mapping" text="Maintain Chart-of-Accounts Mappings Used by Posted Journals and Exports." />
+        <AccountingLink href="/accounting/landed-cost" title="Landed Cost" text="Allocate Freight/Duty/Non-Recoverable Tax Without Stock Mutation." />
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <section id="drop-source-documents" className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-4">
-          <h2 className="font-medium">Drop source documents</h2>
+          <h2 className="font-medium">Drop Source Documents</h2>
           <p className="text-xs text-slate-500">
             Best format: private original file/email + SHA-256 hash + extracted text/OCR + structured AccountingDocument analysis + audited invoice/payment links.
           </p>
@@ -232,48 +388,20 @@ export default async function AccountingWorkbenchPage() {
         {canApplyDocuments ? <AccountingDocumentDropzone /> : <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Your role can view accounting evidence but cannot upload or re-analyze source documents.</p>}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <h2 className="font-medium">Canadian GST/HST and audit-ready records</h2>
-          <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
-            <Checklist title="Source evidence" items={["Original PDF/email/screenshot stored privately", "SHA-256 hash and upload actor", "OCR/extraction text retained separately", "Human corrections create audit history"]} />
-            <Checklist title="AP invoice fields" items={["Supplier legal name, invoice number/date/due date", "Currency, subtotal, shipping, tax, total", "Line quantities, SKU/part, unit price, tax treatment", "PO/receiving/customs/payment references"]} />
-            <Checklist title="Tax and landed cost" items={["GST/HST ITC evidence and supplier tax number when required", "Recoverable tax separated from landed cost", "Duties, brokerage, freight, and non-recoverable tax tracked", "Currency/FX source preserved"]} />
-            <Checklist title="Retention and controls" items={["Keep supporting records for at least six years", "Deduplicate by hash and supplier invoice key", "No payment without reference evidence", "No stock movement from accounting upload"]} />
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <h2 className="font-medium">Invoice functionality upgrades active here</h2>
-          <ul className="mt-3 space-y-2 text-sm text-slate-700">
-            <li><span className="font-medium">Evidence bundle:</span> multiple source documents can be attached to the same supplier invoice/PO with hash/path provenance.</li>
-            <li><span className="font-medium">Multi-invoice POs:</span> deposits, partial/final invoices, and credit-note style records can share one PO while supplier invoice numbers are unique per supplier.</li>
-            <li><span className="font-medium">Customer invoices / AR:</span> draft, send, and mark customer-facing invoices paid without consuming stock or shipping products.</li>
-            <li><span className="font-medium">Payment reconciliation:</span> bank transactions are deduped by hash and explicitly allocated to approved invoices before marking paid.</li>
-            <li><span className="font-medium">GST/HST exports:</span> accountant CSV rows separate recoverable and non-recoverable tax with source-evidence warnings.</li>
-            <li><span className="font-medium">Posted journals:</span> approving AP invoices and reconciling AP payments now creates immutable, balanced journal entries with account snapshots.</li>
-            <li><span className="font-medium">GL mapping / landed cost:</span> chart mappings drive posted journals and landed-cost allocation reports without posting stock side effects.</li>
-            <li><span className="font-medium">Automatic extraction:</span> PDFs, emails, text, and screenshot OCR are analyzed into invoice/order/payment fields.</li>
-            <li><span className="font-medium">Review gates:</span> uncertain or non-invoice documents stay in review instead of posting AP.</li>
-            <li><span className="font-medium">3-way boundary:</span> invoices can link to POs, but receiving remains on the `/incoming` workbench.</li>
-            <li><span className="font-medium">Audit trail:</span> upload/apply/reconcile actions are logged and source documents are immutable/deduped.</li>
-          </ul>
-        </div>
-      </section>
-
       <section id="source-document-review-queue" className="rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="font-medium">Saved source document review queue</h2>
+          <h2 className="font-medium">Saved Source Document Review Queue</h2>
           <p className="text-xs text-slate-500">Analyze, review, apply to invoices, or keep as evidence. Uploads never mutate stock quantities.</p>
+          <div className="mt-2 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-800">Evidence Only Until Apply · Retry/manual OCR edits lock after attach or apply.</div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3">Source document</th>
-                <th className="px-4 py-3">Detected record</th>
+                <th className="px-4 py-3">Source Document</th>
+                <th className="px-4 py-3">Detected Record</th>
                 <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Review / action</th>
+                <th className="px-4 py-3">Review / Action</th>
                 <th className="px-4 py-3">Links</th>
               </tr>
             </thead>
@@ -288,6 +416,7 @@ export default async function AccountingWorkbenchPage() {
                 const readiness = documentReadiness(document, analysis);
                 const canApply = canApplyDocuments && !document.supplierInvoiceId && analysis?.classification === "SUPPLIER_INVOICE" && !hasRequiredReview;
                 const canAttach = canApplyDocuments && document.status !== "APPLIED" && document.status !== "ATTACHED";
+                const canReanalyze = canApplyDocuments && documentCanBeReanalyzed(document);
                 const canDeleteSourceDocument = canApplyDocuments
                   && document.status !== "APPLIED"
                   && document.status !== "ATTACHED";
@@ -301,7 +430,7 @@ export default async function AccountingWorkbenchPage() {
                       <div className="mt-1 text-xs text-slate-500">{document.status} · {document.sourceKind} · SHA256 {document.sha256.slice(0, 12)}…</div>
                       <div className="mt-1 text-xs text-slate-500">{readiness.helper}</div>
                       <div className="mt-1 max-w-xs truncate text-xs text-slate-400">{document.storedPath}</div>
-                      <Link href={`/api/accounting/documents/${document.id}/download`} className="mt-1 inline-block text-xs text-blue-700 hover:underline">Download source document</Link>
+                      <Link href={`/api/accounting/documents/${document.id}/download`} className="mt-1 inline-block text-xs text-blue-700 hover:underline">Download Source Document</Link>
                     </td>
                     <td className="px-4 py-3">
                       <div>{analysis?.classification ?? "Unclassified"}</div>
@@ -309,7 +438,7 @@ export default async function AccountingWorkbenchPage() {
                       <div className="text-xs text-slate-500">{analysis?.invoiceNumber ? `Invoice ${analysis.invoiceNumber}` : "Invoice number not detected"}</div>
                       {document.extractedText ? (
                         <details className="mt-2 max-w-xs text-xs text-slate-500">
-                          <summary className="cursor-pointer text-blue-700">Extracted text preview</summary>
+                          <summary className="cursor-pointer text-blue-700">Extracted Text Preview</summary>
                           <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2">{document.extractedText.slice(0, 800)}</pre>
                         </details>
                       ) : null}
@@ -340,14 +469,14 @@ export default async function AccountingWorkbenchPage() {
                               ))}
                             </select>
                           )}
-                          <button className="rounded-md bg-ink px-2 py-1 text-xs font-medium text-white">Apply to invoice</button>
+                          <button className="rounded-md bg-ink px-2 py-1 text-xs font-medium text-white">Apply to Invoice</button>
                         </RefreshingActionForm>
                       ) : <div className="text-xs text-slate-500">{analysis?.suggestedActions?.[0] ?? document.errorMessage ?? "Saved as source evidence."}</div>}
 
                       {canAttach ? (
                         <RefreshingActionForm action={attachAccountingDocumentEvidenceAction} className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
                           <input type="hidden" name="documentId" value={document.id} />
-                          <div className="text-xs font-medium text-slate-700">Attach only — does not receive stock or mark paid.</div>
+                          <div className="text-xs font-medium text-slate-700">Attach Only — Does Not Receive Stock or Mark Paid.</div>
                           {matchedSupplierInvoiceId ? (
                             <>
                               <input type="hidden" name="supplierInvoiceId" value={matchedSupplierInvoiceId} />
@@ -355,7 +484,7 @@ export default async function AccountingWorkbenchPage() {
                             </>
                           ) : invoices.length > 0 ? (
                             <select name="supplierInvoiceId" className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs" defaultValue="">
-                              <option value="">Choose invoice bundle…</option>
+                              <option value="">Choose Invoice Bundle…</option>
                               {invoices.map((invoice) => (
                                 <option key={invoice.id} value={invoice.id}>{invoice.supplier.name} · {invoice.invoiceNumber}</option>
                               ))}
@@ -368,24 +497,24 @@ export default async function AccountingWorkbenchPage() {
                             </>
                           ) : (
                             <select name="purchaseOrderId" className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs" defaultValue="">
-                              <option value="">Optional PO evidence link…</option>
+                              <option value="">Optional PO Evidence Link…</option>
                               {uninvoicedPurchaseOrders.map((order) => (
                                 <option key={order.id} value={order.id}>{order.supplier.name} · {order.id}</option>
                               ))}
                             </select>
                           )}
-                          <button className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium hover:bg-slate-50">Attach as evidence</button>
+                          <button className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium hover:bg-slate-50">Attach as Evidence</button>
                         </RefreshingActionForm>
                       ) : null}
 
-                      {canApplyDocuments ? (
+                      {canReanalyze ? (
                         <div className="mt-3 space-y-2 border-t border-slate-100 pt-2">
                           <RefreshingActionForm action={retryAccountingDocumentExtractionAction} className="inline-block">
                             <input type="hidden" name="documentId" value={document.id} />
-                            <button className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">Retry OCR/extraction</button>
+                            <button className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50">Retry OCR/Extraction</button>
                           </RefreshingActionForm>
                           <details className="text-xs text-slate-600">
-                            <summary className="cursor-pointer text-blue-700">Paste extracted text / OCR and re-analyze</summary>
+                            <summary className="cursor-pointer text-blue-700">Paste Extracted Text / OCR and Re-Analyze</summary>
                             <RefreshingActionForm action={updateAccountingDocumentTextAction} className="mt-2 space-y-2">
                               <input type="hidden" name="documentId" value={document.id} />
                               <textarea
@@ -395,7 +524,7 @@ export default async function AccountingWorkbenchPage() {
                                 className="w-full rounded-md border border-slate-300 px-2 py-1 font-mono text-xs"
                                 placeholder="Paste invoice/order/payment text visible in the saved source document. This re-analyzes evidence only; it does not receive stock, approve payment, or create AP without apply."
                               />
-                              <button className="rounded-md bg-ink px-2 py-1 text-xs font-medium text-white">Save text & analyze</button>
+                              <button className="rounded-md bg-ink px-2 py-1 text-xs font-medium text-white">Save Text & Analyze</button>
                             </RefreshingActionForm>
                           </details>
                           {canDeleteSourceDocument ? (
@@ -405,11 +534,13 @@ export default async function AccountingWorkbenchPage() {
                               confirmMessage="Delete this accounting source document? This permanently removes the saved file and analysis row. Applied or attached evidence cannot be deleted."
                             >
                               <input type="hidden" name="documentId" value={document.id} />
-                              <button className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50">Delete source document</button>
+                              <button className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50">Delete Source Document</button>
                               <div className="mt-1 text-[11px] text-slate-500">This permanently removes the saved file and analysis row. It is only available before the document is attached or applied.</div>
                             </RefreshingActionForm>
                           ) : null}
                         </div>
+                      ) : canApplyDocuments ? (
+                        <div className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500">Linked Evidence Is Locked After Attach/Apply; upload a corrected source document instead of mutating the reviewed record.</div>
                       ) : <div className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500">View-only: retry/manual re-analysis controls hidden.</div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">
@@ -427,7 +558,7 @@ export default async function AccountingWorkbenchPage() {
 
       <section id="uninvoiced-purchase-orders" className="rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="font-medium">Uninvoiced purchase orders</h2>
+          <h2 className="font-medium">Uninvoiced Purchase Orders</h2>
           <p className="text-xs text-slate-500">Accounting documents can be applied to these PO records after review. Physical receiving remains separate.</p>
         </div>
         <div className="divide-y divide-slate-100">
@@ -441,11 +572,49 @@ export default async function AccountingWorkbenchPage() {
                   <div className="font-medium">PO {order.id}</div>
                   <div className="text-sm text-slate-600">{order.supplier.name} · {order.status} · {order.lines.length} line(s) · subtotal USD{subtotal.toFixed(2)}</div>
                 </div>
-                <Link href="/accounting/invoices" className="rounded-md border border-slate-300 px-3 py-2 text-xs hover:bg-slate-50">Create invoice manually</Link>
+                <Link href="/accounting/invoices" className="rounded-md border border-slate-300 px-3 py-2 text-xs hover:bg-slate-50">Create Invoice Manually</Link>
               </div>
             );
           })}
         </div>
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-3">
+        <details className="rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium text-slate-900">Canadian GST/HST and Audit-Ready Records</summary>
+          <div className="mt-3 grid gap-3 text-sm text-slate-700">
+            <Checklist title="Source Evidence" items={["Original PDF/email/screenshot stored privately", "SHA-256 hash and upload actor", "OCR/extraction text retained separately", "Human corrections create audit history"]} />
+            <Checklist title="AP Invoice Fields" items={["Supplier legal name, invoice number/date/due date", "Currency, subtotal, shipping, tax, total", "Line quantities, SKU/part, unit price, tax treatment", "PO/receiving/customs/payment references"]} />
+            <Checklist title="Tax And Landed Cost" items={["GST/HST ITC evidence and supplier tax number when required", "Recoverable tax separated from landed cost", "Duties, brokerage, freight, and non-recoverable tax tracked", "Currency/FX source preserved"]} />
+            <Checklist title="Retention And Controls" items={["Keep supporting records for at least six years", "Deduplicate by hash, order, and supplier invoice key", "No payment without reference evidence", "No stock movement from accounting upload"]} />
+          </div>
+        </details>
+
+        <details className="rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium text-slate-900">Invoice Functionality Upgrades Active Here</summary>
+          <ul className="mt-3 space-y-2 text-sm text-slate-700">
+            <li><span className="font-medium">Evidence Bundle:</span> multiple source documents attach to the same supplier invoice/PO with hash/path provenance.</li>
+            <li><span className="font-medium">Order-Unique Bills:</span> supplier bills merge into the existing order invoice when another source points at the same PO/order.</li>
+            <li><span className="font-medium">Customer Invoices / AR:</span> draft, send, and mark customer-facing invoices paid without consuming stock or shipping products.</li>
+            <li><span className="font-medium">Payment Reconciliation:</span> bank transactions are deduped by hash and explicitly allocated to approved invoices before marking paid.</li>
+            <li><span className="font-medium">GST/HST Exports:</span> accountant CSV rows separate recoverable and non-recoverable tax with source-evidence warnings.</li>
+            <li><span className="font-medium">Posted Journals:</span> approving AP invoices and reconciling AP payments creates immutable, balanced journal entries with account snapshots.</li>
+            <li><span className="font-medium">Automatic Extraction:</span> PDFs, emails, text, and screenshot OCR are analyzed into invoice/order/payment fields.</li>
+            <li><span className="font-medium">Review Gates:</span> uncertain or non-invoice documents stay in review instead of posting AP.</li>
+            <li><span className="font-medium">3-Way Boundary:</span> invoices can link to POs, but receiving remains on the `/incoming` workbench.</li>
+            <li><span className="font-medium">Audit Trail:</span> upload/apply/reconcile actions are logged and source documents are immutable/deduped.</li>
+          </ul>
+        </details>
+
+        <details className="rounded-lg border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-medium text-slate-900">Accounting Control Trail</summary>
+          <p className="mt-3 text-xs text-slate-500">Upload → Review → Apply/Attach → Approve/Pay → Post/Export</p>
+          <ol className="mt-3 space-y-2 text-sm text-slate-700">
+            <li><span className="font-medium">1. Capture Evidence:</span> private source file, hash, OCR/text, and upload actor.</li>
+            <li><span className="font-medium">2. Triage Exceptions:</span> warnings stay visible until a human resolves or attaches them.</li>
+            <li><span className="font-medium">3. Act Explicitly:</span> AP, approval, payment, and journals remain separate human-gated steps.</li>
+          </ol>
+        </details>
       </section>
     </div>
   );
@@ -461,14 +630,41 @@ function SummaryCard({ label, value, subtext }: { label: string; value: string; 
   );
 }
 
-function MiniMetric({ label, value, text, tone }: { label: string; value: string; text: string; tone: string }) {
-  return (
-    <div className={`rounded-md border p-3 ${miniMetricToneClass(tone)}`}>
+function MiniMetric({ href, label, value, text, tone }: { href?: string; label: string; value: string; text: string; tone: string }) {
+  const className = `block rounded-md border p-3 ${miniMetricToneClass(tone)} ${href ? "hover:ring-2 hover:ring-blue-100" : ""}`;
+  const body = (
+    <>
       <div className="text-xs font-medium uppercase tracking-wide">{label}</div>
       <div className="mt-1 text-2xl font-semibold">{value}</div>
       <div className="mt-1 text-xs opacity-80">{text}</div>
+      {href ? <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide opacity-70">Open →</div> : null}
+    </>
+  );
+  return href ? <Link href={href} className={className}>{body}</Link> : <div className={className}>{body}</div>;
+}
+
+function CommandMetric({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: string }) {
+  return (
+    <div className={`rounded-md border p-3 ${miniMetricToneClass(tone)}`}>
+      <div className="text-xs font-medium uppercase tracking-wide">{title}</div>
+      <div className="mt-1 text-xl font-semibold">{value}</div>
+      <div className="mt-1 text-xs opacity-80">{detail}</div>
     </div>
   );
+}
+
+function urgencyClass(urgency: "overdue" | "due-soon" | "later" | "no-due-date") {
+  if (urgency === "overdue") return "border-amber-200 bg-amber-50 text-amber-800";
+  if (urgency === "due-soon") return "border-blue-200 bg-blue-50 text-blue-800";
+  if (urgency === "no-due-date") return "border-slate-200 bg-slate-50 text-slate-700";
+  return "border-emerald-200 bg-emerald-50 text-emerald-800";
+}
+
+function workflowStepClass(tone: string, active: boolean) {
+  const base = "flex h-full gap-3 rounded-lg border p-3 transition hover:-translate-y-0.5 hover:shadow-sm";
+  const toneClass = miniMetricToneClass(tone);
+  const emphasis = active ? "ring-2 ring-blue-200 shadow-sm" : tone === "slate" ? "opacity-75" : "";
+  return `${base} ${toneClass} ${emphasis}`;
 }
 
 function attentionToneClass(tone: string) {

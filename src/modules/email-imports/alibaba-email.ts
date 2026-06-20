@@ -4,6 +4,7 @@ import { createInvoiceFromPurchaseOrder } from "@/modules/accounting/invoices";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { DEFAULT_CURRENCY, convertToUsd, isUsdConversionSupported } from "@/modules/currency";
+import { canonicalSupplierIdentityKey, isValidSupplierIdentityName } from "@/modules/suppliers/service";
 
 type ParsedAlibabaEmail = {
   sourceHash: string;
@@ -140,7 +141,7 @@ export async function importAlibabaEmailOrder(input: {
   if (existing) {
     const refreshed = existing.purchaseOrder
       ? await updateExistingImportProvenance(existing.id, input)
-      : await mergeExistingImport(existing, parsed, matchedLines, supplier.id, input);
+      : await mergeExistingImport(existing, parsed, matchedLines, supplier?.id ?? null, input);
     if (refreshed.archivedAt) {
       return {
         import: refreshed,
@@ -181,7 +182,7 @@ export async function importAlibabaEmailOrder(input: {
       invoiceDownloadedAt: input.invoiceDownloadedAt,
       externalOrderId: parsed.externalOrderId,
       supplierName: parsed.supplierName,
-      supplierId: supplier.id,
+      supplierId: supplier?.id,
       orderDate: parsed.orderDate,
       currency: parsed.currency,
       subtotal: toDecimal(parsed.subtotal),
@@ -238,7 +239,7 @@ export async function applyAlibabaEmailOrderImport(importId: string, actorId: st
     const reparsed = parseAlibabaEmail(orderImport.rawText);
     const rematchedLines = await matchLines(reparsed.lines);
     const supplier = await findOrCreateSupplier(reparsed.supplierName || orderImport.supplierName);
-    orderImport = await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier.id);
+    orderImport = await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier?.id ?? null);
   }
 
   const matchedLines = orderImport.lines.filter((line) =>
@@ -475,9 +476,9 @@ export async function reassessRecentEmailOrderImports(actorId: string) {
     const rematchedLines = await matchLines(reparsed.lines);
     const supplier = await findOrCreateSupplier(reparsed.supplierName || orderImport.supplierName);
     if (orderImport.purchaseOrderId) {
-      await refreshAppliedImport(orderImport.id, reparsed, rematchedLines, supplier.id, actorId);
+      await refreshAppliedImport(orderImport.id, reparsed, rematchedLines, supplier?.id ?? null, actorId);
     } else {
-      await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier.id);
+      await refreshExistingImport(orderImport.id, reparsed, rematchedLines, supplier?.id ?? null);
     }
     refreshed += 1;
   }
@@ -668,7 +669,7 @@ async function mergeExistingImport(
   existing: ExistingEmailImportForMerge,
   parsed: ParsedAlibabaEmail,
   matchedLines: MatchedAlibabaLine[],
-  supplierId: string,
+  supplierId: string | null,
   metadata: EmailImportMetadata
 ) {
   if (isParsedEmailMoreInformative(existing, parsed)) {
@@ -682,7 +683,7 @@ async function updateExistingImportMissingFields(
   importId: string,
   existing: ExistingEmailImportForMerge,
   parsed: ParsedAlibabaEmail,
-  supplierId: string,
+  supplierId: string | null,
   metadata: EmailImportMetadata
 ) {
   return prisma.emailOrderImport.update({
@@ -716,7 +717,7 @@ async function refreshExistingImport(
   importId: string,
   parsed: ParsedAlibabaEmail,
   matchedLines: MatchedAlibabaLine[],
-  supplierId: string,
+  supplierId: string | null,
   metadata?: {
     rawText?: string;
     source?: string;
@@ -767,7 +768,7 @@ async function refreshAppliedImport(
   importId: string,
   parsed: ParsedAlibabaEmail,
   matchedLines: MatchedAlibabaLine[],
-  supplierId: string,
+  supplierId: string | null,
   actorId: string
 ) {
   const matchedCount = matchedLines.filter((line) => line.matchedItem).length;
@@ -1020,17 +1021,29 @@ async function matchLines(lines: ParsedAlibabaLine[]) {
 }
 
 async function findOrCreateSupplier(name: string) {
-  const existing = await prisma.supplier.findUnique({ where: { name } });
-  if (existing) return existing;
+  const normalizedName = cleanField(name);
+  if (!isValidSupplierIdentityName(normalizedName)) return null;
+
+  const canonicalName = canonicalSupplierIdentityKey(normalizedName);
+  const suppliers = await prisma.supplier.findMany({
+    select: { id: true, name: true, companyName: true, confirmedByHuman: true, moq: true, leadTimeDays: true, shippingCost: true, reliabilityScore: true, productPageUrl: true, archivedAt: true, archivedBy: true, archiveReason: true, companyRevenue: true, foundedYear: true, address: true, contactEmail: true, contactName: true, createdAt: true, updatedAt: true }
+  });
+  const existing = suppliers.find((supplier) =>
+    canonicalSupplierIdentityKey(supplier.companyName || supplier.name) === canonicalName
+      || canonicalSupplierIdentityKey(supplier.name) === canonicalName
+  );
+  if (existing) return existing.archivedAt ? null : existing;
+
   return prisma.supplier.create({
     data: {
-      name,
+      name: normalizedName,
+      companyName: normalizedName,
       confirmedByHuman: false,
       moq: 1,
       leadTimeDays: 21,
       shippingCost: new Prisma.Decimal(0),
       reliabilityScore: new Prisma.Decimal(3),
-      productPageUrl: name.toLowerCase().includes("alibaba") ? "https://www.alibaba.com" : undefined
+      productPageUrl: normalizedName.toLowerCase().includes("alibaba") ? "https://www.alibaba.com" : undefined
     }
   });
 }
@@ -1703,8 +1716,18 @@ function cleanIdentifier(value?: string) {
 
 function findSupplierName(text: string, fromAddress?: string) {
   const supplierPayment = text.match(/supplier\s+(.+?)\s+has received/i)?.[1];
-  if (supplierPayment) return cleanField(supplierPayment);
-  return cleanField(findField(text, ["Supplier name", "Supplier", "Vendor name", "Vendor", "Seller name", "Seller", "Sold by", "Store", "Merchant", "Company name", "Company"]) ?? inferSupplierName(fromAddress, text));
+  if (supplierPayment && isValidSupplierIdentityName(supplierPayment)) return cleanField(supplierPayment);
+  const labeledSupplier = findLabeledSupplierField(text, ["Supplier name", "Supplier", "Vendor name", "Vendor", "Seller name", "Seller", "Sold by", "Store", "Merchant", "Company name", "Company"]);
+  if (labeledSupplier && isValidSupplierIdentityName(labeledSupplier)) return cleanField(labeledSupplier);
+  return cleanField(inferSupplierName(fromAddress, text));
+}
+
+function findLabeledSupplierField(text: string, labels: string[]) {
+  for (const label of labels) {
+    const match = text.match(new RegExp(`(?:^|\\n)\\s*${escapeRegex(label)}\\s*[:#-]\\s*([^\\n|;]+)`, "i"));
+    if (match?.[1]) return cleanField(match[1]);
+  }
+  return undefined;
 }
 
 function findDateText(text: string, compact: string) {

@@ -28,8 +28,8 @@ export function ItemImportExportPanel({
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
           <div>
-            <h2 className="font-medium">CSV import / export</h2>
-            <p className="text-sm text-slate-500">Collapsed by default. Open only when you need bulk item master data movement.</p>
+            <h2 className="font-medium">CSV Import / Export</h2>
+            <p className="text-sm text-slate-500">Collapsed by Default. Open Only When You Need Bulk Item Master Data Movement.</p>
           </div>
           <span className="text-sm font-medium text-ink group-open:hidden">Open</span>
           <span className="hidden text-sm font-medium text-ink group-open:inline">Close</span>
@@ -65,7 +65,7 @@ export function ItemImportExportPanel({
               disabled={pending || !defaultStorageLocationId}
               className="rounded-md bg-ink px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending ? "Importing…" : "Validate and import CSV"}
+              {pending ? "Importing…" : "Validate and Import CSV"}
             </button>
             {!defaultStorageLocationId ? (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

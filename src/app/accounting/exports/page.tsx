@@ -22,12 +22,12 @@ export default async function AccountingExportsPage({ searchParams }: { searchPa
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">GST/HST exports</h1>
+          <h1 className="text-2xl font-semibold">GST/HST Exports</h1>
           <p className="max-w-3xl text-sm text-slate-600">
             Export AP invoice tax-support rows with source evidence, warnings, and recoverable/non-recoverable tax splits for accountant review. Posted journal CSV is available on the journal entries page.
           </p>
         </div>
-        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to accounting</Link>
+        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to Accounting</Link>
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -40,10 +40,10 @@ export default async function AccountingExportsPage({ searchParams }: { searchPa
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Export rows</h2></div>
+        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Export Rows</h2></div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Invoice</th><th className="px-4 py-3">Supplier</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Tax</th><th className="px-4 py-3">Evidence / warnings</th></tr></thead>
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Invoice</th><th className="px-4 py-3">Supplier</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Tax</th><th className="px-4 py-3">Evidence / Warnings</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 ? <tr><td className="px-4 py-6 text-slate-500" colSpan={5}>No GST/HST rows in this range.</td></tr> : rows.map((row) => (
                 <tr key={row.invoiceId} className="align-top">

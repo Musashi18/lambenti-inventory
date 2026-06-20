@@ -57,13 +57,13 @@ export function AccountingDocumentDropzone() {
           type="file"
           name="documents"
           multiple
-          accept=".pdf,.eml,.txt,.html,.htm,.csv,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,application/pdf,message/rfc822,text/*,image/*"
+          accept=".pdf,.eml,.txt,.html,.htm,.csv,.png,.jpg,.jpeg,.webp,.tif,.tiff,.bmp,.zip,application/pdf,message/rfc822,text/*,image/*,application/zip,application/x-zip-compressed"
           onChange={onChange}
         />
         <div className="mx-auto max-w-xl space-y-2">
-          <p className="text-sm font-medium text-slate-900">Drag and drop invoices, order notices, emails, PDFs, receipts, or screenshots.</p>
+          <p className="text-sm font-medium text-slate-900">Drag and drop invoices, order notices, emails, PDFs, receipts, screenshots, or Zipped Folders.</p>
           <p className="text-xs text-slate-600">
-            Files are saved privately, hashed, text/OCR analyzed, deduped, and turned into reviewable accounting evidence. Uploading does not receive stock or mark anything paid.
+            Files are saved privately, hashed, text/OCR analyzed, deduped, and turned into reviewable accounting evidence. ZIP archives are unpacked first; uploading does not receive stock or mark anything paid.
           </p>
           <button
             type="button"
@@ -71,7 +71,7 @@ export function AccountingDocumentDropzone() {
             disabled={isPending}
             className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isPending ? "Analyzing…" : "Upload & analyze"}
+            {isPending ? "Analyzing…" : "Upload & Analyze"}
           </button>
         </div>
       </div>
@@ -85,6 +85,16 @@ export function AccountingDocumentDropzone() {
       {result ? (
         <div className={`rounded-md border p-3 text-sm ${result.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`} role="status">
           <p className="font-medium">{result.message}</p>
+          {result.archiveSummaries?.length ? (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+              {result.archiveSummaries.map((archive) => (
+                <li key={archive.archiveName}>
+                  Expanded {archive.extractedCount} document{archive.extractedCount === 1 ? "" : "s"} from {archive.archiveName}
+                  {archive.skippedCount > 0 ? ` · skipped ${archive.skippedCount} unsupported/metadata file${archive.skippedCount === 1 ? "" : "s"}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {result.documents.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
               {result.documents.map((document) => (

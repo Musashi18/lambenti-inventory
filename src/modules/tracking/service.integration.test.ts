@@ -486,17 +486,19 @@ describe("tracking service", () => {
     });
     const tracking = await prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "LL270153425CN" } });
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") return new Response(JSON.stringify({ data: { trackers: [] } }), { status: 200 });
       expect(init?.method).toBe("POST");
       expect(init?.headers).toMatchObject({
         authorization: "Bearer ship24-test-key",
         "content-type": "application/json"
       });
-      expect(JSON.parse(String(init?.body))).toMatchObject({
+      const requestBody = JSON.parse(String(init?.body));
+      expect(requestBody).toMatchObject({
         trackingNumber: "LL270153425CN",
-        clientTrackerId: tracking.id,
         shipmentReference: fixture.externalOrderId,
         destinationCountryCode: "CA"
       });
+      expect(requestBody.clientTrackerId).toMatch(new RegExp(`^${tracking.id}-[0-9a-f]{10}$`));
       return new Response(JSON.stringify({
         data: {
           trackings: [{
@@ -540,6 +542,179 @@ describe("tracking service", () => {
     expect(refreshed.nextRefreshAt?.toISOString()).toBe("2026-06-14T03:30:00.000Z");
     const events = await prisma.trackingEvent.findMany({ where: { trackingNumberId: refreshed.id } });
     expect(events).toEqual([expect.objectContaining({ description: "Departed from sorting center", location: "Shenzhen, China", status: "IN_TRANSIT" })]);
+  });
+
+  it("avoids Ship24 tracker conflicts by not reusing stale bare row ids as client tracker ids", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-CONFLICT");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153429CN"],
+        text: "Tracking Number: LL270153429CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const tracking = await prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "LL270153429CN" } });
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") return new Response(JSON.stringify({ data: { trackers: [] } }), { status: 200 });
+      const requestBody = JSON.parse(String(init?.body));
+      expect(requestBody.clientTrackerId).not.toBe(tracking.id);
+      expect(requestBody.clientTrackerId).toMatch(new RegExp(`^${tracking.id}-[0-9a-f]{10}$`));
+      return new Response(JSON.stringify({
+        data: {
+          trackings: [{
+            tracker: { trackerId: "ship24-tracker-conflict-safe", trackingNumber: "LL270153429CN", courierCode: ["china-post"], clientTrackerId: requestBody.clientTrackerId },
+            shipment: { statusMilestone: "in_transit", originCountryCode: "CN", destinationCountryCode: "CA" },
+            events: [{ status: "Arrived at export facility", statusMilestone: "in_transit", occurrenceDatetime: "2026-06-14T01:30:00.000Z" }]
+          }]
+        }
+      }), { status: 200 });
+    });
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153429CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-14T02:30:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key" },
+      fetcher
+    });
+
+    expect(refreshed.refreshStatus).toBe("SUCCESS");
+    expect(refreshed.refreshError).toBeNull();
+    expect(refreshed.currentStatus).toBe("IN_TRANSIT");
+  });
+
+  it("deactivates duplicate active Ship24 trackers before creating the next tracker poll", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-DEDUPE");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153430CN"],
+        text: "Tracking Number: LL270153430CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const patchedTrackerIds: string[] = [];
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return new Response(JSON.stringify({
+          data: {
+            trackers: [
+              { trackerId: "current-old", trackingNumber: "LL270153430CN", clientTrackerId: "stale-current", isTracked: true, isSubscribed: true, createdAt: "2026-06-14T00:00:00.000Z" },
+              { trackerId: "other-old", trackingNumber: "873130679210", clientTrackerId: "other-old", isTracked: true, isSubscribed: true, createdAt: "2026-06-14T00:00:00.000Z" },
+              { trackerId: "other-new", trackingNumber: "873130679210", clientTrackerId: "other-new", isTracked: true, isSubscribed: true, createdAt: "2026-06-15T00:00:00.000Z" }
+            ]
+          }
+        }), { status: 200 });
+      }
+      if (init?.method === "PATCH") {
+        patchedTrackerIds.push(url.split("/").at(-1) ?? "");
+        expect(JSON.parse(String(init.body))).toEqual({ isSubscribed: false, isTracked: false });
+        return new Response(JSON.stringify({ data: { tracker: { isTracked: false, isSubscribed: false } } }), { status: 200 });
+      }
+      expect(init?.method).toBe("POST");
+      return new Response(JSON.stringify({
+        data: {
+          trackings: [{
+            tracker: { trackerId: "ship24-dedupe-current", trackingNumber: "LL270153430CN" },
+            shipment: { statusMilestone: "in_transit", originCountryCode: "CN", destinationCountryCode: "CA" },
+            events: [{ status: "Processed through facility", statusMilestone: "in_transit", occurrenceDatetime: "2026-06-14T01:30:00.000Z" }]
+          }]
+        }
+      }), { status: 200 });
+    });
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153430CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-14T02:30:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key", ship24BaseUrl: "https://api.ship24.test" },
+      fetcher
+    });
+
+    expect(patchedTrackerIds).toEqual(["current-old", "other-old"]);
+    expect(refreshed.refreshStatus).toBe("SUCCESS");
+    expect(fetcher).toHaveBeenCalledWith("https://api.ship24.test/public/v1/trackers?limit=100", expect.objectContaining({ method: "GET" }));
+    expect(fetcher).toHaveBeenCalledWith("https://api.ship24.test/public/v1/trackers/track", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("normalizes Ship24 info-received provider entries separately from pending", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-DATA");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153426CN"],
+        text: "Tracking Number: LL270153426CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        trackings: [{
+          shipment: {
+            statusCode: "data_information_received",
+            statusCategory: "data",
+            statusMilestone: "data"
+          },
+          events: [{
+            status: "Electronic information submitted by shipper",
+            occurrenceDatetime: "2026-06-14T01:30:00.000Z",
+            statusCategory: "data",
+            statusMilestone: "data"
+          }]
+        }]
+      }
+    }), { status: 200 }));
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153426CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-14T02:30:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key" },
+      fetcher
+    });
+
+    expect(refreshed.currentStatus).toBe("INFO_RECEIVED");
+    await expect(prisma.trackingEvent.findFirstOrThrow({ where: { trackingNumberId: refreshed.id } })).resolves.toMatchObject({ status: "INFO_RECEIVED" });
+  });
+
+  it("keeps pending when the provider has no initial tracking entry", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-NO-EVENT");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153427CN"],
+        text: "Tracking Number: LL270153427CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        trackings: [{
+          shipment: {
+            statusCode: "data",
+            statusCategory: "data",
+            statusMilestone: "data"
+          },
+          events: []
+        }]
+      }
+    }), { status: 200 }));
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153427CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-14T02:30:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key" },
+      fetcher
+    });
+
+    expect(refreshed.currentStatus).toBe("PENDING");
+    await expect(prisma.trackingEvent.count({ where: { trackingNumberId: refreshed.id } })).resolves.toBe(0);
   });
 
   it("backfills tracking numbers from archived email evidence without receiving stock", async () => {
@@ -604,6 +779,84 @@ describe("tracking service", () => {
     await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310034" } })).resolves.toMatchObject({ currentStatus: "DELIVERED" });
   });
 
+  it("screens duplicate same-order shipments down to the active most-recent tracking stream while preserving links", async () => {
+    const fixture = await createOrderImportFixture("DUPLICATE-SHIPMENT");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        supplierName: fixture.supplier.name,
+        capturedAt: "2026-06-14T02:00:00.000Z",
+        trackingNumbers: ["LL270153431CN", "LL270153432CN"],
+        text: "Shipment 1 LL270153431CN was replaced by shipment 2 LL270153432CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const stale = await prisma.trackingNumber.update({
+      where: { trackingNumber: "LL270153431CN" },
+      data: { currentStatus: "IN_TRANSIT", lastEventAt: new Date("2026-06-14T01:00:00.000Z") }
+    });
+    const active = await prisma.trackingNumber.update({
+      where: { trackingNumber: "LL270153432CN" },
+      data: { currentStatus: "IN_TRANSIT", lastEventAt: new Date("2026-06-15T01:00:00.000Z") }
+    });
+    await prisma.trackingEvent.createMany({
+      data: [
+        {
+          trackingNumberId: stale.id,
+          status: "IN_TRANSIT",
+          description: "Older duplicate label scanned",
+          occurredAt: new Date("2026-06-14T01:00:00.000Z")
+        },
+        {
+          trackingNumberId: active.id,
+          status: "IN_TRANSIT",
+          description: "Newest active shipment departed facility",
+          occurredAt: new Date("2026-06-15T01:00:00.000Z")
+        }
+      ]
+    });
+
+    const persistedLinks = await prisma.trackingNumber.findMany({
+      where: { externalOrderId: fixture.externalOrderId },
+      orderBy: { trackingNumber: "asc" }
+    });
+    expect(persistedLinks).toEqual([
+      expect.objectContaining({ trackingNumber: "LL270153431CN", purchaseOrderId: fixture.order.id, emailOrderImportId: fixture.orderImport.id }),
+      expect.objectContaining({ trackingNumber: "LL270153432CN", purchaseOrderId: fixture.order.id, emailOrderImportId: fixture.orderImport.id })
+    ]);
+
+    const dashboard = await getTrackingDashboard({ now: new Date("2026-06-15T02:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
+    const orderRows = dashboard.rows.filter((row) => row.externalOrderId === fixture.externalOrderId);
+
+    expect(orderRows.map((row) => row.trackingNumber)).toEqual(["LL270153432CN"]);
+    expect(orderRows[0]).toMatchObject({
+      trackingNumber: "LL270153432CN",
+      relatedTrackingNumbers: ["LL270153431CN", "LL270153432CN"],
+      screenedShipmentCount: 2,
+      latestEvent: expect.objectContaining({ description: "Newest active shipment departed facility" })
+    });
+  });
+
+  it("hides junk supplier labels from dashboard display rows", async () => {
+    await prisma.trackingNumber.create({
+      data: {
+        trackingNumber: `${TEST_PREFIX}-JUNK-SUPPLIER`,
+        source: "ALIBABA_PORTAL",
+        supplierName: "to ship",
+        currentStatus: "PENDING",
+        refreshStatus: "FAILED",
+        refreshError: "provider failed",
+        nextRefreshAt: new Date("2026-06-14T00:00:00.000Z")
+      }
+    });
+
+    const dashboard = await getTrackingDashboard({ now: new Date("2026-06-14T04:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
+    const row = dashboard.rows.find((entry) => entry.trackingNumber === `${TEST_PREFIX}-JUNK-SUPPLIER`);
+
+    expect(row).toMatchObject({ linkedOrderLabel: "Unlinked evidence", supplierName: null });
+  });
+
   it("builds dashboard rows with linked order and service connection metadata", async () => {
     const fixture = await createOrderImportFixture("DASHBOARD");
     await captureTrackingNumbersFromPortalSnapshot({
@@ -636,7 +889,8 @@ describe("tracking service", () => {
         currentStatus: "DELIVERED",
         deliveredAt: new Date("2026-06-14T03:00:00.000Z"),
         lastEventAt: new Date("2026-06-14T03:00:00.000Z"),
-        nextRefreshAt: new Date("2026-06-13T00:00:00.000Z")
+        nextRefreshAt: new Date("2026-06-13T00:00:00.000Z"),
+        rawStatusJson: { provider: "test", shipment: { status: "DELIVERED" } }
       }
     });
     await prisma.trackingEvent.createMany({
@@ -653,18 +907,26 @@ describe("tracking service", () => {
           status: "DELIVERED",
           description: "Delivered",
           location: "Toronto, Canada",
-          occurredAt: new Date("2026-06-14T03:00:00.000Z")
+          occurredAt: new Date("2026-06-14T03:00:00.000Z"),
+          rawEventJson: { checkpoint: "front_door" }
         }
       ]
     });
     const deliveredDashboard = await getTrackingDashboard({ now: new Date("2026-06-14T04:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
     expect(deliveredDashboard.rows.some((row) => row.trackingNumber === "LL270153424CN")).toBe(false);
-    const deliveredRow = (deliveredDashboard as { deliveredRows?: Array<{ trackingNumber: string; nextRefreshAt: Date | null; shipTimeLabel: string | null; shipTimeMs: number | null }> }).deliveredRows?.find((row) => row.trackingNumber === "LL270153424CN");
+    const deliveredRow = deliveredDashboard.deliveredRows.find((row) => row.trackingNumber === "LL270153424CN");
     expect(deliveredRow).toMatchObject({
       trackingNumber: "LL270153424CN",
       nextRefreshAt: null,
       shipTimeLabel: "2d 3h",
-      shipTimeMs: 183_600_000
+      shipTimeMs: 183_600_000,
+      rawStatusJson: { provider: "test", shipment: { status: "DELIVERED" } }
+    });
+    expect(deliveredRow?.events).toHaveLength(2);
+    expect(deliveredRow?.events[0]).toMatchObject({
+      status: "DELIVERED",
+      description: "Delivered",
+      rawEventJson: { checkpoint: "front_door" }
     });
   });
 });

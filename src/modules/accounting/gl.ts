@@ -2,6 +2,13 @@ import { GLAccountType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 
+export const DEFAULT_AP_POSTING_SETUP = [
+  { purpose: "BANK_CASH", code: "1000", name: "Operating bank", type: GLAccountType.ASSET },
+  { purpose: "TAX_RECOVERABLE", code: "1060", name: "GST/HST recoverable", type: GLAccountType.ASSET },
+  { purpose: "INVENTORY_ASSET", code: "1300", name: "Inventory asset", type: GLAccountType.ASSET },
+  { purpose: "ACCOUNTS_PAYABLE", code: "2000", name: "Accounts payable", type: GLAccountType.LIABILITY }
+] as const;
+
 type GLResolverClient = Pick<typeof prisma, "gLAccountMapping" | "supplierInvoiceLine">;
 
 export type GLAccountInput = {
@@ -75,6 +82,58 @@ export async function upsertGLMapping(input: GLMappingInput) {
     payload: { scopeType, scopeId: input.scopeId, purpose, glAccountId: input.glAccountId, priority: mapping.priority, active: mapping.active }
   });
   return mapping;
+}
+
+export async function installDefaultApPostingSetup(input: { actorId: string; codePrefix?: string }) {
+  const results: Array<{ purpose: string; accountCode: string; status: "created" | "reactivated" | "kept" }> = [];
+
+  for (const setup of DEFAULT_AP_POSTING_SETUP) {
+    const purpose = setup.purpose;
+    const existingActiveDefault = await prisma.gLAccountMapping.findFirst({
+      where: {
+        active: true,
+        scopeType: "DEFAULT",
+        scopeId: null,
+        purpose,
+        glAccount: input.codePrefix ? { active: true, code: { startsWith: input.codePrefix } } : { active: true }
+      },
+      include: { glAccount: true },
+      orderBy: [{ priority: "asc" }, { createdAt: "desc" }]
+    });
+    if (existingActiveDefault) {
+      results.push({ purpose, accountCode: existingActiveDefault.glAccount.code, status: "kept" });
+      continue;
+    }
+
+    const code = input.codePrefix ? `${input.codePrefix}-${setup.code}` : setup.code;
+    const existingAccount = await prisma.gLAccount.findUnique({ where: { code } });
+    if (existingAccount && existingAccount.type !== setup.type) {
+      throw new Error(`Cannot install default ${purpose} mapping: GL account ${code} exists as ${existingAccount.type}, expected ${setup.type}. Update /accounting/accounts manually.`);
+    }
+
+    const account = existingAccount
+      ? await prisma.gLAccount.update({ where: { id: existingAccount.id }, data: { active: true } })
+      : await prisma.gLAccount.create({ data: { code, name: setup.name, type: setup.type, active: true } });
+
+    const existingMapping = await prisma.gLAccountMapping.findFirst({
+      where: { scopeType: "DEFAULT", scopeId: null, purpose, glAccountId: account.id }
+    });
+    const mapping = existingMapping
+      ? await prisma.gLAccountMapping.update({ where: { id: existingMapping.id }, data: { active: true, priority: defaultPriorityForScope("DEFAULT"), createdBy: input.actorId } })
+      : await prisma.gLAccountMapping.create({ data: { scopeType: "DEFAULT", scopeId: null, purpose, glAccountId: account.id, priority: defaultPriorityForScope("DEFAULT"), active: true, createdBy: input.actorId } });
+
+    await writeAuditLog({
+      actorType: "USER",
+      actorId: input.actorId,
+      action: "INSTALL_DEFAULT_AP_GL_MAPPING",
+      entityType: "GLAccountMapping",
+      entityId: mapping.id,
+      payload: { purpose, accountCode: account.code, accountName: account.name, status: existingAccount || existingMapping ? "reactivated" : "created" }
+    });
+    results.push({ purpose, accountCode: account.code, status: existingAccount || existingMapping ? "reactivated" : "created" });
+  }
+
+  return results;
 }
 
 export async function resolveInvoiceLineAccount(invoiceLineId: string, purpose = "INVENTORY_ASSET", client: GLResolverClient = prisma) {

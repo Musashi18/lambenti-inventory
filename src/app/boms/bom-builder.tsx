@@ -2,6 +2,8 @@
 
 import { type FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ItemSelectOptions } from "@/components/item-select-options";
+import { sortItemsByUseGroup } from "@/modules/inventory/item-option-groups";
 
 type BomAction = (formData: FormData) => Promise<void>;
 
@@ -19,12 +21,21 @@ type BomBuilderLine = {
   componentItem: BomBuilderItem;
 };
 
+type BomBuildConstraint = {
+  bottleneckSku: string;
+  quantityPerUnit: number;
+  available: number;
+  buildableUnits: number;
+  percentOfMax: number;
+};
+
 type BomBuilderSection = {
   id: string;
   parentItemId: string;
   version: string;
   parentItem: BomBuilderItem;
   lines: BomBuilderLine[];
+  buildConstraint: BomBuildConstraint | null;
 };
 
 type BomBuilderProps = {
@@ -48,8 +59,11 @@ export function BomBuilder({
 }: BomBuilderProps) {
   const router = useRouter();
   const itemById = useMemo(() => new Map(activeItems.map((item) => [item.id, item])), [activeItems]);
-  const firstFinishedUnitId = finishedUnitItems[0]?.id ?? "";
+  const sortedActiveItems = useMemo(() => sortItemsByUseGroup(activeItems), [activeItems]);
+  const sortedFinishedUnitItems = useMemo(() => sortItemsByUseGroup(finishedUnitItems), [finishedUnitItems]);
+  const firstFinishedUnitId = sortedFinishedUnitItems[0]?.id ?? "";
   const [newParentItemId, setNewParentItemId] = useState(firstFinishedUnitId);
+
   const [componentSelections, setComponentSelections] = useState<Record<string, string>>(() => Object.fromEntries(
     boms.flatMap((bom) => bom.lines.map((line) => [line.id, line.componentItemId]))
   ));
@@ -68,7 +82,7 @@ export function BomBuilder({
       afterSuccess?.();
       router.refresh();
       window.location.reload();
-      setMessage("BOM builder updated.");
+      setMessage("BOM Builder updated.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "BOM update failed. Refresh and try again.");
     } finally {
@@ -80,7 +94,7 @@ export function BomBuilder({
     <div className="space-y-6">
       <section className="rounded-md border border-slate-200 bg-white p-4">
         <div>
-          <h2 className="font-medium">Create another finished unit section</h2>
+          <h2 className="font-medium">Create Another Finished Unit Section</h2>
           <p className="mt-1 text-sm text-slate-600">
             Finished units are active finished-good items from the item master. Components/raw materials stay available only in component-row dropdowns.
           </p>
@@ -98,10 +112,8 @@ export function BomBuilder({
               className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
               required
             >
-              {finishedUnitItems.length === 0 ? <option value="">No finished units available</option> : null}
-              {finishedUnitItems.map((item) => (
-                <option key={item.id} value={item.id}>{item.sku} — {item.description}</option>
-              ))}
+              {sortedFinishedUnitItems.length === 0 ? <option value="">No finished units available</option> : null}
+              <ItemSelectOptions items={sortedFinishedUnitItems} />
             </select>
           </label>
           <button
@@ -109,7 +121,7 @@ export function BomBuilder({
             disabled={!newParentItemId || pendingKey !== null}
             aria-busy={pendingKey === "create-section"}
           >
-            {pendingKey === "create-section" ? "Creating…" : "Create another finished unit section"}
+            {pendingKey === "create-section" ? "Creating…" : "Create Another Finished Unit Section"}
           </button>
         </form>
       </section>
@@ -121,7 +133,7 @@ export function BomBuilder({
       ) : null}
 
       {boms.map((bom) => {
-        const componentOptions = activeItems.filter((item) => item.id !== bom.parentItemId);
+        const componentOptions = sortedActiveItems.filter((item) => item.id !== bom.parentItemId);
         const draftComponentId = draftComponentSelections[bom.id] ?? componentOptions[0]?.id ?? "";
         const selectedComponentDetails = itemById.get(draftComponentId);
 
@@ -129,18 +141,23 @@ export function BomBuilder({
           <section key={bom.id} className="rounded-md border border-slate-200 bg-white p-4">
             <div className="mb-4">
               <div className="text-xs uppercase tracking-wide text-slate-500">Finished unit</div>
-              <h2 className="text-lg font-semibold">{bom.parentItem.sku} — {bom.parentItem.description}</h2>
+              <h2 className="text-lg font-semibold">{bom.parentItem.sku} — {titleCaseLabel(bom.parentItem.description)}</h2>
               <p className="text-sm text-slate-500">{cleanItemType(bom.parentItem.category)} · {bom.version}</p>
+              {bom.parentItem.sku === "LAMBENTI_PACKAGE" ? (
+                <span className="mt-2 inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800">Launch-Critical BOM</span>
+              ) : null}
             </div>
 
-            <div className="overflow-x-auto">
+            <BomBuildConstraintBar constraint={bom.buildConstraint} />
+
+            <div className="mt-4 overflow-x-auto rounded-md border border-slate-100">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left text-slate-500">
                   <tr>
                     <th className="px-3 py-2 font-medium">Component</th>
-                    <th className="px-3 py-2 font-medium">Clean item type</th>
+                    <th className="px-3 py-2 font-medium">Clean Item Type</th>
                     <th className="px-3 py-2 font-medium">Description</th>
-                    <th className="px-3 py-2 font-medium">Quantity per unit</th>
+                    <th className="px-3 py-2 font-medium">Quantity per Unit</th>
                     <th className="px-3 py-2 font-medium">Action</th>
                   </tr>
                 </thead>
@@ -154,7 +171,7 @@ export function BomBuilder({
                     const selectedComponentId = componentSelections[line.id] ?? line.componentItemId;
                     const selectedLineComponentDetails = itemById.get(selectedComponentId) ?? line.componentItem;
                     return (
-                      <tr key={line.id} className="border-t border-slate-100 align-top">
+                      <tr key={line.id} className="border-t border-slate-100 align-top odd:bg-white even:bg-slate-50/60 hover:bg-cyan-50/40">
                         <td className="px-3 py-2 min-w-72">
                           <form
                             id={`bom-line-${line.id}`}
@@ -167,9 +184,7 @@ export function BomBuilder({
                               onChange={(event) => setComponentSelections((current) => ({ ...current, [line.id]: event.target.value }))}
                               className="w-full rounded-md border px-2 py-1.5"
                             >
-                              {componentOptions.map((item) => (
-                                <option key={item.id} value={item.id}>{item.sku} — {item.description}</option>
-                              ))}
+                              <ItemSelectOptions items={componentOptions} />
                             </select>
                           </form>
                         </td>
@@ -181,7 +196,7 @@ export function BomBuilder({
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-2">
                             <button form={`bom-line-${line.id}`} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium hover:bg-slate-50 disabled:opacity-60" disabled={pendingKey !== null}>
-                              {pendingKey === `update-${line.id}` ? "Saving…" : "Save row"}
+                              {pendingKey === `update-${line.id}` ? "Saving…" : "Save Row"}
                             </button>
                             <form
                               onSubmit={(event) => void submitForm(event, removeBomLineAction, `remove-${line.id}`, () => {
@@ -190,7 +205,7 @@ export function BomBuilder({
                             >
                               <input type="hidden" name="lineId" value={line.id} />
                               <button className="rounded-md border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60" disabled={pendingKey !== null}>
-                                {pendingKey === `remove-${line.id}` ? "Removing…" : "Remove row"}
+                                {pendingKey === `remove-${line.id}` ? "Removing…" : "Remove Row"}
                               </button>
                             </form>
                           </div>
@@ -208,7 +223,7 @@ export function BomBuilder({
             >
               <input type="hidden" name="bomId" value={bom.id} />
               <label className="text-sm font-medium text-slate-700">
-                Add component line
+                Add Component Line
                 <select
                   name="componentItemId"
                   value={draftComponentId}
@@ -217,9 +232,7 @@ export function BomBuilder({
                   required
                 >
                   {componentOptions.length === 0 ? <option value="">No component options</option> : null}
-                  {componentOptions.map((item) => (
-                    <option key={item.id} value={item.id}>{item.sku} — {item.description}</option>
-                  ))}
+                  <ItemSelectOptions items={componentOptions} />
                 </select>
               </label>
               <div className="text-sm text-slate-600">
@@ -227,11 +240,11 @@ export function BomBuilder({
                 {selectedComponentDetails ? cleanItemType(selectedComponentDetails.category) : "—"}
               </div>
               <label className="text-sm font-medium text-slate-700">
-                Qty/unit
+                Qty/Unit
                 <input name="quantity" type="number" min="1" defaultValue="1" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
               </label>
               <button className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-white disabled:opacity-60" disabled={!draftComponentId || pendingKey !== null}>
-                {pendingKey === `add-${bom.id}` ? "Adding…" : "Add component line"}
+                {pendingKey === `add-${bom.id}` ? "Adding…" : "Add Component Line"}
               </button>
               <div className="text-xs text-slate-500 md:col-span-4">
                 {selectedComponentDetails ? selectedComponentDetails.description : "Choose an active item; type and description autofill from the item master."}
@@ -246,10 +259,39 @@ export function BomBuilder({
   );
 }
 
+function BomBuildConstraintBar({ constraint }: { constraint: BomBuildConstraint | null }) {
+  if (!constraint) {
+    return (
+      <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+        Build Constraint: Add Component Rows To Calculate The Current Bottleneck.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div>
+          <div className="font-semibold uppercase tracking-wide text-slate-500">Build Constraint</div>
+          <div className="mt-1 text-sm font-medium text-slate-900">{constraint.bottleneckSku} limits this BOM to {constraint.buildableUnits} buildable unit{constraint.buildableUnits === 1 ? "" : "s"}</div>
+        </div>
+        <div className="text-slate-500">Qty/Unit {constraint.quantityPerUnit} · Available {constraint.available}</div>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200" aria-label="BOM build constraint mini-bar">
+        <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${constraint.percentOfMax}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function cleanItemType(category: string) {
   return category
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function titleCaseLabel(value: string) {
+  return value.replace(/\b[a-z][\w-]*/g, (word) => word.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("-"));
 }

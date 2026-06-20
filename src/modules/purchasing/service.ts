@@ -13,12 +13,20 @@ export async function getPurchaseRecommendations() {
   const [recommendableItems, incomingByItemId, openRequestsByItemId] = await Promise.all([
     prisma.item.findMany({
       where: { id: { in: itemIds }, lifecycleStatus: { not: "OBSOLETE" }, category: { not: ItemCategory.FINISHED_GOOD } },
-      select: { id: true }
+      select: {
+        id: true,
+        preferredSupplierId: true,
+        preferredSupplier: { select: { name: true, companyName: true } },
+        supplierSku: true,
+        estimatedUnitCost: true,
+        costConfidence: true
+      }
     }),
     getIncomingPurchaseOrderQuantityByItem(itemIds),
     getOpenPurchaseRequestQuantityByItem(itemIds)
   ]);
   const recommendableItemIds = new Set(recommendableItems.map((item) => item.id));
+  const recommendableItemById = new Map(recommendableItems.map((item) => [item.id, item]));
 
   return stock
     .filter((item) => recommendableItemIds.has(item.itemId))
@@ -26,10 +34,16 @@ export async function getPurchaseRecommendations() {
     .map((item) => {
       const incomingQty = incomingByItemId.get(item.itemId) ?? 0;
       const openDraftOrPendingRequestQty = openRequestsByItemId.get(item.itemId) ?? 0;
+      const itemDetails = recommendableItemById.get(item.itemId);
       return {
         ...item,
         incomingQty,
         openDraftOrPendingRequestQty,
+        preferredSupplierId: itemDetails?.preferredSupplierId ?? null,
+        preferredSupplierName: itemDetails?.preferredSupplier?.companyName ?? itemDetails?.preferredSupplier?.name ?? null,
+        supplierSku: itemDetails?.supplierSku ?? null,
+        estimatedUnitCost: itemDetails?.estimatedUnitCost?.toString() ?? null,
+        costConfidence: itemDetails?.costConfidence ?? null,
         recommendedOrderQuantity: Math.max(item.targetStock - item.available - incomingQty - openDraftOrPendingRequestQty, 0)
       };
     })

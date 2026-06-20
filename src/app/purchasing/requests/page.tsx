@@ -27,14 +27,20 @@ export default async function PurchaseRequestsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Purchase request approvals</h1>
+        <h1 className="text-2xl font-semibold">Purchase Request Approvals</h1>
         <p className="text-sm text-slate-600">
           Human approval gate for agent or user-generated purchasing requests.
         </p>
       </div>
 
       <div className="space-y-4">
-        {requests.map((request) => (
+        {requests.length === 0 ? (
+          <section className="rounded-md border border-slate-200 bg-white p-6 text-sm text-slate-600">
+            <h2 className="font-medium text-slate-900">No Purchase Requests Waiting</h2>
+            <p className="mt-1">Use purchase recommendations to create draft PRs, then approve and convert them into draft purchase orders. No ordering, payment, or stock receiving happens from this empty state.</p>
+            <a href="/purchasing/recommendations" className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Open Recommendations</a>
+          </section>
+        ) : requests.map((request) => (
           <section key={request.id} className="rounded-md border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
@@ -51,7 +57,7 @@ export default async function PurchaseRequestsPage() {
                         {line.item.sku} x {line.quantity}
                         <span className="ml-2 text-xs text-slate-500">
                           {unitPriceEvidence
-                            ? `Unit price evidence: $${Number(unitPriceEvidence).toFixed(4)} USD`
+                            ? `Unit Price evidence: $${Number(unitPriceEvidence).toFixed(4)} USD`
                             : "Missing unit price evidence"}
                         </span>
                       </div>
@@ -75,7 +81,7 @@ export default async function PurchaseRequestsPage() {
                 <RefreshingActionForm action={convertApprovedPurchaseRequestAction} className="flex flex-col items-start gap-2">
                   <input type="hidden" name="requestId" value={request.id} />
                   <input type="hidden" name="comment" value="Converted from approved purchase request by purchasing approvals page." />
-                  <button className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white">Create draft PO</button>
+                  <button className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white">Create Draft PO</button>
                   <div className="max-w-64 text-xs text-slate-500">Creates a draft purchase order only; inventory is still received separately through Incoming.</div>
                 </RefreshingActionForm>
               ) : null}

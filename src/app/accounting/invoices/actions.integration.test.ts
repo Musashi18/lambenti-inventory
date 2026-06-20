@@ -3,7 +3,7 @@ import { InvoiceStatus, GLAccountType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizeInvoiceNumberKey } from "@/modules/accounting/invoices";
 import { upsertGLAccount, upsertGLMapping } from "@/modules/accounting/gl";
-import { updateInvoiceStatusAction } from "./actions";
+import { updateInvoiceStatusAction, updateInvoiceTermsAction } from "./actions";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -79,6 +79,14 @@ function formDataFor(invoiceId: string, status: InvoiceStatus, extra?: Record<st
   return formData;
 }
 
+function termsFormDataFor(invoiceId: string, dueDate: string, extra?: Record<string, string>) {
+  const formData = new FormData();
+  formData.set("invoiceId", invoiceId);
+  formData.set("dueDate", dueDate);
+  for (const [key, value] of Object.entries(extra ?? {})) formData.set(key, value);
+  return formData;
+}
+
 async function configurePaymentAccounts() {
   const ap = await upsertGLAccount({ code: `${TEST_PREFIX}-2000`, name: "Accounts payable", type: GLAccountType.LIABILITY, actorId: `${TEST_PREFIX}-accountant` });
   const bank = await upsertGLAccount({ code: `${TEST_PREFIX}-1000`, name: "Operating bank", type: GLAccountType.ASSET, actorId: `${TEST_PREFIX}-accountant` });
@@ -120,6 +128,37 @@ describe("invoice server-action authorization and state machine", () => {
     await expect(prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).resolves.toMatchObject({
       status: InvoiceStatus.APPROVED
     });
+  });
+
+  it("updates invoice due date without changing status or posting journals", async () => {
+    vi.stubEnv("LAMBENTI_DEV_USER_ROLE", "ACCOUNTING");
+    vi.stubEnv("LAMBENTI_DEV_USER_ID", `${TEST_PREFIX}-accountant`);
+    const invoice = await createInvoice(InvoiceStatus.RECEIVED);
+
+    const result = await updateInvoiceTermsAction(termsFormDataFor(invoice.id, "2026-07-01", { notes: "Net terms confirmed" }));
+
+    expect(result).toMatchObject({ ok: true });
+    const updated = await prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    expect(updated.status).toBe(InvoiceStatus.RECEIVED);
+    expect(updated.dueDate?.toISOString()).toBe("2026-07-01T00:00:00.000Z");
+    expect(updated.notes).toBe("Net terms confirmed");
+    await expect(prisma.journalEntry.count({ where: { supplierInvoiceId: invoice.id } })).resolves.toBe(0);
+    await expect(prisma.auditLog.findFirstOrThrow({ where: { entityId: invoice.id, action: "UPDATE_SUPPLIER_INVOICE_TERMS" } })).resolves.toMatchObject({
+      actorId: `${TEST_PREFIX}-accountant`
+    });
+  });
+
+  it("blocks approval when a received invoice has no source evidence", async () => {
+    vi.stubEnv("LAMBENTI_DEV_USER_ROLE", "ACCOUNTING");
+    vi.stubEnv("LAMBENTI_DEV_USER_ID", `${TEST_PREFIX}-accountant`);
+    const invoice = await createInvoice(InvoiceStatus.RECEIVED);
+
+    await expect(updateInvoiceStatusAction(formDataFor(invoice.id, InvoiceStatus.APPROVED))).rejects.toThrow(/source evidence/i);
+
+    await expect(prisma.supplierInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).resolves.toMatchObject({
+      status: InvoiceStatus.RECEIVED
+    });
+    await expect(prisma.journalEntry.count({ where: { supplierInvoiceId: invoice.id } })).resolves.toBe(0);
   });
 
   it("records authenticated accounting actor and payment reference when marking paid", async () => {

@@ -66,7 +66,7 @@ export function MailboxSyncButton({ syncAction, disabled = false }: MailboxSyncB
       >
         <span className="inline-flex items-center gap-2">
           {pending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : null}
-          {pending ? "Syncing mailbox…" : "Sync mailbox now"}
+          {pending ? "Syncing mailbox…" : "Sync Mailbox Now"}
         </span>
       </button>
       {message ? <p className="text-xs text-slate-600" role="status">{message}</p> : null}
@@ -105,7 +105,7 @@ export function ReassessRecentImportsButton({ reassessAction, disabled = false }
       >
         <span className="inline-flex items-center gap-2">
           {pending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" /> : null}
-          {pending ? "Syncing & reassessing…" : "Sync & reassess recent imports"}
+          {pending ? "Syncing & reassessing…" : "Sync & Reassess Recent Imports"}
         </span>
       </button>
       {message ? <p className="text-xs text-slate-600" role="status">{message}</p> : null}

@@ -156,6 +156,7 @@ export async function retryAccountingDocumentExtraction(input: {
   assertPermission(input.actor, "invoice:create");
 
   const document = await prisma.accountingDocument.findUniqueOrThrow({ where: { id: input.documentId } });
+  assertAccountingDocumentCanBeReanalyzed(document);
   const buffer = await readFile(join(process.cwd(), document.storedPath));
   const extracted = await extractAccountingDocumentText({
     buffer,
@@ -209,6 +210,7 @@ export async function updateAccountingDocumentExtractedText(input: {
   if (text.length < 10) throw new Error("Paste at least 10 characters of source document text before analyzing.");
 
   const document = await prisma.accountingDocument.findUniqueOrThrow({ where: { id: input.documentId } });
+  assertAccountingDocumentCanBeReanalyzed(document);
   const outcome = await analyzeExtractionOutcome({
     extractedText: text,
     extractionWarnings: [],
@@ -287,6 +289,20 @@ export async function deleteAccountingDocumentSource(input: {
   });
 
   return deleted;
+}
+
+function assertAccountingDocumentCanBeReanalyzed(document: {
+  status: AccountingDocumentStatus;
+  supplierInvoiceId: string | null;
+}) {
+  if (
+    document.status === AccountingDocumentStatus.APPLIED
+    || document.status === AccountingDocumentStatus.ATTACHED
+    || document.status === AccountingDocumentStatus.ARCHIVED
+    || document.supplierInvoiceId
+  ) {
+    throw new Error("Linked accounting evidence cannot be re-analyzed. Upload a corrected source document or attach a separate supporting document instead.");
+  }
 }
 
 export async function analyzeAccountingDocumentText(input: {
@@ -585,9 +601,9 @@ export async function attachAccountingDocumentEvidence(input: {
 function classifyAccountingDocument(text: string, fileName = ""): AccountingDocumentClassification {
   const combined = `${fileName}\n${text}`;
   if (/quote|quotation|pro\s*forma/i.test(combined) && !/tax invoice|commercial invoice/i.test(combined)) return "QUOTE_OR_PRO_FORMA";
+  if (/customs|commercial\s+invoice|hs\s*code|dut(?:y|ies)|brokerage|cbsa|import\s+(?:fees|charges|duty)|fedex\s+clearance/i.test(combined) && !/amount\s+due|balance\s+due/i.test(combined)) return "CUSTOMS_DOCUMENT";
   if (/receipt|\bpaid\b|full\s+payment|payment confirmation|wire transfer|bank reference/i.test(combined) && !/amount\s+due|balance\s+due/i.test(combined)) return "PAYMENT_RECEIPT";
   if (/packing\s+slip|delivery\s+note|despatch|dispatch/i.test(combined)) return "PACKING_SLIP";
-  if (/customs|commercial\s+invoice|hs\s*code|duty|brokerage|cbsa|import/i.test(combined) && !/amount\s+due|balance\s+due/i.test(combined)) return "CUSTOMS_DOCUMENT";
   if (/invoice|amount\s+due|balance\s+due|gst\/hst|tax invoice/i.test(combined)) return "SUPPLIER_INVOICE";
   if (/purchase\s+order|order\s*(id|no|number|#)|order confirmation|order notice/i.test(combined)) return "ORDER_NOTICE";
   return "UNKNOWN";
@@ -648,6 +664,8 @@ function isUsefulSupplierName(value?: string) {
 function findAccountingAmounts(text: string) {
   const candidates = [
     findAmountAfterLabel(text, /full\s+payment/i),
+    findAmountAfterLabel(text, /we\s+have\s+charged/i),
+    findAmountAfterLabel(text, /charged/i),
     findAmountAfterLabel(text, /amount\s+due/i),
     findAmountAfterLabel(text, /balance\s+due/i),
     findAmountAfterLabel(text, /total\s+(?:value|price|amount|due)?/i),
@@ -697,6 +715,15 @@ function firstCurrencyAmount(text: string): MoneyAmount | undefined {
     const currency = codeFirstMatch[1].toUpperCase();
     if (KNOWN_ACCOUNTING_CURRENCIES.has(currency)) {
       return { currency, value: Number(codeFirstMatch[2].replace(/,/g, "")) };
+    }
+  }
+
+  const amountFirstPattern = /\b([0-9][0-9,]*(?:\.\d{1,2})?)\s*([A-Z]{3})\b/gi;
+  let amountFirstMatch: RegExpExecArray | null;
+  while ((amountFirstMatch = amountFirstPattern.exec(text)) !== null) {
+    const currency = amountFirstMatch[2].toUpperCase();
+    if (KNOWN_ACCOUNTING_CURRENCIES.has(currency)) {
+      return { currency, value: Number(amountFirstMatch[1].replace(/,/g, "")) };
     }
   }
 

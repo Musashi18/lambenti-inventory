@@ -65,23 +65,23 @@ export function ReceiveIncomingLineForm({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <label className="space-y-1 text-sm">
-          <span className="font-medium text-slate-700">Quantity counted</span>
+        <label className="space-y-1 rounded-lg border border-blue-200 bg-white p-3 text-sm shadow-sm xl:col-span-2">
+          <span className="font-semibold text-blue-900">Quantity Counted</span>
           <input
             name="quantity"
             type="number"
             min="1"
             step="1"
-            className="w-full rounded-md border px-3 py-2"
+            className="w-full rounded-md border border-blue-300 px-3 py-3 text-lg font-semibold"
             defaultValue={state.success ? "" : state.values.quantity}
             required
           />
-          <p className="text-xs text-slate-500">Remaining quantity: {remainingQuantity}</p>
+          <p className="text-xs text-slate-500">Remaining Quantity: {remainingQuantity}</p>
           <FieldErrors errors={state.fieldErrors.quantity} />
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="font-medium text-slate-700">Lot / packing slip code</span>
+          <span className="font-medium text-slate-700">Lot / Packing Slip Code</span>
           <input
             name="lotCode"
             placeholder="LOT-2026-001 or packing slip"
@@ -93,7 +93,7 @@ export function ReceiveIncomingLineForm({
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="font-medium text-slate-700">Received date</span>
+          <span className="font-medium text-slate-700">Received Date</span>
           <input
             name="receivedAt"
             type="date"
@@ -105,7 +105,7 @@ export function ReceiveIncomingLineForm({
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="font-medium text-slate-700">Unit cost</span>
+          <span className="font-medium text-slate-700">Unit Cost</span>
           <input
             name="unitCost"
             type="number"
@@ -154,7 +154,7 @@ export function ReceiveIncomingLineForm({
         </label>
 
         <label className="space-y-1 text-sm xl:col-span-2">
-          <span className="font-medium text-slate-700">Admin override reason</span>
+          <span className="font-medium text-slate-700">Admin Override Reason</span>
           <input
             name="overrideReason"
             placeholder="Required only for over-receipts or obsolete items"
@@ -166,7 +166,7 @@ export function ReceiveIncomingLineForm({
       </div>
 
       <button className="mt-3 rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60" disabled={pending}>
-        {pending ? "Receiving…" : "Receive counted stock"}
+        {pending ? "Receiving…" : "Receive Counted Stock"}
       </button>
     </form>
   );

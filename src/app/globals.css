@@ -4,19 +4,69 @@
 
 :root {
   color-scheme: light;
+  --table-row-hover-bg: rgb(248 250 252 / 0.8);
+  --table-sticky-cell-bg: #ffffff;
+  --table-sticky-cell-hover-bg: var(--table-row-hover-bg);
+  --table-sticky-cell-divider: rgb(226 232 240 / 1);
 }
 
 body {
   @apply bg-canvas text-ink;
 }
 
+.lambenti-sidebar-logo {
+  position: relative;
+  height: 7rem;
+  overflow: hidden;
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0) 35%, #ffffff 82%),
+    linear-gradient(135deg, #ffffff 0%, #f4f7fb 100%);
+}
+
+.lambenti-sidebar-logo-image {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0.95;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 42%, rgb(0 0 0 / 0.86) 62%, transparent 100%);
+  mask-image: radial-gradient(ellipse at center, #000 42%, rgb(0 0 0 / 0.86) 62%, transparent 100%);
+}
+
+.lambenti-sidebar-logo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, #ffffff 0%, rgb(255 255 255 / 0) 20%, rgb(255 255 255 / 0) 78%, #f4f7fb 100%),
+    linear-gradient(180deg, #ffffff 0%, rgb(255 255 255 / 0) 24%, rgb(255 255 255 / 0) 74%, #ffffff 100%);
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
+  --table-row-hover-bg: rgb(30 41 59 / 0.72);
+  --table-sticky-cell-bg: #0f172a;
+  --table-sticky-cell-hover-bg: var(--table-row-hover-bg);
+  --table-sticky-cell-divider: rgb(51 65 85 / 1);
 }
 
 [data-theme="dark"] body {
   background-color: #020617;
   color: #e2e8f0;
+}
+
+[data-theme="dark"] .lambenti-sidebar-logo {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(15 23 42 / 0) 35%, #0f172a 82%),
+    linear-gradient(135deg, #0f172a 0%, #020617 100%);
+}
+
+[data-theme="dark"] .lambenti-sidebar-logo::after {
+  background:
+    linear-gradient(90deg, #0f172a 0%, rgb(15 23 42 / 0) 20%, rgb(15 23 42 / 0) 78%, #020617 100%),
+    linear-gradient(180deg, #0f172a 0%, rgb(15 23 42 / 0) 24%, rgb(15 23 42 / 0) 74%, #0f172a 100%);
 }
 
 [data-theme="dark"] * {
@@ -55,6 +105,14 @@ body {
 
 [data-theme="dark"] .bg-amber-100 {
   background-color: rgb(146 64 14 / 0.38);
+}
+
+[data-theme="dark"] .bg-orange-50 {
+  background-color: rgb(154 52 18 / 0.30);
+}
+
+[data-theme="dark"] .bg-orange-100 {
+  background-color: rgb(154 52 18 / 0.42);
 }
 
 [data-theme="dark"] .bg-emerald-50 {
@@ -104,7 +162,10 @@ body {
 }
 
 [data-theme="dark"] .text-amber-900,
-[data-theme="dark"] .text-amber-800 {
+[data-theme="dark"] .text-amber-800,
+[data-theme="dark"] .text-amber-700,
+[data-theme="dark"] .text-orange-700,
+[data-theme="dark"] .text-orange-600 {
   color: #fcd34d;
 }
 
@@ -127,7 +188,9 @@ body {
 }
 
 [data-theme="dark"] .border-amber-300,
-[data-theme="dark"] .border-amber-200 {
+[data-theme="dark"] .border-amber-200,
+[data-theme="dark"] .border-orange-300,
+[data-theme="dark"] .border-orange-200 {
   border-color: rgb(245 158 11 / 0.45);
 }
 
@@ -150,6 +213,19 @@ body {
 [data-theme="dark"] .hover\:bg-slate-50:hover,
 [data-theme="dark"] .hover\:bg-slate-100:hover {
   background-color: #1e293b;
+}
+
+.table-row-interactive:hover {
+  background-color: var(--table-row-hover-bg);
+}
+
+.table-sticky-cell {
+  background-color: var(--table-sticky-cell-bg);
+  box-shadow: 1px 0 0 0 var(--table-sticky-cell-divider);
+}
+
+.table-row-interactive:hover .table-sticky-cell {
+  background-color: var(--table-sticky-cell-hover-bg);
 }
 
 [data-theme="dark"] input,

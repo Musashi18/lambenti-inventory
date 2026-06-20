@@ -3,7 +3,7 @@
 import { GLAccountType } from "@prisma/client";
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import { requirePermission } from "@/modules/auth/permissions";
-import { upsertGLAccount, upsertGLMapping } from "@/modules/accounting/gl";
+import { installDefaultApPostingSetup, upsertGLAccount, upsertGLMapping } from "@/modules/accounting/gl";
 
 export async function upsertGLAccountAction(formData: FormData) {
   const actor = await requirePermission("invoice:create");
@@ -34,7 +34,20 @@ export async function upsertGLMappingAction(formData: FormData) {
     actorId: actor.id
   });
   revalidateWorkspace(["/accounting/accounts"]);
-  return { ok: true, message: "GL mapping saved." };
+  return { ok: true, message: "GL Mapping saved." };
+}
+
+export async function installDefaultApPostingSetupAction() {
+  const actor = await requirePermission("invoice:create");
+  const results = await installDefaultApPostingSetup({ actorId: actor.id });
+  revalidateWorkspace(["/accounting", "/accounting/accounts", "/accounting/invoices", "/accounting/payments"]);
+  const changed = results.filter((result) => result.status !== "kept").length;
+  return {
+    ok: true,
+    message: changed === 0
+      ? "Default AP posting mappings were already configured."
+      : `Installed ${changed} default AP posting mapping${changed === 1 ? "" : "s"}.`
+  };
 }
 
 function stringField(formData: FormData, key: string) {

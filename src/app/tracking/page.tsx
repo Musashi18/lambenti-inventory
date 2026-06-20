@@ -1,10 +1,11 @@
+import type { ReactNode } from "react";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
 import {
   refreshAllTrackingAction,
   refreshSingleTrackingAction,
   saveManualTrackingNumbersAction
 } from "./actions";
-import { TrackingAutoRefresh } from "./tracking-auto-refresh";
+import { TrackingProviderHeartbeat } from "./tracking-auto-refresh";
 import {
   getLeadTimeLog,
   getTrackingDashboard,
@@ -18,6 +19,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+type TrackingDashboard = Awaited<ReturnType<typeof getTrackingDashboard>>;
+
+type Tone = "neutral" | "success" | "warning" | "danger";
+
 export default async function TrackingPage() {
   const [dashboard, linkOptions, leadTimeLog] = await Promise.all([
     getTrackingDashboard(),
@@ -27,139 +32,531 @@ export default async function TrackingPage() {
 
   return (
     <main className="space-y-6">
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Shipment logistics</p>
-            <h1 className="mt-1 text-3xl font-semibold text-slate-900">Tracking workbench</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Paste tracking numbers, shipment-notification emails, or Alibaba order-detail links into the manual drop box below. Tracking numbers are retained as shipment evidence, linked to purchase orders by explicit PO selection or Alibaba external order ID, and refreshed through the configured tracking service. This is metadata only: it does not receive stock or confirm delivery.
-            </p>
-          </div>
-          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-            <div className="font-medium text-slate-900">Tracking service connection</div>
-            <div className={dashboard.service.configured ? "text-green-700" : "text-amber-700"}>
-              {dashboard.service.configured ? `${dashboard.service.provider} configured` : `${dashboard.service.provider} not configured`}
-            </div>
-            <div className="text-xs text-slate-500">
-              {dashboard.service.provider === "SHIP24" ? (
-                <>
-                  Recommended provider: Ship24. Set <code>LAMBENTI_TRACKING_STATUS_AUTH_TOKEN</code> from the Ship24 dashboard. Interval: {dashboard.service.refreshIntervalMinutes} min.
-                </>
-              ) : (
-                <>
-                  Set <code>LAMBENTI_TRACKING_STATUS_URL_TEMPLATE</code> for automatic carrier status updates. Interval: {dashboard.service.refreshIntervalMinutes} min.
-                </>
-              )}
-            </div>
-            <TrackingAutoRefresh enabled={dashboard.service.configured} intervalMinutes={dashboard.service.refreshIntervalMinutes} />
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-5">
-        <Metric label="Saved numbers" value={dashboard.summary.total} />
-        <Metric label="Due refresh" value={dashboard.summary.due} />
-        <Metric label="Delivered" value={dashboard.summary.delivered} />
-        <Metric label="Needs config" value={dashboard.summary.needsConfiguration} />
-        <Metric label="Failed refresh" value={dashboard.summary.failed} tone={dashboard.summary.failed > 0 ? "danger" : "neutral"} />
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)]">
-        <ManualTrackingDropBox linkOptions={linkOptions} />
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Automatic refresh</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Refreshes due, non-delivered tracking numbers through the configured service. Delivered shipments are no longer polled.
-            </p>
-            <RefreshingActionForm action={refreshAllTrackingAction} className="mt-4">
-              <button className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800" type="submit">
-                Refresh due tracking statuses
-              </button>
-            </RefreshingActionForm>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Active tracking numbers</h2>
-          <p className="mt-1 text-sm text-slate-600">Open, non-delivered shipment numbers that remain eligible for refresh. Delivered shipments are removed from this active list but retained in the history below.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Tracking number</th>
-                <th className="px-4 py-3">Linked order</th>
-                <th className="px-4 py-3">Carrier</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Latest event</th>
-                <th className="px-4 py-3">Refresh</th>
-                <th className="px-4 py-3">Source</th>
-                <th className="px-4 py-3">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {dashboard.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">No active tracking numbers. Delivered tracking information is retained in the history below.</td>
-                </tr>
-              ) : dashboard.rows.map((row) => (
-                <ActiveTrackingRow key={row.id} row={row} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Delivered tracking history</h2>
-          <p className="mt-1 text-sm text-slate-600">Delivered shipment records are retained for evidence and carrier history. Total ship time is measured from the first carrier event to delivery when carrier events are available.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Tracking number</th>
-                <th className="px-4 py-3">Linked order</th>
-                <th className="px-4 py-3">Carrier</th>
-                <th className="px-4 py-3">Delivered</th>
-                <th className="px-4 py-3">Total ship time</th>
-                <th className="px-4 py-3">Latest event</th>
-                <th className="px-4 py-3">Source</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {dashboard.deliveredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">No delivered tracking history yet.</td>
-                </tr>
-              ) : dashboard.deliveredRows.map((row) => (
-                <DeliveredTrackingRow key={row.id} row={row} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
+      <TrackingHero dashboard={dashboard} />
+      <TrackingSummary dashboard={dashboard} />
+      <TrackingVisualCommandPanel dashboard={dashboard} />
+      <TrackingAttention dashboard={dashboard} />
+      <OpenShipments rows={dashboard.rows} />
+      <ManualTrackingDropBox linkOptions={linkOptions} hasOpenShipments={dashboard.rows.length > 0} />
+      <DeliveredTrackingHistory rows={dashboard.deliveredRows} />
       <LeadTimeLearningLog log={leadTimeLog} />
     </main>
   );
 }
 
-function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
+function TrackingHero({ dashboard }: { dashboard: TrackingDashboard }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Shipment logistics</p>
+          <h1 className="mt-1 text-3xl font-semibold text-slate-900">Tracking Workbench</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+            See what needs attention first, keep Open Shipments easy to scan, and add tracking evidence only when you have a new shipment notice. Tracking Metadata Only: this page never receives stock, confirms delivery, pays invoices, or sends supplier messages.
+          </p>
+        </div>
+        <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm lg:min-w-80">
+          <div className="font-medium text-slate-900">Tracking service connection</div>
+          <div className={dashboard.service.configured ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>
+            {dashboard.service.configured ? `${dashboard.service.provider} configured` : `${dashboard.service.provider} not configured`}
+          </div>
+          <div className="text-xs leading-5 text-slate-500">
+            {dashboard.service.provider === "SHIP24" ? (
+              <>
+                Recommended provider: Ship24. Set <code>LAMBENTI_TRACKING_STATUS_AUTH_TOKEN</code> from the Ship24 dashboard. Interval: {dashboard.service.refreshIntervalMinutes} min.
+              </>
+            ) : (
+              <>
+                Set <code>LAMBENTI_TRACKING_STATUS_URL_TEMPLATE</code> for automatic carrier status updates. Interval: {dashboard.service.refreshIntervalMinutes} min.
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TrackingSummary({ dashboard }: { dashboard: TrackingDashboard }) {
+  return (
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Tracking summary">
+      <Metric label="Open Shipments" value={dashboard.rows.length} hint="Active tracking numbers" tone={dashboard.rows.length > 0 ? "warning" : "neutral"} />
+      <Metric label="Due refresh" value={dashboard.summary.due} hint="Ready to check now" tone={dashboard.summary.due > 0 ? "warning" : "neutral"} />
+      <Metric label="Failed refresh" value={dashboard.summary.failed} hint="Needs operator review" tone={dashboard.summary.failed > 0 ? "danger" : "neutral"} />
+      <Metric label="Delivered" value={dashboard.summary.delivered} hint="Retained as history" tone="success" />
+      <Metric label="Saved numbers" value={dashboard.summary.total} hint="All tracking evidence" />
+    </section>
+  );
+}
+
+function TrackingVisualCommandPanel({ dashboard }: { dashboard: TrackingDashboard }) {
+  const failedRows = dashboard.rows.filter((row) => row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION");
+  const unlinkedRows = dashboard.rows.filter((row) => !row.externalOrderId && !row.purchaseOrderId);
+  const stageDefinitions = [
+    { key: "PENDING", label: "Pending", glow: "bg-slate-300" },
+    { key: "INFO_RECEIVED", label: "Info Received", glow: "bg-yellow-300" },
+    { key: "IN_TRANSIT", label: "In Transit", glow: "bg-blue-300" },
+    { key: "OUT_FOR_DELIVERY", label: "Out for Delivery", glow: "bg-amber-300" },
+    { key: "DELIVERED", label: "Delivered", glow: "bg-emerald-300" }
+  ] as const;
+  const stageCounts = stageDefinitions.map((stage) => ({
+    ...stage,
+    count: stage.key === "DELIVERED"
+      ? dashboard.deliveredRows.length
+      : dashboard.rows.filter((row) => shipmentStageKey(row.currentStatus) === stage.key).length
+  }));
+  const pendingNoUpdateRows = dashboard.rows.filter((row) => shipmentStageKey(row.currentStatus) === "PENDING" && row.eventCount === 0);
+  const laneMax = Math.max(1, ...stageCounts.map((stage) => stage.count));
+  const carrierCounts = new Map<string, number>();
+  for (const row of [...dashboard.rows, ...dashboard.deliveredRows]) {
+    const carrier = formatCarrier(row.carrier);
+    carrierCounts.set(carrier, (carrierCounts.get(carrier) ?? 0) + 1);
+  }
+  const topCarriers = Array.from(carrierCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const carrierMax = Math.max(1, ...topCarriers.map(([, count]) => count));
+  const riskItems = [
+    { label: "Fix Failed", value: failedRows.length, className: "bg-red-400", href: "#what-needs-attention" },
+    { label: "Refresh Due", value: dashboard.summary.due, className: "bg-amber-300", href: "#what-needs-attention" },
+    { label: "Link Evidence", value: unlinkedRows.length, className: "bg-orange-300", href: "#manual-tracking-drop-box" },
+    { label: "Review Open", value: dashboard.rows.length, className: "bg-blue-300", href: "#open-shipments" }
+  ];
+  const riskTotal = Math.max(1, riskItems.reduce((sum, item) => sum + item.value, 0));
+  return (
+    <section className="grid gap-4 xl:grid-cols-[1.45fr_0.9fr]" aria-label="Tracking visual command layer">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 p-5 text-white shadow-xl shadow-slate-900/10">
+        <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full border border-emerald-300/20 bg-emerald-400/10 blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-20 left-10 h-64 w-64 rounded-full border border-orange-300/20 bg-orange-500/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-200">Visual Command Layer</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">Live Shipment Radar</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Premium graphics, but tied to operator signal: stage distribution, provider health, provenance risk, and carrier mix. No stock receipt or delivery confirmation happens here.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center sm:min-w-72">
+            <RadarNumber label="Open" value={dashboard.rows.length} tone="text-blue-200" />
+            <RadarNumber label="Due" value={dashboard.summary.due} tone="text-amber-200" />
+            <RadarNumber label="Failed" value={failedRows.length} tone="text-red-200" />
+          </div>
+        </div>
+
+        <div className="relative mt-6 grid gap-3 xl:grid-cols-[1.35fr_0.8fr]">
+          <div className="grid gap-3 lg:grid-cols-4">
+            {stageCounts.map((stage) => {
+              const width = stage.count === 0 ? "0%" : `${Math.max(12, Math.round((stage.count / laneMax) * 100))}%`;
+              return (
+                <div key={stage.key} className="rounded-xl border border-white/10 bg-white/5 p-3 backdrop-blur">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{stage.label}</div>
+                    <div className="font-mono text-sm font-semibold text-white">{stage.count}</div>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div className={`h-full rounded-full ${stage.glow}`} style={{ width }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <PendingTrackingPanel rows={pendingNoUpdateRows} />
+        </div>
+
+        <div className="relative mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Risk Spectrum</div>
+              <div className="mt-1 text-sm text-slate-300">Ordered action list: fix provider failures, refresh due rows, link weak provenance, then review open shipments.</div>
+            </div>
+            <div className="text-xs text-slate-400">{riskTotal === 1 && riskItems.every((item) => item.value === 0) ? "0 active signals" : `${riskTotal} signal${riskTotal === 1 ? "" : "s"}`}</div>
+          </div>
+          <div className="mt-3 flex h-4 overflow-hidden rounded-full bg-white/10" aria-label="Tracking risk spectrum by ordered action">
+            {riskItems.map((item) => (
+              <div key={item.label} className={`${item.className} grid min-w-0 place-items-center text-[10px] font-semibold text-slate-950`} style={{ width: item.value === 0 ? "0%" : `${(item.value / riskTotal) * 100}%` }}>
+                {item.value > 0 ? item.value : ""}
+              </div>
+            ))}
+          </div>
+          <ol className="mt-3 grid gap-2 text-xs text-slate-300 sm:grid-cols-4">
+            {riskItems.map((item, index) => (
+              <li key={item.label} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{index + 1}. {item.label}</div>
+                <div className="mt-1 font-mono text-lg font-semibold text-white">{item.value}</div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+
+      <div className="grid gap-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">Provider Heartbeat</p>
+              <h3 className="mt-1 text-lg font-semibold text-slate-900">{dashboard.service.provider}</h3>
+              <p className="mt-1 text-sm text-slate-600">Refresh cadence {dashboard.service.refreshIntervalMinutes} min · {dashboard.service.configured ? "live status enabled" : "setup needed"}</p>
+              <p className="mt-1 text-xs text-slate-500">Last Good Refresh: {formatDate(dashboard.service.lastCheckedAt)}</p>
+            </div>
+            <RefreshingActionForm action={refreshAllTrackingAction}>
+              <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" type="submit">
+                Refresh Due Statuses
+              </button>
+            </RefreshingActionForm>
+          </div>
+          <div className="mt-4">
+            <TrackingProviderHeartbeat
+              enabled={dashboard.service.configured}
+              intervalMinutes={dashboard.service.refreshIntervalMinutes}
+              provider={dashboard.service.provider}
+              initialNextRefreshAt={dashboard.service.nextRefreshAt}
+              lastCheckedAt={dashboard.service.lastCheckedAt}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">Carrier Mix</p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-900">Evidence Constellation</h3>
+          <div className="mt-4 space-y-3">
+            {topCarriers.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">No Carrier Evidence Saved Yet.</div>
+            ) : topCarriers.map(([carrier, count]) => (
+              <div key={carrier}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-700">{carrier}</span>
+                  <span className="font-mono text-slate-500">{count}</span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.max(16, Math.round((count / carrierMax) * 100))}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PendingTrackingPanel({ rows }: { rows: TrackingDashboardRow[] }) {
+  return (
+    <div className="rounded-xl border border-yellow-300/50 bg-yellow-300/15 p-4 backdrop-blur" aria-label="Pending tracking numbers without provider updates">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-yellow-200">Pending</div>
+          <div className="mt-1 text-sm font-medium text-white">No Carrier Updates Yet</div>
+        </div>
+        <div className="grid h-12 w-12 place-items-center rounded-full bg-yellow-300 text-lg font-semibold text-slate-950">{rows.length}</div>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-yellow-50/90">Tracking Numbers stay pending until the provider returns a first readable event. This is shipment metadata only.</p>
+      {rows.length > 0 ? (
+        <div className="mt-3 space-y-1">
+          {rows.slice(0, 3).map((row) => (
+            <div key={row.id} className="truncate rounded-md bg-black/20 px-2 py-1 font-mono text-xs text-yellow-50">{row.trackingNumber}</div>
+          ))}
+          {rows.length > 3 ? <div className="text-xs text-yellow-50/75">+ {rows.length - 3} more pending number{rows.length - 3 === 1 ? "" : "s"}</div> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RadarNumber({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur">
+      <div className={`font-mono text-2xl font-semibold ${tone}`}>{value}</div>
+      <div className="mt-1 text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
+    </div>
+  );
+}
+
+function TrackingAttention({ dashboard }: { dashboard: TrackingDashboard }) {
+  const failedRows = dashboard.rows.filter((row) => row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION");
+  const unlinkedRows = dashboard.rows.filter((row) => !row.externalOrderId && !row.purchaseOrderId);
+  const showNoIssues = dashboard.service.configured && dashboard.summary.due === 0 && failedRows.length === 0 && unlinkedRows.length === 0;
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">What Needs Attention</h2>
+        <p className="mt-1 text-sm text-slate-600">A short action queue before the detailed shipment cards. Manual Refresh Now Lives in the Provider Heartbeat Card.</p>
+      </div>
+
+      {showNoIssues ? (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          <div className="font-medium">No Open Tracking Issues</div>
+          <p className="mt-1">Provider is configured, no rows are due, no Refresh Failures are active, and open evidence is linked.</p>
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {!dashboard.service.configured ? (
+            <AttentionCard tone="warning" title="Connect tracking provider" label="Setup needed">
+              Configure Ship24 or the custom HTTP template so refreshes use live carrier status instead of evidence-only records.
+            </AttentionCard>
+          ) : null}
+          {failedRows.length > 0 ? (
+            <AttentionCard tone="danger" title={`${failedRows.length} Refresh Failure${failedRows.length === 1 ? "" : "s"}`} label="Fix First">
+              <div className="space-y-2">
+                <p>Retry failed rows or check whether Ship24 rejects the number/carrier combination.</p>
+                <div className="space-y-2">
+                  {failedRows.slice(0, 3).map((row) => (
+                    <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-2">
+                      <span className="font-mono text-xs">{row.trackingNumber}</span>
+                      <RefreshSingleButton row={row} compact />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </AttentionCard>
+          ) : null}
+          {dashboard.summary.due > 0 ? (
+            <AttentionCard tone="warning" title={`${dashboard.summary.due} due refresh`} label="Ready now">
+              Use the refresh button above to check non-delivered shipments. Delivered rows are retained below and are not polled.
+            </AttentionCard>
+          ) : null}
+          {unlinkedRows.length > 0 ? (
+            <AttentionCard tone="warning" title={`${unlinkedRows.length} unlinked evidence row${unlinkedRows.length === 1 ? "" : "s"}`} label="Weak provenance">
+              Add future tracking numbers with a PO selected or an Alibaba order ID so lead-time learning and receiving context stay auditable.
+            </AttentionCard>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OpenShipments({ rows }: { rows: TrackingDashboardRow[] }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 p-5">
-        <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Reorder forecasting input</p>
-        <h2 className="mt-1 text-lg font-semibold text-slate-900">Lead-time learning log</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Completed tracking/receiving samples update item and supplier lead-time days automatically. Expand an item to audit quantity ordered, payment/order start, receipt or delivery endpoint, tracking evidence, and shipping time before those averages are used as reorder buffers.
-        </p>
+        <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Active tracking numbers</p>
+        <h2 className="mt-1 text-lg font-semibold text-slate-900">Open Shipments</h2>
+        <p className="mt-1 text-sm text-slate-600">Non-delivered tracking numbers shown as scan-friendly cards. Refresh, evidence, linked order, latest event, and errors stay visible without a wide table.</p>
       </div>
+      {rows.length === 0 ? (
+        <div className="p-5 text-sm text-slate-500">No Open Shipments. Delivered tracking information is retained in history below.</div>
+      ) : (
+        <div className="grid gap-4 p-5 xl:grid-cols-2">
+          {rows.map((row) => <TrackingRowCard key={row.id} row={row} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TrackingRowCard({ row }: { row: TrackingDashboardRow }) {
+  const problematic = row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION";
+  return (
+    <article data-testid="tracking-row" className={`rounded-xl border p-4 ${problematic ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="font-mono text-base font-semibold text-slate-900">{row.trackingNumber}</div>
+          <div className="mt-1 text-sm font-medium text-slate-800">Linked Order: {row.linkedOrderLabel}</div>
+          {row.screenedShipmentCount > 1 ? (
+            <div className="mt-1 text-xs text-slate-500">
+              Duplicate shipment screen: showing active stream; linked shipment numbers {row.relatedTrackingNumbers.join(", ")}.
+            </div>
+          ) : null}
+          {row.supplierName ? <div className="mt-0.5 text-xs text-slate-500">Supplier: {row.supplierName}</div> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <StatusBadge status={row.currentStatus} />
+          <RefreshBadge row={row} />
+        </div>
+      </div>
+
+      <ShipmentProgressRail row={row} />
+
+      <PackageTrackingDataDetails row={row} />
+    </article>
+  );
+}
+
+function ShipmentProgressRail({ row }: { row: TrackingDashboardRow }) {
+  const stages = [
+    { key: "PENDING", label: "Pending" },
+    { key: "INFO_RECEIVED", label: "Info Received" },
+    { key: "IN_TRANSIT", label: "In Transit" },
+    { key: "OUT_FOR_DELIVERY", label: "Out for Delivery" },
+    { key: "DELIVERED", label: "Delivered" }
+  ];
+  const currentIndex = shipmentProgressIndex(row.currentStatus);
+  const blocked = row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION";
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3" aria-label={`Shipment Progress for ${row.trackingNumber}`}>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shipment Progress</div>
+        {blocked ? <div className="text-xs font-medium text-red-700">Provider needs review before this rail can advance.</div> : null}
+      </div>
+      <div className="mt-3 grid grid-cols-5 gap-2">
+        {stages.map((stage, index) => {
+          const active = !blocked && index <= currentIndex;
+          const current = !blocked && index === currentIndex;
+          return (
+            <div key={stage.key} className="min-w-0">
+              <div className={`h-2 rounded-full ${active ? "bg-emerald-500" : blocked && index === 0 ? "bg-red-400" : "bg-slate-200"}`} />
+              <div className={`mt-1 truncate text-[11px] ${current ? "font-semibold text-slate-900" : "text-slate-500"}`}>{stage.label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function shipmentProgressIndex(status: string) {
+  if (status === "DELIVERED") return 4;
+  if (status === "OUT_FOR_DELIVERY") return 3;
+  if (status === "IN_TRANSIT") return 2;
+  if (status === "INFO_RECEIVED") return 1;
+  return 0;
+}
+
+function shipmentStageKey(status: string) {
+  if (status === "DELIVERED") return "DELIVERED";
+  if (status === "OUT_FOR_DELIVERY") return "OUT_FOR_DELIVERY";
+  if (status === "IN_TRANSIT") return "IN_TRANSIT";
+  if (status === "INFO_RECEIVED") return "INFO_RECEIVED";
+  return "PENDING";
+}
+
+function ManualTrackingDropBox({ linkOptions, hasOpenShipments }: { linkOptions: TrackingLinkOption[]; hasOpenShipments: boolean }) {
+  return (
+    <details className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" open={!hasOpenShipments}>
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Add Tracking Evidence</h2>
+            <p className="mt-1 text-sm text-slate-600">Paste a Tracking Number, Shipment Email, or Alibaba Order URL. Pick a PO When Known; Otherwise the App Auto-Matches by Alibaba Order Number.</p>
+          </div>
+          <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">Manual Drop Box</span>
+        </div>
+      </summary>
+      <RefreshingActionForm action={saveManualTrackingNumbersAction} className="mt-4 space-y-4">
+        <label className="block text-sm font-medium text-slate-700">
+          Tracking Numbers / Shipment Email Text
+          <textarea
+            className="mt-1 min-h-32 w-full rounded-lg border border-dashed border-orange-300 bg-orange-50 px-3 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200"
+            name="rawText"
+            placeholder={"1Z675EW60490310023\nAlibaba order 304716450001023166 shipped\nTrack Package: 888071620741\nhttps://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166"}
+            required
+          />
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Link to receiving PO (preferred)
+            <select name="purchaseOrderId" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900">
+              <option value="">Auto-match by order number</option>
+              {linkOptions.map((option) => (
+                <option key={option.purchaseOrderId} value={option.purchaseOrderId}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Alibaba / Supplier Order Number
+            <input name="externalOrderId" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="304716450001023166" />
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Supplier Name (Optional)
+            <input name="supplierName" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="Supplier from shipment email" />
+          </label>
+          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
+            Evidence URL (Optional)
+            <input name="sourceUrl" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="https://biz.alibaba.com/ta/detail.htm?..." type="url" />
+          </label>
+        </div>
+        <button className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700" type="submit">
+          Save Tracking Numbers
+        </button>
+      </RefreshingActionForm>
+    </details>
+  );
+}
+
+function DeliveredTrackingHistory({ rows }: { rows: TrackingDashboardRow[] }) {
+  return (
+    <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <summary className="cursor-pointer list-none border-b border-slate-200 p-5">
+        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Delivered Tracking History</h2>
+            <p className="mt-1 text-sm text-slate-600">{rows.length} Delivered Record{rows.length === 1 ? "" : "s"} Retained for Evidence. Total Ship Time Is Measured from First Carrier Event to Delivery When Available.</p>
+          </div>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Delivered {rows.length}</span>
+        </div>
+      </summary>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Tracking Number</th>
+              <th className="px-4 py-3">Linked Order</th>
+              <th className="px-4 py-3">Carrier</th>
+              <th className="px-4 py-3">Delivered</th>
+              <th className="px-4 py-3">Total Ship Time</th>
+              <th className="px-4 py-3">Latest Event</th>
+              <th className="px-4 py-3">Source</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">No delivered tracking history yet.</td>
+              </tr>
+            ) : rows.map((row) => (
+              <DeliveredTrackingRow key={row.id} row={row} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
+  return (
+    <>
+      <tr data-testid="delivered-tracking-row" className="align-top">
+        <td className="px-4 py-3 font-mono text-slate-900">{row.trackingNumber}</td>
+        <td className="px-4 py-3">
+          <div className="font-medium text-slate-900">{row.linkedOrderLabel}</div>
+          {row.supplierName ? <div className="text-xs text-slate-500">{row.supplierName}</div> : null}
+        </td>
+        <td className="px-4 py-3 text-slate-700">{formatCarrier(row.carrier)}</td>
+        <td className="px-4 py-3">
+          <StatusBadge status={row.currentStatus} />
+          <div className="mt-1 text-xs text-slate-500">{formatDate(row.deliveredAt ?? row.shipTimeEndedAt)}</div>
+        </td>
+        <td className="px-4 py-3 text-slate-700">
+          <div className="font-medium text-slate-900">{row.shipTimeLabel ?? "—"}</div>
+          {row.shipTimeStartedAt && row.shipTimeEndedAt ? (
+            <div className="text-xs text-slate-500">{formatDate(row.shipTimeStartedAt)} → {formatDate(row.shipTimeEndedAt)}</div>
+          ) : <div className="text-xs text-slate-400">Carrier event range unavailable</div>}
+        </td>
+        <td className="px-4 py-3 text-slate-700"><LatestEvent row={row} /></td>
+        <td className="px-4 py-3 text-xs text-slate-600"><SourceCell row={row} /></td>
+      </tr>
+      <tr className="border-t border-slate-100 bg-white">
+        <td colSpan={7} className="px-4 py-3">
+          <PackageTrackingDataDetails row={row} compact />
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
+  return (
+    <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <summary className="cursor-pointer list-none border-b border-slate-200 p-5">
+        <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Reorder Forecasting Input</p>
+        <div className="mt-1 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Advanced: Lead-Time Learning Audit</h2>
+            <p className="mt-1 text-sm text-slate-600">Completed Tracking/Receiving Samples Feed Reorder Buffers. Expand Only When Auditing Lead-Time Math.</p>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">{log.sampleCount} Sample{log.sampleCount === 1 ? "" : "s"}</span>
+        </div>
+      </summary>
       <div className="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-4">
         <Metric label="Sampled items" value={log.itemCount} />
         <Metric label="Order-line samples" value={log.sampleCount} />
@@ -175,7 +572,7 @@ function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
           <div className="p-5 text-sm text-slate-500">No completed lead-time samples yet. Samples appear after linked orders have carrier delivery or human receiving evidence.</div>
         ) : log.items.map((item) => <LeadTimeLogItemDetails key={item.itemId} item={item} />)}
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -187,11 +584,11 @@ function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
           <div className="font-medium text-slate-900">{item.itemSku}</div>
           <div className="text-sm text-slate-600">{item.itemDescription}</div>
           <div className="mt-1 text-xs text-slate-500">
-            Current item lead time {item.currentLeadTimeDays}d · weighted average {formatDays(item.weightedAverageLeadTimeDays)} across {item.totalQuantityOrdered} ordered · shipping avg {formatDays(item.averageShipTimeDays)}
+            Current Item Lead Time {item.currentLeadTimeDays} Days · Weighted Average {formatDays(item.weightedAverageLeadTimeDays)} Across {item.totalQuantityOrdered} Ordered · Shipping Avg {formatDays(item.averageShipTimeDays)}
           </div>
         </div>
         <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-          {item.sampleCount} sample{item.sampleCount === 1 ? "" : "s"}
+          {item.sampleCount} Sample{item.sampleCount === 1 ? "" : "s"}
         </span>
       </summary>
       <div className="mt-4 overflow-x-auto rounded-lg border border-slate-100">
@@ -201,10 +598,10 @@ function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
               <th className="px-3 py-2">Order</th>
               <th className="px-3 py-2">Supplier</th>
               <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Lead time</th>
-              <th className="px-3 py-2">Start → end</th>
+              <th className="px-3 py-2">Lead Time</th>
+              <th className="px-3 py-2">Start → End</th>
               <th className="px-3 py-2">Shipping</th>
-              <th className="px-3 py-2">Tracking evidence</th>
+              <th className="px-3 py-2">Tracking Evidence</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -225,7 +622,7 @@ function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
       </td>
       <td className="px-3 py-2 text-slate-700">{entry.supplierName}</td>
       <td className="px-3 py-2 text-slate-700">
-        <div>{entry.quantityOrdered} ordered</div>
+        <div>{entry.quantityOrdered} quantity ordered</div>
         <div className="text-xs text-slate-500">{entry.quantityReceived} received</div>
       </td>
       <td className="px-3 py-2">
@@ -240,7 +637,7 @@ function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
         <div>{entry.shipTimeLabel ?? "—"}</div>
         {entry.shipTimeStartedAt && entry.shipTimeEndedAt ? (
           <div className="text-xs text-slate-500">{formatDate(entry.shipTimeStartedAt)} → {formatDate(entry.shipTimeEndedAt)}</div>
-        ) : <div className="text-xs text-slate-400">No carrier range</div>}
+        ) : <div className="text-xs text-slate-400">No Carrier Range</div>}
       </td>
       <td className="px-3 py-2 font-mono text-xs text-slate-700">
         {entry.trackingNumbers.length > 0 ? entry.trackingNumbers.join(", ") : "—"}
@@ -249,109 +646,154 @@ function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
   );
 }
 
-function ManualTrackingDropBox({ linkOptions }: { linkOptions: TrackingLinkOption[] }) {
+function PackageTrackingDataDetails({ row, compact = false }: { row: TrackingDashboardRow; compact?: boolean }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">Manual tracking drop box</h2>
-      <p className="mt-2 text-sm text-slate-600">
-        Paste one or more tracking numbers, a shipment notification email, or an Alibaba order-details URL. Best linking order: choose the receiving PO when you know it; otherwise include the Alibaba order number so the app can match the saved email import / receiving entry. Lead time uses the payment/order email date as the start and the human receiving date first, falling back to carrier delivery when receipt has not happened yet.
-      </p>
-      <RefreshingActionForm action={saveManualTrackingNumbersAction} className="mt-4 space-y-4">
-        <label className="block text-sm font-medium text-slate-700">
-          Tracking numbers / shipment email text
-          <textarea
-            className="mt-1 min-h-36 w-full rounded-lg border border-dashed border-orange-300 bg-orange-50/40 px-3 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-200"
-            name="rawText"
-            placeholder={"1Z675EW60490310023\nAlibaba order 304716450001023166 shipped\nTrack Package: 888071620741\nhttps://biz.alibaba.com/ta/detail.htm?orderId=304716450001023166"}
-            required
-          />
-        </label>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Link to receiving PO (preferred)
-            <select name="purchaseOrderId" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900">
-              <option value="">Auto-match by order number</option>
-              {linkOptions.map((option) => (
-                <option key={option.purchaseOrderId} value={option.purchaseOrderId}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Alibaba / supplier order number
-            <input name="externalOrderId" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="304716450001023166" />
-          </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Supplier name (optional)
-            <input name="supplierName" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="Supplier from shipment email" />
-          </label>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Evidence URL (optional)
-            <input name="sourceUrl" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal text-slate-900" placeholder="https://biz.alibaba.com/ta/detail.htm?..." type="url" />
-          </label>
+    <details className={compact ? "mt-0" : "mt-4 rounded-lg border border-slate-200 bg-slate-50"}>
+      <summary className="cursor-pointer list-none p-3 marker:hidden">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Tracking Data</div>
+            <div className="text-xs text-slate-500">Package movements first; technical details are nested below.</div>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600">
+            Expand Tracking Data · {row.eventCount} Event{row.eventCount === 1 ? "" : "s"}
+          </span>
         </div>
-        <button className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700" type="submit">
-          Save tracking numbers
-        </button>
-      </RefreshingActionForm>
+      </summary>
+      <div className={`${compact ? "" : "border-t border-slate-200"} space-y-4 p-3`}>
+        <EventTimeline row={row} />
+        <ShipmentDetailsDisclosure row={row} />
+      </div>
+    </details>
+  );
+}
+
+function ShipmentDetailsDisclosure({ row }: { row: TrackingDashboardRow }) {
+  return (
+    <details className="rounded-lg border border-slate-200 bg-white">
+      <summary className="cursor-pointer list-none p-3 marker:hidden">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Shipment Details</div>
+            <div className="text-xs text-slate-500">Carrier, latest event, refresh schedule, source evidence, and raw provider payloads.</div>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-600">Expand Details</span>
+        </div>
+      </summary>
+      <div className="space-y-4 border-t border-slate-200 p-3">
+        <div className="grid gap-3 md:grid-cols-2">
+          <Fact label="Carrier" value={formatCarrier(row.carrier)} />
+          <Fact label="Latest Event" value={<LatestEvent row={row} />} />
+          <Fact label="Refresh" value={<RefreshSummary row={row} />} />
+          <Fact label="Source" value={<SourceCell row={row} />} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <DataPoint label="Tracking Number" value={row.trackingNumber} mono />
+          <DataPoint label="Provider / Carrier" value={`${row.provider} / ${formatCarrier(row.carrier)}`} />
+          <DataPoint label="Status" value={`${formatLabel(row.currentStatus)} · refresh ${formatLabel(row.refreshStatus)}`} />
+          <DataPoint label="Linked Order" value={row.linkedOrderLabel} />
+          <DataPoint label="Linked Shipments" value={row.relatedTrackingNumbers.length > 1 ? row.relatedTrackingNumbers.join(", ") : "—"} mono />
+          <DataPoint label="External Order" value={row.externalOrderId ?? "—"} mono />
+          <DataPoint label="Purchase Order" value={row.purchaseOrderId ?? "—"} mono />
+          <DataPoint label="Captured Source" value={formatLabel(row.source)} />
+          <DataPoint label="Last Checked" value={formatDate(row.lastCheckedAt)} />
+          <DataPoint label="Next Refresh" value={formatDate(row.nextRefreshAt)} />
+        </div>
+        {row.statusDescription ? <p className="text-sm text-slate-600">{row.statusDescription}</p> : null}
+        {row.refreshError ? <p className="rounded-md border border-red-200 bg-white px-3 py-2 text-sm text-red-700">{row.refreshError}</p> : null}
+        <div className="grid gap-3 lg:grid-cols-2">
+          <JsonDisclosure label="Raw Provider Status Payload" value={row.rawStatusJson} />
+          <JsonDisclosure label="Raw Event Payloads" value={row.events.map((event) => ({
+            status: event.status,
+            description: event.description,
+            location: event.location,
+            occurredAt: event.occurredAt?.toISOString() ?? null,
+            rawEventJson: event.rawEventJson
+          }))} />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-slate-500">Events saved: {row.eventCount}</div>
+          <RefreshSingleButton row={row} />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function EventTimeline({ row }: { row: TrackingDashboardRow }) {
+  if (row.events.length === 0) {
+    return <div className="rounded-md border border-dashed border-slate-300 bg-white p-3 text-sm text-slate-500">No provider events have been saved yet.</div>;
+  }
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Complete event timeline</div>
+      <ol className="space-y-3">
+        {row.events.map((event) => (
+          <li key={event.id} className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
+            <div className="text-xs text-slate-500">{formatDate(event.occurredAt ?? event.createdAt)}</div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                {event.status ? <StatusBadge status={normalizeDisplayStatus(event.status)} /> : null}
+                <span className="text-sm font-medium text-slate-900">{event.description}</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">{event.location ?? "No location"}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
 
-function ActiveTrackingRow({ row }: { row: TrackingDashboardRow }) {
+function DataPoint({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <tr data-testid="tracking-row" className="align-top">
-      <td className="px-4 py-3 font-mono text-slate-900">{row.trackingNumber}</td>
-      <td className="px-4 py-3">
-        <div className="font-medium text-slate-900">{row.linkedOrderLabel}</div>
-        {row.supplierName ? <div className="text-xs text-slate-500">{row.supplierName}</div> : null}
-      </td>
-      <td className="px-4 py-3 text-slate-700">{row.carrier ?? "Auto"}</td>
-      <td className="px-4 py-3">
-        <StatusBadge status={row.currentStatus} />
-        {row.statusDescription ? <div className="mt-1 max-w-xs text-xs text-slate-500">{row.statusDescription}</div> : null}
-      </td>
-      <td className="px-4 py-3 text-slate-700"><LatestEvent row={row} /></td>
-      <td className="px-4 py-3 text-xs text-slate-600">
-        <div>{row.refreshStatus}</div>
-        <div>Last: {formatDate(row.lastCheckedAt)}</div>
-        <div>Next: {formatDate(row.nextRefreshAt)}</div>
-        {row.refreshError ? <div className="mt-1 max-w-xs text-red-700">{row.refreshError}</div> : null}
-      </td>
-      <td className="px-4 py-3 text-xs text-slate-600"><SourceCell row={row} /></td>
-      <td className="px-4 py-3">
-        <RefreshingActionForm action={refreshSingleTrackingAction}>
-          <input type="hidden" name="trackingNumber" value={row.trackingNumber} />
-          <button className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50" type="submit">
-            Refresh now
-          </button>
-        </RefreshingActionForm>
-      </td>
-    </tr>
+    <div className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-1 break-words text-sm text-slate-900 ${mono ? "font-mono" : ""}`}>{value}</div>
+    </div>
   );
 }
 
-function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
+function JsonDisclosure({ label, value }: { label: string; value: unknown }) {
   return (
-    <tr data-testid="delivered-tracking-row" className="align-top">
-      <td className="px-4 py-3 font-mono text-slate-900">{row.trackingNumber}</td>
-      <td className="px-4 py-3">
-        <div className="font-medium text-slate-900">{row.linkedOrderLabel}</div>
-        {row.supplierName ? <div className="text-xs text-slate-500">{row.supplierName}</div> : null}
-      </td>
-      <td className="px-4 py-3 text-slate-700">{row.carrier ?? "Auto"}</td>
-      <td className="px-4 py-3">
-        <StatusBadge status={row.currentStatus} />
-        <div className="mt-1 text-xs text-slate-500">{formatDate(row.deliveredAt ?? row.shipTimeEndedAt)}</div>
-      </td>
-      <td className="px-4 py-3 text-slate-700">
-        <div className="font-medium text-slate-900">{row.shipTimeLabel ?? "—"}</div>
-        {row.shipTimeStartedAt && row.shipTimeEndedAt ? (
-          <div className="text-xs text-slate-500">{formatDate(row.shipTimeStartedAt)} → {formatDate(row.shipTimeEndedAt)}</div>
-        ) : <div className="text-xs text-slate-400">Carrier event range unavailable</div>}
-      </td>
-      <td className="px-4 py-3 text-slate-700"><LatestEvent row={row} /></td>
-      <td className="px-4 py-3 text-xs text-slate-600"><SourceCell row={row} /></td>
-    </tr>
+    <details className="rounded-md border border-slate-200 bg-white">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</summary>
+      <pre className="max-h-72 overflow-auto border-t border-slate-100 p-3 text-xs leading-5 text-slate-700">{safeJson(value)}</pre>
+    </details>
+  );
+}
+
+function safeJson(value: unknown) {
+  if (value === null || value === undefined) return "No provider payload saved.";
+  return JSON.stringify(value, null, 2);
+}
+
+function normalizeDisplayStatus(status: string) {
+  return status.toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function AttentionCard({ tone, title, label, children }: { tone: Tone; title: string; label: string; children: ReactNode }) {
+  const classes = tone === "danger"
+    ? "border-red-200 bg-red-50 text-red-900"
+    : tone === "warning"
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-slate-200 bg-slate-50 text-slate-900";
+  const labelClass = tone === "danger" ? "text-red-700" : tone === "warning" ? "text-amber-700" : "text-slate-500";
+  return (
+    <div className={`rounded-lg border p-4 text-sm ${classes}`}>
+      <div className={`text-xs font-semibold uppercase tracking-wide ${labelClass}`}>{label}</div>
+      <div className="mt-1 font-semibold">{title}</div>
+      <div className="mt-2 leading-5">{children}</div>
+    </div>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 text-sm text-slate-800">{value}</div>
+    </div>
   );
 }
 
@@ -364,33 +806,92 @@ function LatestEvent({ row }: { row: TrackingDashboardRow }) {
   ) : <span className="text-slate-400">No events yet</span>;
 }
 
+function RefreshSummary({ row }: { row: TrackingDashboardRow }) {
+  return (
+    <div>
+      <div className="font-medium">{formatLabel(row.refreshStatus)}</div>
+      <div className="text-xs text-slate-500">Last: {formatDate(row.lastCheckedAt)}</div>
+      <div className="text-xs text-slate-500">Next: {formatDate(row.nextRefreshAt)}</div>
+    </div>
+  );
+}
+
 function SourceCell({ row }: { row: TrackingDashboardRow }) {
   return (
     <>
-      <div>{row.source}</div>
+      <div>{formatLabel(row.source)}</div>
       {row.sourceUrl ? <a className="text-orange-700 underline" href={row.sourceUrl} rel="noreferrer" target="_blank">Open evidence</a> : null}
     </>
   );
 }
 
-function Metric({ label, value, tone = "neutral" }: { label: string; value: number; tone?: "neutral" | "danger" }) {
+function RefreshSingleButton({ row, compact = false }: { row: TrackingDashboardRow; compact?: boolean }) {
   return (
-    <div className={`rounded-xl border p-4 shadow-sm ${tone === "danger" ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}>
+    <RefreshingActionForm action={refreshSingleTrackingAction}>
+      <input type="hidden" name="trackingNumber" value={row.trackingNumber} />
+      <button className={`rounded-md border border-slate-300 font-medium text-slate-700 hover:bg-slate-50 ${compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs"}`} type="submit">
+        Refresh Now
+      </button>
+    </RefreshingActionForm>
+  );
+}
+
+function Metric({ label, value, hint, tone = "neutral" }: { label: string; value: number; hint?: string; tone?: Tone }) {
+  const toneClasses = tone === "danger"
+    ? "border-red-200 bg-red-50"
+    : tone === "warning"
+      ? "border-amber-200 bg-amber-50"
+      : tone === "success"
+        ? "border-emerald-200 bg-emerald-50"
+        : "border-slate-200 bg-white";
+  return (
+    <div className={`rounded-xl border p-4 shadow-sm ${toneClasses}`}>
       <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
+      {hint ? <div className="mt-1 text-xs text-slate-500">{hint}</div> : null}
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
   const tone = status === "DELIVERED"
-    ? "bg-green-100 text-green-800"
+    ? "bg-emerald-100 text-emerald-800"
     : status === "IN_TRANSIT"
       ? "bg-blue-100 text-blue-800"
-      : status === "FAILED" || status === "EXCEPTION"
+    : status === "FAILED" || status === "EXCEPTION"
         ? "bg-red-100 text-red-800"
-        : "bg-slate-100 text-slate-700";
-  return <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{status}</span>;
+        : status === "INFO_RECEIVED"
+          ? "bg-yellow-100 text-yellow-800"
+          : status === "PENDING"
+            ? "bg-slate-100 text-slate-700"
+            : "bg-slate-100 text-slate-700";
+  return <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{formatLabel(status)}</span>;
+}
+
+function RefreshBadge({ row }: { row: TrackingDashboardRow }) {
+  const tone = row.refreshStatus === "FAILED"
+    ? "border-red-200 bg-red-50 text-red-700"
+    : row.refreshStatus === "SUCCESS"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : "border-slate-200 bg-slate-50 text-slate-700";
+  return <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${tone}`}>{formatLabel(row.refreshStatus)}</span>;
+}
+
+function formatCarrier(value: string | null) {
+  if (!value) return "Auto-Detect";
+  const normalized = value.replace(/-?tracking$/i, "").replace(/[_-]+/g, " ").trim();
+  if (/^ups$/i.test(normalized)) return "UPS";
+  if (/^canada post$/i.test(normalized)) return "Canada Post";
+  if (/^china post$/i.test(normalized)) return "China Post";
+  return titleCase(normalized);
+}
+
+function formatLabel(value: string) {
+  return titleCase(value.replace(/[_-]+/g, " ").toLowerCase());
+}
+
+function titleCase(value: string) {
+  return value.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
 function formatDays(value: number | null) {

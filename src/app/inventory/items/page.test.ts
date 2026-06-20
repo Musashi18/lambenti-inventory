@@ -36,16 +36,19 @@ describe("ItemsPage import/export source contract", () => {
     const source = readFileSync(join(__dirname, "item-create-form.tsx"), "utf8");
 
     expect(source).toContain('name="customSupplierName"');
-    expect(source).toContain("Custom supplier");
+    expect(source).toContain("Custom Supplier");
   });
 });
 
 describe("active item catalog source contract", () => {
   it("shows unit price in USD instead of preferred supplier in the active row table", () => {
     const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+    const pageSource = readFileSync(join(__dirname, "page.tsx"), "utf8");
 
-    expect(source).toContain("Unit price (USD)");
+    expect(source).toContain("Unit Price (USD)");
     expect(source).toContain("formatUsdUnitPrice");
     expect(source).not.toContain('<th className="px-4 py-3 font-medium">Preferred supplier</th>');
+    expect(source).toContain("Stock Health");
+    expect(pageSource).toContain("getStockSummaries");
   });
 });

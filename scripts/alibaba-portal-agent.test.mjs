@@ -282,7 +282,7 @@ describe("Alibaba portal agent CLI import mode", () => {
   it("remembers message threads and rereads them only when the visible thread fingerprint changes", () => {
     const memory = createEmptyTrackingCaptureMemory();
     const firstThread = {
-      label: "Jason Zhou Today Tracking number 7321315589070429",
+      label: "Jason Zhou Today Tracking Number 7321315589070429",
       href: "https://message.alibaba.com/message/messenger.htm?conversationId=jason"
     };
     const secondThread = {
@@ -295,7 +295,7 @@ describe("Alibaba portal agent CLI import mode", () => {
       key: firstKey,
       label: firstThread.label,
       listFingerprint: "same-preview",
-      sectionText: "Tracking number 7321315589070429",
+      sectionText: "Tracking Number 7321315589070429",
       trackingNumbers: ["7321315589070429"]
     });
 

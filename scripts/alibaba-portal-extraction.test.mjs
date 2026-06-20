@@ -36,7 +36,7 @@ describe("Alibaba portal extraction helpers", () => {
 
   it("does not mistake message-composer logistics UI for a tracking number", () => {
     expect(extractTrackingNumbers('Logistics Inquiry Press "Enter" to send Send')).toEqual([]);
-    expect(extractTrackingNumbers("Tracking number as soon as the logistics company provides it to me")).toEqual([]);
+    expect(extractTrackingNumbers("Tracking Number as soon as the logistics company provides it to me")).toEqual([]);
     expect(extractTrackingNumbers("Logistics update: Tracking Number 888071620741 is active.")).toEqual(["888071620741"]);
   });
 
@@ -100,7 +100,7 @@ describe("Alibaba portal extraction helpers", () => {
   });
 
   it("treats only shipping/tracking-related message sections as capture-worthy", () => {
-    expect(hasShippingTrackingMessageContext("Winnie XU: Will ship out your order soon. Tracking number 888071620741 will follow.")).toBe(true);
+    expect(hasShippingTrackingMessageContext("Winnie XU: Will ship out your order soon. Tracking Number 888071620741 will follow.")).toBe(true);
     expect(hasShippingTrackingMessageContext("Logistics update: package delivered to Toronto hub.")).toBe(true);
     expect(hasShippingTrackingMessageContext("Glad to assist! Please check the product catalog when you have time.")).toBe(false);
 

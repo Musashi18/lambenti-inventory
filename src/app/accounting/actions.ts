@@ -2,6 +2,7 @@
 
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import { requirePermission } from "@/modules/auth/permissions";
+import { expandAccountingDocumentUploads, type AccountingZipExpansionSummary } from "@/modules/documents/zip";
 import {
   applyAccountingDocumentAnalysis,
   attachAccountingDocumentEvidence,
@@ -26,17 +27,25 @@ export type AccountingDocumentUploadActionResult = {
     total?: number;
     suggestedActions?: string[];
   }>;
+  archiveSummaries?: AccountingZipExpansionSummary[];
 };
 
 export async function uploadAccountingDocumentsAction(formData: FormData): Promise<AccountingDocumentUploadActionResult> {
   const files = formData.getAll("documents").filter((value): value is File => typeof value !== "string" && value instanceof File && value.size > 0);
   if (files.length === 0) {
-    return { ok: false, message: "Drop or choose at least one PDF, email, screenshot, or text document.", documents: [] };
+    return { ok: false, message: "Drop or choose at least one PDF, email, screenshot, text document, or zipped folder of accounting files.", documents: [] };
   }
 
   const actor = await requirePermission("invoice:create");
+  let expansion;
+  try {
+    expansion = await expandAccountingDocumentUploads(files);
+  } catch (error) {
+    return { ok: false, message: errorMessage(error), documents: [] };
+  }
+
   const results = [];
-  for (const file of files) {
+  for (const file of expansion.files) {
     const result = await ingestAccountingDocumentUpload({ file, actorId: actor.id });
     results.push({
       id: result.document.id,
@@ -55,8 +64,9 @@ export async function uploadAccountingDocumentsAction(formData: FormData): Promi
   revalidateWorkspace(["/accounting"]);
   return {
     ok: true,
-    message: `Saved and analyzed ${results.length} accounting document${results.length === 1 ? "" : "s"}.`,
-    documents: results
+    message: accountingUploadMessage(results.length, expansion.archiveSummaries),
+    documents: results,
+    archiveSummaries: expansion.archiveSummaries.length > 0 ? expansion.archiveSummaries : undefined
   };
 }
 
@@ -128,4 +138,18 @@ function stringField(formData: FormData, key: string) {
 
 function optionalStringField(formData: FormData, key: string) {
   return stringField(formData, key);
+}
+
+function accountingUploadMessage(documentCount: number, archiveSummaries: AccountingZipExpansionSummary[]) {
+  const base = `Saved and analyzed ${documentCount} accounting document${documentCount === 1 ? "" : "s"}.`;
+  if (archiveSummaries.length === 0) return base;
+
+  const expandedCount = archiveSummaries.reduce((sum, archive) => sum + archive.extractedCount, 0);
+  const skippedCount = archiveSummaries.reduce((sum, archive) => sum + archive.skippedCount, 0);
+  const skippedSuffix = skippedCount > 0 ? ` Skipped ${skippedCount} unsupported or metadata file${skippedCount === 1 ? "" : "s"}.` : "";
+  return `${base} Expanded ${expandedCount} file${expandedCount === 1 ? "" : "s"} from ${archiveSummaries.length} ZIP archive${archiveSummaries.length === 1 ? "" : "s"}.${skippedSuffix}`;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Accounting upload failed before analysis.";
 }

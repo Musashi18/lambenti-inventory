@@ -10,50 +10,65 @@ const port = 5173;
 const baseUrl = `http://${host}:${port}`;
 
 const pageRoutes = [
-  ["/", "Operations dashboard"],
-  ["/inventory/items", "Inventory items"],
-  ["/inventory/movements", "Stock movement history"],
-  ["/inventory/valuation", "Inventory valuation"],
+  ["/", "Operations Dashboard"],
+  ["/inventory/items", "Inventory Items"],
+  ["/inventory/movements", "Stock Movement History"],
+  ["/inventory/valuation", "Inventory Valuation"],
   ["/suppliers", "Suppliers"],
-  ["/purchasing/recommendations", "Purchase recommendations"],
-  ["/purchasing/requests", "Purchase request approvals"],
-  ["/boms", "BOM builder"],
-  ["/incoming", "Incoming inventory tracker"],
+  ["/purchasing/recommendations", "Purchase Recommendations"],
+  ["/purchasing/requests", "Purchase Request Approvals"],
+  ["/boms", "BOM Builder"],
+  ["/incoming", "Incoming / Receiving"],
   ["/integrations/email-import", "Order Email Agent"],
   ["/integrations/alibaba-email", "Order Email Agent"],
-  ["/accounting/invoices", "Accounting invoices"]
+  ["/automation", "Manual Safe Automation"],
+  ["/tracking", "Tracking Workbench"],
+  ["/accounting", "Accounting Workbench"],
+  ["/accounting/accounts", "GL Account Mapping"],
+  ["/accounting/customer-invoices", "Customer Invoices / AR"],
+  ["/accounting/exports", "GST/HST Exports"],
+  ["/accounting/invoices", "Accounting Invoices"],
+  ["/accounting/journals", "Journal Entries"],
+  ["/accounting/landed-cost", "Landed-Cost Allocation"],
+  ["/accounting/payments", "Payment Reconciliation"]
 ];
 
-const apiRoutes = [
+const jsonApiRoutes = [
   "/api/agent/stock",
   "/api/agent/boms",
   "/api/agent/shortages",
   "/api/agent/supplier-offers"
 ];
 
+const csvApiRoutes = [
+  ["/api/accounting/exports/gst-hst", "invoiceNumber"],
+  ["/api/accounting/exports/journals", "entryNumber"],
+  ["/api/accounting/exports/landed-cost", "invoiceNumber"]
+];
+
 const uiContracts = [
   {
     route: "/inventory/items",
-    expected: ["Active item catalog", "CSV import / export", "Collapsed by default"],
+    expected: ["Active Item Catalog", "CSV Import / Export", "Collapsed by Default"],
     rejected: ["has received your initial payment", "has drafted a Trade Assurance contract"],
-    ordered: ["Active item catalog", "CSV import / export"]
+    ordered: ["Active Item Catalog", "CSV Import / Export"]
   },
   {
     route: "/suppliers",
-    expected: ["Saved supplier contact information", "Edit company", "Edit email", "Edit dropdown confirmation", "Item sourcing rows"]
+    expected: ["Saved supplier contact information", "Edit Company", "Edit Email", "Edit Human Confirmation", "Item Sourcing Rows"]
   },
   {
     route: "/automation",
-    expected: ["Manual safe automation", "Run reorder scan", "Run anomaly scan", "Recent automation runs"]
+    expected: ["Manual Safe Automation", "Run Reorder Scan", "Run Anomaly Scan", "Recent Automation Runs"]
   },
   {
     route: "/boms",
-    expected: ["Create another finished unit section", "Add component line", "Remove row"],
+    expected: ["Create Another Finished Unit Section", "Add Component Line", "Remove Row"],
     rejected: ["Active items imported from item master"]
   },
   {
     route: "/integrations/email-import",
-    expected: ["Sync mailbox now", "Sync &amp; reassess recent imports", "Import a supplier order email manually", "Collapsed by default"]
+    expected: ["Sync Mailbox Now", "Sync &amp; Reassess Recent Imports", "Import a Supplier Order Email Manually", "Collapsed by Default"]
   }
 ];
 
@@ -70,10 +85,13 @@ async function main() {
     for (const contract of uiContracts) {
       await assertUiContract(contract);
     }
-    for (const route of apiRoutes) {
+    for (const route of jsonApiRoutes) {
       await assertJsonApi(route);
     }
-    console.log(`Smoke passed: ${pageRoutes.length} pages, ${uiContracts.length} UI contracts, and ${apiRoutes.length} APIs at ${baseUrl}`);
+    for (const [route, expectedText] of csvApiRoutes) {
+      await assertCsvApi(route, expectedText);
+    }
+    console.log(`Smoke passed: ${pageRoutes.length} pages, ${uiContracts.length} UI contracts, ${jsonApiRoutes.length} JSON APIs, and ${csvApiRoutes.length} CSV exports at ${baseUrl}`);
   } finally {
     await stopServer(server);
   }
@@ -180,6 +198,20 @@ async function assertJsonApi(route) {
     throw new Error(`${route} returned an invalid JSON payload`);
   }
   console.log(`API  ${route} OK`);
+}
+
+async function assertCsvApi(route, expectedText) {
+  const response = await fetch(`${baseUrl}${route}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${route} returned HTTP ${response.status}`);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/csv")) {
+    throw new Error(`${route} returned non-CSV content type: ${contentType}`);
+  }
+  const csv = await response.text();
+  if (!csv.includes(expectedText)) {
+    throw new Error(`${route} CSV did not contain expected marker: ${expectedText}`);
+  }
+  console.log(`CSV  ${route} OK`);
 }
 
 async function stopPortOwner(portToStop) {

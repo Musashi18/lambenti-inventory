@@ -55,6 +55,11 @@ export type SupplierProfile = {
   archiveReason: string;
 };
 
+export type SupplierCleanupCandidate = SupplierProfile & {
+  reason: string;
+  emailImportCount: number;
+};
+
 type SupplierOptionCandidate = {
   name: string;
   confirmedByHuman?: boolean | null;
@@ -265,6 +270,143 @@ export async function getArchivedSupplierProfiles(): Promise<SupplierProfile[]> 
   }));
 }
 
+export async function getSupplierCleanupCandidates(): Promise<SupplierCleanupCandidate[]> {
+  const suppliers = await prisma.supplier.findMany({
+    where: { archivedAt: null },
+    orderBy: { name: "asc" },
+    select: supplierCleanupSelect()
+  });
+
+  return suppliers
+    .map((supplier) => supplierCleanupCandidate(supplier))
+    .filter((candidate): candidate is SupplierCleanupCandidate => candidate !== null);
+}
+
+export async function archiveSupplierCleanupCandidates(input: {
+  actorId: string;
+  actorType?: "USER" | "AGENT";
+  candidateIds?: string[];
+}) {
+  return prisma.$transaction(async (tx) => {
+    const candidateIdSet = input.candidateIds?.length ? new Set(input.candidateIds) : null;
+    const suppliers = await tx.supplier.findMany({
+      where: {
+        archivedAt: null,
+        ...(candidateIdSet ? { id: { in: Array.from(candidateIdSet) } } : {})
+      },
+      orderBy: { name: "asc" },
+      select: supplierCleanupSelect()
+    });
+    const candidates = suppliers
+      .map((supplier) => supplierCleanupCandidate(supplier))
+      .filter((candidate): candidate is SupplierCleanupCandidate => candidate !== null);
+
+    for (const candidate of candidates) {
+      const supplier = await tx.supplier.update({
+        where: { id: candidate.id },
+        data: {
+          archivedAt: new Date(),
+          archivedBy: input.actorId,
+          archiveReason: `Auto-quarantined import/UI supplier junk: ${candidate.reason}`
+        }
+      });
+
+      await writeAuditLog({
+        actorType: input.actorType ?? "USER",
+        actorId: input.actorId,
+        action: "ARCHIVE_SUPPLIER_IMPORT_JUNK",
+        entityType: "Supplier",
+        entityId: supplier.id,
+        payload: {
+          supplierName: supplier.name,
+          reason: candidate.reason,
+          emailImportCount: candidate.emailImportCount,
+          note: "Auto-quarantined only because the supplier had no preferred items, offers, purchase requests, purchase orders, or invoices. Historical email evidence is preserved."
+        }
+      }, tx);
+    }
+
+    return { archivedCount: candidates.length, candidates };
+  });
+}
+
+function supplierCleanupSelect() {
+  return {
+    id: true,
+    name: true,
+    confirmedByHuman: true,
+    companyName: true,
+    contactEmail: true,
+    contactName: true,
+    companyRevenue: true,
+    foundedYear: true,
+    address: true,
+    productPageUrl: true,
+    leadTimeDays: true,
+    archivedAt: true,
+    archivedBy: true,
+    archiveReason: true,
+    createdAt: true,
+    updatedAt: true,
+    _count: {
+      select: {
+        offers: true,
+        preferredFor: true,
+        purchaseRequests: true,
+        purchaseOrders: true,
+        invoices: true,
+        emailOrderImports: true
+      }
+    }
+  } as const;
+}
+
+type SupplierCleanupRow = Prisma.SupplierGetPayload<{ select: ReturnType<typeof supplierCleanupSelect> }>;
+
+function supplierCleanupCandidate(supplier: SupplierCleanupRow): SupplierCleanupCandidate | null {
+  const candidate: SupplierProfileCandidate = {
+    id: supplier.id,
+    name: supplier.name,
+    confirmedByHuman: supplier.confirmedByHuman,
+    companyName: supplier.companyName,
+    contactEmail: supplier.contactEmail,
+    contactName: supplier.contactName,
+    companyRevenue: supplier.companyRevenue,
+    foundedYear: supplier.foundedYear,
+    address: supplier.address,
+    productPageUrl: supplier.productPageUrl,
+    leadTimeDays: supplier.leadTimeDays,
+    archivedAt: supplier.archivedAt,
+    archivedBy: supplier.archivedBy,
+    archiveReason: supplier.archiveReason,
+    createdAt: supplier.createdAt,
+    updatedAt: supplier.updatedAt,
+    supplierOfferCount: supplier._count.offers,
+    preferredItemCount: supplier._count.preferredFor,
+    purchaseRequestCount: supplier._count.purchaseRequests,
+    purchaseOrderCount: supplier._count.purchaseOrders,
+    invoiceCount: supplier._count.invoices,
+    emailImportCount: supplier._count.emailOrderImports
+  };
+  const reason = importedSupplierJunkReason(candidate.name) ?? importedSupplierJunkReason(cleanConfirmedSupplierOptionName(candidate));
+  if (!reason) return null;
+  if (candidate.confirmedByHuman) return null;
+  if (hasOperationalSupplierReferences(candidate)) return null;
+  return {
+    ...toSupplierProfile(candidate),
+    reason,
+    emailImportCount: candidate.emailImportCount ?? 0
+  };
+}
+
+function hasOperationalSupplierReferences(candidate: SupplierProfileCandidate) {
+  return (candidate.preferredItemCount ?? 0) > 0
+    || (candidate.supplierOfferCount ?? 0) > 0
+    || (candidate.purchaseRequestCount ?? 0) > 0
+    || (candidate.purchaseOrderCount ?? 0) > 0
+    || (candidate.invoiceCount ?? 0) > 0;
+}
+
 export function filterOneSupplierPerSource<T extends SupplierProfileCandidate>(suppliers: T[]): T[] {
   const bySource = new Map<string, T>();
 
@@ -283,7 +425,7 @@ export function filterOneSupplierPerSource<T extends SupplierProfileCandidate>(s
 }
 
 export function cleanConfirmedSupplierOptionName(input: Pick<SupplierOptionCandidate, "name" | "companyName">) {
-  const preferred = input.companyName?.trim() || input.name;
+  const preferred = extractEmbeddedSupplierCompany(input.companyName?.trim() || input.name) || input.companyName?.trim() || input.name;
   return preferred
     .replace(/^\s*(?:from|supplier|seller|store|company)\s*[:#-]\s*/i, "")
     .replace(/^"(.+)"$/, "$1")
@@ -300,6 +442,8 @@ export function isConfirmedSupplierOptionCandidate(candidate: SupplierOptionCand
   if (looksLikeEmailHeading(candidate.name) || looksLikeEmailHeading(cleanedName)) return false;
   if (looksLikeImportedEmailSentence(candidate.name) || looksLikeImportedEmailSentence(cleanedName)) return false;
   if (looksLikeGenericImportedSupplier(cleanedName)) return false;
+  if (looksLikeImportedSupplierJunk(candidate.name) || looksLikeImportedSupplierJunk(cleanedName)) return false;
+  if (!isValidSupplierIdentityName(cleanedName)) return false;
   if (!candidate.confirmedByHuman) return false;
 
   return true;
@@ -311,8 +455,18 @@ function isDisplayableSupplierProfileCandidate(candidate: SupplierProfileCandida
   if (looksLikeEmailHeading(candidate.name) || looksLikeEmailHeading(cleanedName)) return false;
   if (looksLikeImportedEmailSentence(candidate.name) || looksLikeImportedEmailSentence(cleanedName)) return false;
   if (looksLikeGenericImportedSupplier(cleanedName)) return false;
+  if (looksLikeImportedSupplierJunk(candidate.name) || looksLikeImportedSupplierJunk(cleanedName)) return false;
   if (looksLikeTestOrUselessSupplier(candidate.name) || looksLikeTestOrUselessSupplier(cleanedName)) return false;
-  return true;
+  return isValidSupplierIdentityName(cleanedName);
+}
+
+function extractEmbeddedSupplierCompany(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const companyPattern = /([A-Z][A-Za-z0-9&.,' -]+?(?:Co\.?|Ltd\.?|Limited|Factory|Trading|Technology|Electronic|Electronics|Textile|Industrial|Import And Export)[A-Za-z0-9&.,' -]*?)(?=$|\s+(?:ok|will ship|\[read\]|great))/i;
+  const afterDate = normalized.match(new RegExp(`\\b\\d{4}-\\d{1,2}-\\d{1,2}\\s+${companyPattern.source}`, "i"));
+  if (afterDate?.[1]) return afterDate[1].trim();
+  const leading = normalized.match(new RegExp(`^${companyPattern.source}`, "i"));
+  return leading?.[1]?.trim();
 }
 
 function toSupplierProfile(supplier: SupplierProfileCandidate): SupplierProfile {
@@ -340,7 +494,7 @@ function supplierSourceKey(supplier: SupplierProfileCandidate) {
   if (urlKey) return `url:${urlKey}`;
   const email = supplier.contactEmail?.trim().toLowerCase();
   if (email) return `email:${email}`;
-  return `name:${cleanConfirmedSupplierOptionName(supplier).toLowerCase()}`;
+  return `name:${canonicalSupplierIdentityKey(cleanConfirmedSupplierOptionName(supplier))}`;
 }
 
 function supplierSourceLabel(supplier: SupplierProfileCandidate) {
@@ -490,13 +644,18 @@ async function getOrCreateCustomSupplier(input: {
 }) {
   const client = input.client ?? prisma;
   const name = normalizeCustomSupplierName(input.name);
-  if (name.length < 2 || looksLikeEmailHeading(name) || looksLikeImportedEmailSentence(name) || looksLikeGenericImportedSupplier(name)) {
-    throw new Error("Enter a specific supplier name, not an email heading or generic supplier label.");
+  if (!isValidSupplierIdentityName(name)) {
+    throw new Error("Enter a specific supplier name, not an email heading, tracking note, UI label, or generic supplier label.");
   }
 
-  const existing = await client.supplier.findFirst({
-    where: { name: { equals: name, mode: "insensitive" } }
+  const canonicalName = canonicalSupplierIdentityKey(name);
+  const possibleExisting = await client.supplier.findMany({
+    select: { id: true, name: true, companyName: true, archivedAt: true }
   });
+  const existing = possibleExisting.find((supplier) =>
+    canonicalSupplierIdentityKey(supplier.companyName || supplier.name) === canonicalName
+      || canonicalSupplierIdentityKey(supplier.name) === canonicalName
+  );
   if (existing) {
     if (existing.archivedAt) {
       throw new Error(`Supplier "${existing.name}" is archived. Unarchive it from Suppliers before assigning it again.`);
@@ -705,6 +864,30 @@ export function cleanItemType(category: string) {
     .join(" ");
 }
 
+export function canonicalSupplierIdentityKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(?:co|company|ltd|limited|inc|incorporated|llc|factory|store|official|trading|technology|technologies)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isValidSupplierIdentityName(value: string) {
+  const raw = value.trim();
+  if (/\b(?:tracking number|logistics company|ship out your order|order soon|view order details|initial payment|trade assurance|each once)\b/i.test(raw)) return false;
+  const cleaned = cleanConfirmedSupplierOptionName({ name: value });
+  const canonical = canonicalSupplierIdentityKey(cleaned);
+  if (cleaned.length < 2 || canonical.length < 2) return false;
+  if (looksLikeEmailHeading(cleaned) || looksLikeImportedEmailSentence(cleaned) || looksLikeGenericImportedSupplier(cleaned)) return false;
+  if (looksLikeImportedSupplierJunk(cleaned)) return false;
+  if (/^https?:\/\//i.test(cleaned) || /^\//.test(cleaned)) return false;
+  if (cleaned.length > 90 && !/\b(?:co\.?|ltd\.?|limited|factory|electronics|technology|textile|trading|industrial|manufactur)/i.test(cleaned)) return false;
+  if (/\b(?:tracking number|logistics company|ship out your order|order soon|view order details|initial payment|trade assurance|each once)\b/i.test(cleaned)) return false;
+  return true;
+}
+
 function looksLikeEmailHeading(value: string) {
   const cleaned = value.trim();
   return /^(?:subject|from|to|cc|bcc|date|message-id|reply-to)\s*:/i.test(cleaned)
@@ -729,7 +912,34 @@ function looksLikeGenericImportedSupplier(value: string) {
     || normalized === "unknown supplier"
     || normalized === "order email"
     || normalized === "confirmed order"
-    || normalized === "order notification";
+    || normalized === "order notification"
+    || normalized === "tel"
+    || normalized === "phone";
+}
+
+function looksLikeImportedSupplierJunk(value: string) {
+  return importedSupplierJunkReason(value) !== null;
+}
+
+function importedSupplierJunkReason(value: string) {
+  const cleaned = value.trim();
+  const normalized = cleaned.toLowerCase().replace(/\s+/g, " ");
+  const compact = cleaned.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!cleaned) return "blank supplier label";
+  if (["alibaba", "alibaba supplier", "supplier", "unknown supplier", "order email", "confirmed order", "order notification", "tel", "phone"].includes(compact)) {
+    return "generic imported supplier placeholder";
+  }
+  if (/^\/apps\/details\b/i.test(cleaned) || /\bcom\.alibaba\./i.test(cleaned)) return "Alibaba app/deep-link URL captured as supplier";
+  if (["details", "help contact", "help and contact", "send order request", "to ship", "track order", "message center", "each once"].includes(compact)) {
+    return "Alibaba UI/navigation label captured as supplier";
+  }
+  if (/\binternational tracking number\b/.test(normalized) || /\blogistics company provides it\b/.test(normalized)) return "tracking-message sentence captured as supplier";
+  if (/\bwill ship out your order soon\b/.test(normalized)) return "Alibaba shipment-message sentence captured as supplier";
+  if (/\bhas received your initial payment\b/.test(normalized)) return "Alibaba payment sentence captured as supplier";
+  if (/\btrade assurance contract\b/.test(normalized)) return "Alibaba Trade Assurance sentence captured as supplier";
+  if (/\bview order details total\b/.test(normalized)) return "Alibaba order-details sentence captured as supplier";
+  if (/^alibaba\s+com\s+singapore\s+e\s+commerce\s+private\s+limited\b/.test(compact)) return "Alibaba platform/legal entity captured instead of supplier";
+  return null;
 }
 
 function looksLikeTestOrUselessSupplier(value: string) {

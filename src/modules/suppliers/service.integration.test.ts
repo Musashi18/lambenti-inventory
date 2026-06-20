@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { CostConfidence, ItemCategory, LifecycleStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { archiveSupplierProfile, deleteArchivedSupplier, getActiveSupplierOptions, getArchivedSupplierProfiles, getItemSupplierEntries, getUniqueSupplierProfiles, unarchiveSupplierProfile, updateItemSupplierEntry } from "./service";
+import { archiveSupplierCleanupCandidates, archiveSupplierProfile, deleteArchivedSupplier, getActiveSupplierOptions, getArchivedSupplierProfiles, getItemSupplierEntries, getSupplierCleanupCandidates, getUniqueSupplierProfiles, unarchiveSupplierProfile, updateItemSupplierEntry } from "./service";
 
 const TEST_PREFIX = "QA-SUPPLIER-ENTRIES";
 
@@ -222,6 +222,68 @@ describe("item-derived supplier entries", () => {
     await expect(prisma.auditLog.count({
       where: { actorId: `${TEST_PREFIX}-custom-actor`, action: "CREATE_CUSTOM_SUPPLIER", entityId: updated.preferredSupplierId ?? undefined }
     })).resolves.toBe(1);
+  });
+
+  it("quarantines only unreferenced imported supplier junk while preserving operational references", async () => {
+    const { component } = await createFixtures();
+    const unreferencedDeepLink = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} com.alibaba.aliexpresshd /apps/details?junk-supplier`,
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 0
+      }
+    });
+    const unreferencedPaymentSentence = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Aimee Xia has received your initial payment for order no. 123456. View order details Total`,
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 0
+      }
+    });
+    const referencedJunk = await prisma.supplier.create({
+      data: {
+        name: `${TEST_PREFIX} Bruce Dong has received your initial payment for order no. 654321. View order details Total`,
+        moq: 1,
+        leadTimeDays: 7,
+        shippingCost: 0,
+        reliabilityScore: 0
+      }
+    });
+    await prisma.item.update({ where: { id: component.id }, data: { preferredSupplierId: referencedJunk.id } });
+
+    const candidates = await getSupplierCleanupCandidates();
+    expect(candidates.map((candidate) => candidate.id)).toEqual(expect.arrayContaining([
+      unreferencedDeepLink.id,
+      unreferencedPaymentSentence.id
+    ]));
+    expect(candidates.map((candidate) => candidate.id)).not.toContain(referencedJunk.id);
+
+    const result = await archiveSupplierCleanupCandidates({ actorId: `${TEST_PREFIX}-cleanup-actor`, candidateIds: [
+      unreferencedDeepLink.id,
+      unreferencedPaymentSentence.id,
+      referencedJunk.id
+    ] });
+    expect(result.candidates.map((candidate) => candidate.id)).toEqual(expect.arrayContaining([
+      unreferencedDeepLink.id,
+      unreferencedPaymentSentence.id
+    ]));
+
+    await expect(prisma.supplier.findUniqueOrThrow({ where: { id: unreferencedDeepLink.id } })).resolves.toMatchObject({
+      archivedBy: `${TEST_PREFIX}-cleanup-actor`
+    });
+    await expect(prisma.supplier.findUniqueOrThrow({ where: { id: unreferencedPaymentSentence.id } })).resolves.toMatchObject({
+      archivedBy: `${TEST_PREFIX}-cleanup-actor`
+    });
+    await expect(prisma.supplier.findUniqueOrThrow({ where: { id: referencedJunk.id } })).resolves.toMatchObject({
+      archivedAt: null
+    });
+    await expect(prisma.auditLog.count({
+      where: { actorId: `${TEST_PREFIX}-cleanup-actor`, action: "ARCHIVE_SUPPLIER_IMPORT_JUNK" }
+    })).resolves.toBeGreaterThanOrEqual(2);
   });
 
   it("archives supplier profiles so they disappear from active lists and confirmed dropdowns", async () => {

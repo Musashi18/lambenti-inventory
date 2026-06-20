@@ -20,23 +20,23 @@ export default async function CustomerInvoicesPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Customer invoices / AR</h1>
+          <h1 className="text-2xl font-semibold">Customer Invoices / AR</h1>
           <p className="max-w-3xl text-sm text-slate-600">
             Draft and track customer-facing invoices for Lambenti sales. AR invoices do not consume stock, reserve inventory, or ship products; fulfillment remains a separate human operations workflow.
           </p>
         </div>
-        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to accounting</Link>
+        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to Accounting</Link>
       </div>
 
       <section className="grid gap-4 md:grid-cols-4">
         <SummaryCard label="Customer invoices" value={invoices.length.toString()} subtext="AR records" />
         <SummaryCard label="Open" value={openInvoices.length.toString()} subtext="Draft or sent" />
         <SummaryCard label="Sent" value={`CAD${Number(totalsByStatus.SENT?.toString() ?? 0).toFixed(2)}`} subtext="Awaiting payment" />
-        <SummaryCard label="Paid" value={`CAD${Number(totalsByStatus.PAID?.toString() ?? 0).toFixed(2)}`} subtext="Payment reference retained" />
+        <SummaryCard label="Paid" value={`CAD${Number(totalsByStatus.PAID?.toString() ?? 0).toFixed(2)}`} subtext="Payment Reference retained" />
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="font-medium">Create customer invoice</h2>
+        <h2 className="font-medium">Create Customer Invoice</h2>
         <RefreshingActionForm action={createCustomerInvoiceAction} className="mt-3 grid gap-3 md:grid-cols-4">
           <input name="customerName" required placeholder="Customer name" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
           <input name="companyName" placeholder="Company/legal name" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
@@ -48,15 +48,15 @@ export default async function CustomerInvoicesPage() {
           <input name="dueDate" type="date" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
           <input name="description" required placeholder="Line description" className="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-2" />
           <input name="quantity" type="number" min="1" defaultValue="1" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
-          <input name="unitPrice" required placeholder="Unit price" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <input name="unitPrice" required placeholder="Unit Price" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
           <input name="taxRate" placeholder="Tax rate, e.g. 0.13" className="rounded-md border border-slate-300 px-2 py-1 text-sm" />
           <input name="notes" placeholder="Notes" className="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-3" />
-          <button className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white md:col-span-4">Create AR invoice</button>
+          <button className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white md:col-span-4">Create AR Invoice</button>
         </RefreshingActionForm>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Customer invoice ledger</h2></div>
+        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Customer Invoice Ledger</h2></div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Invoice</th><th className="px-4 py-3">Customer</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Actions</th></tr></thead>
@@ -74,8 +74,8 @@ export default async function CustomerInvoicesPage() {
                         <RefreshingActionForm action={updateCustomerInvoiceStatusAction} className="flex gap-2">
                           <input type="hidden" name="customerInvoiceId" value={invoice.id} />
                           <input type="hidden" name="status" value={CustomerInvoiceStatus.PAID} />
-                          <input name="paymentReference" required placeholder="Payment ref" className="w-36 rounded-md border border-slate-300 px-2 py-1 text-xs" />
-                          <button className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50">Mark paid</button>
+                          <input name="paymentReference" required placeholder="Payment Ref" className="w-36 rounded-md border border-slate-300 px-2 py-1 text-xs" />
+                          <button className="rounded-md border px-2 py-1 text-xs hover:bg-slate-50">Mark Paid</button>
                         </RefreshingActionForm>
                       ) : null}
                     </div>

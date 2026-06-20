@@ -77,6 +77,37 @@ describe("auth permission model", () => {
     }
   });
 
+  it("does not trust spoofable loopback origin/forwarded-host headers when the primary host is non-local", () => {
+    const actor = resolveActorFromHeaders(new Headers({
+      host: "inventory.lambenti.example",
+      origin: "http://127.0.0.1:5173",
+      "x-forwarded-host": "127.0.0.1:5173"
+    }), {
+      nodeEnv: "production",
+      appSecret: undefined,
+      allowLocalProductionAuth: "true"
+    });
+
+    expect(actor.ok).toBe(false);
+    if (!actor.ok) expect(actor.status).toBe(503);
+  });
+
+  it("rejects local production app auth when origin or forwarded host contradicts loopback", () => {
+    for (const headers of [
+      new Headers({ host: "127.0.0.1:5173", origin: "https://inventory.lambenti.example" }),
+      new Headers({ host: "127.0.0.1:5173", "x-forwarded-host": "inventory.lambenti.example" })
+    ]) {
+      const actor = resolveActorFromHeaders(headers, {
+        nodeEnv: "production",
+        appSecret: undefined,
+        allowLocalProductionAuth: "true"
+      });
+
+      expect(actor.ok).toBe(false);
+      if (!actor.ok) expect(actor.status).toBe(503);
+    }
+  });
+
   it("allows loopback agent API reads during local production smoke only when the explicit local flag is set", () => {
     const request = new Request("http://127.0.0.1:5173/api/agent/stock", {
       headers: { host: "127.0.0.1:5173" }

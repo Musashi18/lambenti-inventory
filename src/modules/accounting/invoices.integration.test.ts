@@ -87,7 +87,7 @@ async function createPurchaseOrderFixture(suffix: string, supplierName?: string)
   return { supplier, item, order };
 }
 
-describe("supplier invoice identity and multiple invoices per PO", () => {
+describe("supplier invoice identity and order-unique invoice merging", () => {
   beforeEach(cleanupTestData);
   afterAll(cleanupTestData);
 
@@ -126,29 +126,36 @@ describe("supplier invoice identity and multiple invoices per PO", () => {
     await expect(prisma.supplierInvoice.count({ where: { supplierId: first.supplier.id, invoiceNumberKey: normalizeInvoiceNumberKey(`${TEST_PREFIX}-SAME-SUPPLIER-INV`) } })).resolves.toBe(1);
   });
 
-  it("creates multiple distinct invoices against one purchase order without receiving stock", async () => {
+  it("merges multiple bill sources against one purchase order without receiving stock", async () => {
     const { order, item } = await createPurchaseOrderFixture("MULTI-PO");
     const stockMovementCountBefore = await prisma.stockMovement.count({ where: { itemId: item.id } });
 
-    const deposit = await createInvoiceFromPurchaseOrder(order.id, `${TEST_PREFIX}-actor`, {
-      invoiceNumber: `${TEST_PREFIX}-MULTI-PO-DEPOSIT`,
+    const firstSource = await createInvoiceFromPurchaseOrder(order.id, `${TEST_PREFIX}-actor`, {
+      invoiceNumber: `${TEST_PREFIX}-MULTI-PO-FIRST`,
       subtotal: 5,
       total: 5,
-      notes: "Deposit invoice"
+      sourceDocumentHash: `${TEST_PREFIX}-MULTI-PO-HASH-A`,
+      notes: "First source invoice"
     });
-    const final = await createInvoiceFromPurchaseOrder(order.id, `${TEST_PREFIX}-actor`, {
-      invoiceNumber: `${TEST_PREFIX}-MULTI-PO-FINAL`,
+    const secondSource = await createInvoiceFromPurchaseOrder(order.id, `${TEST_PREFIX}-actor`, {
+      invoiceNumber: `${TEST_PREFIX}-MULTI-PO-SECOND`,
       subtotal: 15,
       total: 15,
-      notes: "Final invoice"
+      sourceDocumentHash: `${TEST_PREFIX}-MULTI-PO-HASH-B`,
+      notes: "Second source invoice"
     });
 
-    expect(deposit.id).not.toBe(final.id);
-    await expect(prisma.supplierInvoice.count({ where: { purchaseOrderId: order.id } })).resolves.toBe(2);
+    expect(secondSource.id).toBe(firstSource.id);
+    await expect(prisma.supplierInvoice.count({ where: { purchaseOrderId: order.id } })).resolves.toBe(1);
     await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(stockMovementCountBefore);
+
+    const merged = await prisma.supplierInvoice.findUniqueOrThrow({ where: { id: firstSource.id } });
+    expect(merged.sourceDocumentHash).toBe(`${TEST_PREFIX}-MULTI-PO-HASH-A`);
+    expect(merged.notes).toContain("First source invoice");
+    expect(merged.notes).toContain("Merged source: Second source invoice");
 
     const dashboard = await getInvoiceDashboard();
     const dashboardOrder = dashboard.uninvoicedPurchaseOrders.find((candidate) => candidate.id === order.id);
-    expect(dashboardOrder?.invoices).toHaveLength(2);
+    expect(dashboardOrder?.invoices).toHaveLength(1);
   });
 });

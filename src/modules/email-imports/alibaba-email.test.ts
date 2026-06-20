@@ -81,6 +81,20 @@ Order summary (1 item) Item subtotal USD 15.00 Shipping fee USD 36.50 Total USD 
     });
   });
 
+  it("does not treat Alibaba shipment-message text as a valid supplier name", () => {
+    const parsed = parseAlibabaEmail(`
+Subject: Alibaba shipment update
+From: "Alibaba" <notice@alibaba.com>
+Order ID: 304716450001023166
+Supplier: I will send you the international tracking number as soon as the logistics company provides it to
+Message: Mark Tang 2026-6-5 Shenzhen Sunnice Textile Co., Limited Will ship out your order soon Mark Tang
+Product: LED-COB-12V-3000K qty 1 unit price USD 1.00 total USD 1.00
+Total: USD 1.00
+`);
+
+    expect(parsed.supplierName).toBe("Alibaba supplier");
+  });
+
   it("keeps same-price LED color-temperature variants as separate Alibaba order lines", () => {
     const parsed = parseAlibabaEmail(`
 Subject: Your initial payment has been received (300174506001023166)

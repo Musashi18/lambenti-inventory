@@ -9,9 +9,9 @@ describe("Accounting journal page", () => {
   it("exposes a usable posted-ledger view with export and safety guardrails", () => {
     const pageSource = readFileSync(join(__dirname, "page.tsx"), "utf8");
 
-    expect(pageSource).toContain("Journal entries");
-    expect(pageSource).toContain("Trial balance");
-    expect(pageSource).toContain("Download journal CSV");
+    expect(pageSource).toContain("Journal Entries");
+    expect(pageSource).toContain("Trial Balance");
+    expect(pageSource).toContain("Download Journal CSV");
     expect(pageSource).toContain("AP invoice approval");
     expect(pageSource).toContain("AP payment reconciliation");
     expect(pageSource).toContain("posted balanced journals");

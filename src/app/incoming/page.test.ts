@@ -14,7 +14,10 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(pageSource).toContain("getIncomingOrders");
     expect(pageSource).toContain("ReceiveIncomingLineForm");
     expect(pageSource).toContain("Email imports and invoices do not receive stock");
-    expect(pageSource).toContain("remaining quantity");
+    expect(pageSource).toContain("Packing Slip Duplicate Check");
+    expect(pageSource).toContain("batch-check the packing slip");
+    expect(pageSource).toContain("groupDuplicateIncomingLines");
+    expect(pageSource).toContain("Remaining Quantity");
     expect(pageSource).not.toContain("Incoming inventory tracker");
     expect(pageSource).not.toContain("DashboardTable");
 
@@ -23,7 +26,9 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(formSource).toContain("lotCode");
     expect(formSource).toContain("receivedAt");
     expect(formSource).toContain("unitCost");
-    expect(formSource).toContain("Receive counted stock");
+    expect(formSource).toContain("Receive Counted Stock");
     expect(formSource).toContain("Use this only after the package is physically counted");
+    expect(pageSource).toContain("Receiving Progress");
+    expect(pageSource).toContain("Packing Slip Duplicate Check");
   });
 });

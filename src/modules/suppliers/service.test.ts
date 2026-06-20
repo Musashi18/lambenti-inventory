@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanConfirmedSupplierOptionName, filterOneSupplierPerSource, isConfirmedSupplierOptionCandidate } from "./service";
+import { canonicalSupplierIdentityKey, cleanConfirmedSupplierOptionName, filterOneSupplierPerSource, isConfirmedSupplierOptionCandidate, isValidSupplierIdentityName } from "./service";
 
 describe("confirmed supplier option cleanup", () => {
   it("uses explicit company names and removes email-header wrappers from supplier option labels", () => {
@@ -49,6 +49,29 @@ describe("confirmed supplier option cleanup", () => {
     }
   });
 
+  it("rejects Alibaba UI navigation labels and platform deep links", () => {
+    const importedUiLabels = [
+      "details",
+      "Help & Contact",
+      "Send order request",
+      "to ship",
+      "/apps/details?spm=a2g0o.home&id=com.alibaba.aliexpresshd",
+      "Alibaba.com Singapore E-Commerce Private Limited,"
+    ];
+
+    for (const name of importedUiLabels) {
+      expect(isConfirmedSupplierOptionCandidate({ name, confirmedByHuman: true })).toBe(false);
+    }
+  });
+
+  it("rejects shipment-message fragments and canonicalizes real supplier duplicates", () => {
+    expect(isValidSupplierIdentityName("I will send you the international tracking number as soon as the logistics company provides it to")).toBe(false);
+    expect(isValidSupplierIdentityName("Mark Tang 2026-6-5 Shenzhen Sunnice Textile Co., Limited Will ship out your order soon Mark Tang")).toBe(false);
+    expect(isValidSupplierIdentityName("each once.")).toBe(false);
+    expect(isValidSupplierIdentityName("Huizhou Shengye Electronics Co., Ltd.")).toBe(true);
+    expect(canonicalSupplierIdentityKey("Huizhou Shengye Electronics Co., Ltd.")).toBe(canonicalSupplierIdentityKey("huizhou shengye electronics ltd"));
+  });
+
   it("filters supplier profiles to one display row per source and removes test/junk rows", () => {
     const filtered = filterOneSupplierPerSource([
       {
@@ -82,6 +105,14 @@ describe("confirmed supplier option cleanup", () => {
         id: "person-row",
         name: "Mark Tang",
         emailImportCount: 1
+      },
+      {
+        id: "duplicate-luma",
+        name: "Luma Components Ltd",
+        companyName: "Luma Components Limited",
+        productPageUrl: "https://supplier.example/luma",
+        confirmedByHuman: true,
+        preferredItemCount: 1
       },
       {
         id: "archived-row",

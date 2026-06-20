@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { MovementType, Prisma, PurchaseOrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
@@ -55,6 +56,9 @@ export type TrackingDashboardRow = {
   deliveredAt: Date | null;
   lastCheckedAt: Date | null;
   nextRefreshAt: Date | null;
+  capturedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
   paymentStartAt: Date | null;
   leadTimeEndAt: Date | null;
   leadTimeEndSource: "RECEIVED" | "DELIVERED" | null;
@@ -66,6 +70,18 @@ export type TrackingDashboardRow = {
   shipTimeLabel: string | null;
   eventCount: number;
   latestEvent: { description: string; location: string | null; occurredAt: Date | null } | null;
+  relatedTrackingNumbers: string[];
+  screenedShipmentCount: number;
+  events: Array<{
+    id: string;
+    status: string | null;
+    description: string;
+    location: string | null;
+    occurredAt: Date | null;
+    createdAt: Date;
+    rawEventJson: Prisma.JsonValue | null;
+  }>;
+  rawStatusJson: Prisma.JsonValue | null;
 };
 
 export type TrackingLinkOption = {
@@ -565,7 +581,11 @@ export async function refreshTrackingNumber(input: {
     const response = await fetchTrackingStatus(existing, config, input.fetcher ?? fetch);
     const body = response.body;
     const normalizedStatus = response.normalizedStatus;
-    const status = normalizeTrackingStatus(normalizedStatus.currentStatus ?? existing.currentStatus);
+    const status = normalizeTrackingStatusFromEvidence(
+      normalizedStatus.currentStatus ?? existing.currentStatus,
+      normalizedStatus.statusDescription,
+      normalizedStatus.events
+    );
     const deliveredAt = normalizedStatus.deliveredAt ?? (status === "DELIVERED" ? normalizedStatus.lastEventAt ?? now : null);
     const updated = await prisma.trackingNumber.update({
       where: { id: existing.id },
@@ -699,7 +719,7 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
       trackingNumber: row.trackingNumber,
       carrier: row.carrier,
       provider: row.provider,
-      currentStatus: row.currentStatus,
+      currentStatus: normalizeTrackingStatusFromEvidence(row.currentStatus, row.statusDescription, row.events),
       statusDescription: row.statusDescription,
       refreshStatus: row.refreshStatus,
       refreshError: row.refreshError,
@@ -707,13 +727,16 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
       purchaseOrderId: row.purchaseOrderId,
       emailOrderImportId: row.emailOrderImportId,
       linkedOrderLabel: buildLinkedOrderLabel(row),
-      supplierName: row.supplierName ?? row.purchaseOrder?.supplier.name ?? row.emailOrderImport?.supplierName ?? null,
+      supplierName: displayTrackingSupplierName(row.purchaseOrder?.supplier.name ?? row.emailOrderImport?.supplierName ?? row.supplierName),
       source: row.source,
       sourceUrl: row.sourceUrl,
       lastEventAt: row.lastEventAt,
       deliveredAt: row.deliveredAt,
       lastCheckedAt: row.lastCheckedAt,
       nextRefreshAt: row.currentStatus === "DELIVERED" ? null : row.nextRefreshAt,
+      capturedAt: row.capturedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
       paymentStartAt: leadTime.startAt,
       leadTimeEndAt: leadTime.endAt,
       leadTimeEndSource: leadTime.endSource,
@@ -726,17 +749,32 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
       eventCount: row.events.length,
       latestEvent: row.events[0]
         ? { description: row.events[0].description, location: row.events[0].location, occurredAt: row.events[0].occurredAt }
-        : null
+        : null,
+      relatedTrackingNumbers: [row.trackingNumber],
+      screenedShipmentCount: 1,
+      events: row.events.map((event) => ({
+        id: event.id,
+        status: event.status,
+        description: event.description,
+        location: event.location,
+        occurredAt: event.occurredAt,
+        createdAt: event.createdAt,
+        rawEventJson: event.rawEventJson
+      })),
+      rawStatusJson: row.rawStatusJson
     };
   });
-  const activeRows = mappedRows.filter((row) => row.currentStatus !== "DELIVERED");
+
+  const activeRows = screenDuplicateOrderShipments(mappedRows.filter((row) => row.currentStatus !== "DELIVERED"));
   const deliveredRows = mappedRows.filter((row) => row.currentStatus === "DELIVERED");
 
   return {
     service: {
       configured: isTrackingServiceConfigured(config),
       provider: config.provider ?? (config.urlTemplate ? "CUSTOM_HTTP" : "UNCONFIGURED"),
-      refreshIntervalMinutes: config.refreshIntervalMinutes ?? DEFAULT_REFRESH_INTERVAL_MINUTES
+      refreshIntervalMinutes: config.refreshIntervalMinutes ?? DEFAULT_REFRESH_INTERVAL_MINUTES,
+      lastCheckedAt: trackingHeartbeatFromRows(mappedRows, now).lastCheckedAt,
+      nextRefreshAt: trackingHeartbeatFromRows(mappedRows, now).nextRefreshAt
     },
     summary: {
       total: rows.length,
@@ -748,6 +786,105 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
     rows: activeRows,
     deliveredRows
   };
+}
+
+function screenDuplicateOrderShipments(rows: TrackingDashboardRow[]) {
+  const grouped = new Map<string, TrackingDashboardRow[]>();
+  const ungrouped: TrackingDashboardRow[] = [];
+  for (const row of rows) {
+    const key = duplicateShipmentOrderKey(row);
+    if (!key) {
+      ungrouped.push(row);
+      continue;
+    }
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  const screened = [...ungrouped];
+  for (const group of grouped.values()) {
+    if (group.length === 1) {
+      screened.push(group[0]);
+      continue;
+    }
+    const relatedTrackingNumbers = [...group]
+      .sort((left, right) => {
+        const firstSeenDelta = trackingRowFirstSeenTime(left) - trackingRowFirstSeenTime(right);
+        return firstSeenDelta === 0 ? left.trackingNumber.localeCompare(right.trackingNumber) : firstSeenDelta;
+      })
+      .map((row) => row.trackingNumber);
+    const selected = newestActiveShipmentRow(group);
+    screened.push({
+      ...selected,
+      relatedTrackingNumbers,
+      screenedShipmentCount: group.length
+    });
+  }
+
+  return screened.sort((left, right) => trackingRowSortTime(right) - trackingRowSortTime(left));
+}
+
+function duplicateShipmentOrderKey(row: TrackingDashboardRow) {
+  if (row.externalOrderId) return `external:${row.externalOrderId}`;
+  if (row.purchaseOrderId) return `po:${row.purchaseOrderId}`;
+  return null;
+}
+
+function newestActiveShipmentRow(rows: TrackingDashboardRow[]) {
+  return [...rows].sort((left, right) => {
+    const activityDelta = trackingRowActivityTime(right) - trackingRowActivityTime(left);
+    if (activityDelta !== 0) return activityDelta;
+    const eventCountDelta = right.eventCount - left.eventCount;
+    if (eventCountDelta !== 0) return eventCountDelta;
+    return trackingRowSortTime(right) - trackingRowSortTime(left);
+  })[0];
+}
+
+function trackingRowActivityTime(row: TrackingDashboardRow) {
+  return row.latestEvent?.occurredAt?.getTime()
+    ?? row.lastEventAt?.getTime()
+    ?? (row.eventCount > 0 ? row.updatedAt.getTime() : 0);
+}
+
+function trackingRowSortTime(row: TrackingDashboardRow) {
+  return trackingRowActivityTime(row) || row.capturedAt.getTime() || row.updatedAt.getTime() || row.createdAt.getTime();
+}
+
+function trackingRowFirstSeenTime(row: TrackingDashboardRow) {
+  return row.capturedAt.getTime() || row.createdAt.getTime();
+}
+
+export async function getTrackingRefreshHeartbeat(input: { now?: Date; config?: TrackingServiceConfig } = {}) {
+  const now = input.now ?? new Date();
+  const rows = await prisma.trackingNumber.findMany({
+    where: { currentStatus: { not: "DELIVERED" } },
+    select: { currentStatus: true, lastCheckedAt: true, nextRefreshAt: true }
+  });
+  return trackingHeartbeatFromRows(rows, now);
+}
+
+function trackingHeartbeatFromRows(
+  rows: Array<{ currentStatus: string; lastCheckedAt: Date | null; nextRefreshAt: Date | null }>,
+  now: Date
+) {
+  const refreshableRows = rows.filter((row) => normalizeTrackingStatus(row.currentStatus) !== "DELIVERED");
+  const lastCheckedAt = maxDate(refreshableRows.map((row) => row.lastCheckedAt));
+  const hasDueNow = refreshableRows.some((row) => !row.nextRefreshAt || row.nextRefreshAt <= now);
+  const futureNextRefreshAt = minDate(refreshableRows.map((row) => row.nextRefreshAt).filter((value): value is Date => Boolean(value)));
+  return {
+    lastCheckedAt,
+    nextRefreshAt: refreshableRows.length === 0 ? null : (hasDueNow ? now : futureNextRefreshAt)
+  };
+}
+
+function minDate(values: Date[]) {
+  if (values.length === 0) return null;
+  return values.reduce((earliest, value) => value < earliest ? value : earliest, values[0]);
+}
+
+function maxDate(values: Array<Date | null>) {
+  const dates = values.filter((value): value is Date => Boolean(value));
+  if (dates.length === 0) return null;
+  return dates.reduce((latest, value) => value > latest ? value : latest, dates[0]);
 }
 
 export async function getLeadTimeSummaryIndex(): Promise<LeadTimeSummaryIndex> {
@@ -1246,6 +1383,17 @@ async function resolveTrackingOrderLink(input: { externalOrderId?: string; email
   };
 }
 
+function displayTrackingSupplierName(value?: string | null) {
+  const trimmed = blankToUndefined(value ?? undefined);
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/\s+/g, " ").trim();
+  if (/^(?:to ship|waiting for supplier to ship|ship|shipped|tracking|logistics|package|delivered)$/i.test(normalized)) return null;
+  if (/agree\s*to\s*terms|agreeToTermsAndConditions/i.test(normalized)) return null;
+  if (/^[A-Z0-9]{10,}[&?=]/i.test(normalized)) return null;
+  if (/^\d{10,}[A-Z0-9&?=.-]*$/i.test(normalized)) return null;
+  return normalized;
+}
+
 function buildTrackingStatusUrl(template: string, row: { trackingNumber: string; carrier: string | null }) {
   return template
     .replaceAll("{trackingNumber}", encodeURIComponent(row.trackingNumber))
@@ -1280,6 +1428,15 @@ async function fetchCustomTrackingStatus(row: TrackingProviderRow, config: Track
 async function fetchShip24TrackingStatus(row: TrackingProviderRow, config: TrackingServiceConfig, fetcher: FetchLike) {
   if (!config.authToken) throw new Error(trackingConfigurationMessage(config));
   const baseUrl = (config.ship24BaseUrl ?? DEFAULT_SHIP24_BASE_URL).replace(/\/$/, "");
+  const requestBody = buildShip24TrackerRequestBody(row, config);
+  const clientTrackerId = firstString([requestBody.clientTrackerId]);
+  await dedupeShip24Trackers({
+    baseUrl,
+    authToken: config.authToken,
+    fetcher,
+    keepTrackingNumber: row.trackingNumber,
+    keepClientTrackerId: clientTrackerId ?? undefined
+  });
   const response = await fetcher(`${baseUrl}/public/v1/trackers/track`, {
     method: "POST",
     headers: {
@@ -1287,18 +1444,141 @@ async function fetchShip24TrackingStatus(row: TrackingProviderRow, config: Track
       "content-type": "application/json",
       authorization: `Bearer ${config.authToken}`
     },
-    body: JSON.stringify(pruneUndefined({
-      trackingNumber: row.trackingNumber,
-      clientTrackerId: row.id,
-      shipmentReference: row.externalOrderId ?? row.purchaseOrderId ?? row.emailOrderImportId ?? row.id,
-      destinationCountryCode: normalizeCountryCode(config.destinationCountryCode) ?? "CA",
-      originCountryCode: normalizeCountryCode(config.originCountryCode),
-      courierName: row.carrier ?? undefined
-    }))
+    body: JSON.stringify(requestBody)
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Ship24 tracking service returned HTTP ${response.status}`);
+  if (!response.ok) throw new Error(formatShip24HttpError(response.status, body));
   return { body, normalizedStatus: normalizeShip24TrackingServiceResponse(body) };
+}
+
+function buildShip24TrackerRequestBody(row: TrackingProviderRow, config: TrackingServiceConfig) {
+  const shipmentReference = row.externalOrderId ?? row.purchaseOrderId ?? row.emailOrderImportId ?? row.id;
+  const destinationCountryCode = normalizeCountryCode(config.destinationCountryCode) ?? "CA";
+  const originCountryCode = normalizeCountryCode(config.originCountryCode);
+  const courierName = row.carrier ?? undefined;
+  return pruneUndefined({
+    trackingNumber: row.trackingNumber,
+    clientTrackerId: buildShip24ClientTrackerId(row.id, {
+      trackingNumber: row.trackingNumber,
+      shipmentReference,
+      destinationCountryCode,
+      originCountryCode,
+      courierName
+    }),
+    shipmentReference,
+    destinationCountryCode,
+    originCountryCode,
+    courierName
+  });
+}
+
+function buildShip24ClientTrackerId(rowId: string, input: Record<string, unknown>) {
+  const signature = createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 10);
+  return `${rowId}-${signature}`;
+}
+
+type Ship24TrackerListEntry = {
+  trackerId: string;
+  trackingNumber: string;
+  clientTrackerId: string | null;
+  createdAt: string | null;
+  isTracked: boolean;
+  isSubscribed: boolean;
+};
+
+async function dedupeShip24Trackers(input: {
+  baseUrl: string;
+  authToken: string;
+  fetcher: FetchLike;
+  keepTrackingNumber: string;
+  keepClientTrackerId?: string;
+}) {
+  const response = await input.fetcher(`${input.baseUrl}/public/v1/trackers?limit=100`, {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${input.authToken}`
+    }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(formatShip24HttpError(response.status, body));
+
+  const trackers = extractShip24TrackerList(body);
+  const grouped = new Map<string, Ship24TrackerListEntry[]>();
+  for (const tracker of trackers) {
+    const normalized = normalizeTrackingNumber(tracker.trackingNumber);
+    grouped.set(normalized, [...(grouped.get(normalized) ?? []), tracker]);
+  }
+
+  const keepTrackingNumber = normalizeTrackingNumber(input.keepTrackingNumber);
+  for (const [trackingNumber, entries] of grouped.entries()) {
+    const activeEntries = entries.filter((entry) => entry.isTracked || entry.isSubscribed);
+    if (activeEntries.length === 0) continue;
+    const keepEntry = trackingNumber === keepTrackingNumber && input.keepClientTrackerId
+      ? activeEntries.find((entry) => entry.clientTrackerId === input.keepClientTrackerId)
+      : newestShip24Tracker(activeEntries);
+    const staleEntries = trackingNumber === keepTrackingNumber && !keepEntry
+      ? activeEntries
+      : activeEntries.filter((entry) => entry.trackerId !== keepEntry?.trackerId);
+
+    for (const staleEntry of staleEntries) {
+      await deactivateShip24Tracker(input.baseUrl, input.authToken, staleEntry, input.fetcher);
+    }
+  }
+}
+
+function extractShip24TrackerList(body: unknown): Ship24TrackerListEntry[] {
+  const trackers = firstArray(findByKeys(body, ["trackers"])) ?? [];
+  return trackers.map((entry): Ship24TrackerListEntry | null => {
+    if (!isRecord(entry)) return null;
+    const trackerId = firstString([entry.trackerId]);
+    const trackingNumber = firstString([entry.trackingNumber]);
+    if (!trackerId || !trackingNumber) return null;
+    return {
+      trackerId,
+      trackingNumber,
+      clientTrackerId: firstString([entry.clientTrackerId]) ?? null,
+      createdAt: firstString([entry.createdAt]) ?? null,
+      isTracked: entry.isTracked === true,
+      isSubscribed: entry.isSubscribed === true
+    };
+  }).filter((entry): entry is Ship24TrackerListEntry => Boolean(entry));
+}
+
+function newestShip24Tracker(entries: Ship24TrackerListEntry[]) {
+  return [...entries].sort((left, right) => ship24TrackerTime(right) - ship24TrackerTime(left))[0];
+}
+
+function ship24TrackerTime(entry: Ship24TrackerListEntry) {
+  return entry.createdAt ? Date.parse(entry.createdAt) || 0 : 0;
+}
+
+async function deactivateShip24Tracker(baseUrl: string, authToken: string, tracker: Ship24TrackerListEntry, fetcher: FetchLike) {
+  const response = await fetcher(`${baseUrl}/public/v1/trackers/${encodeURIComponent(tracker.trackerId)}`, {
+    method: "PATCH",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${authToken}`
+    },
+    body: JSON.stringify({ isSubscribed: false, isTracked: false })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(formatShip24HttpError(response.status, body));
+}
+
+function formatShip24HttpError(status: number, body: unknown) {
+  const providerMessage = extractProviderErrorMessage(body);
+  return providerMessage ? `Ship24 tracking service returned HTTP ${status}: ${providerMessage}` : `Ship24 tracking service returned HTTP ${status}`;
+}
+
+function extractProviderErrorMessage(body: unknown): string | null {
+  if (!isRecord(body)) return null;
+  const errors = Array.isArray(body.errors) ? body.errors : [];
+  const messages = errors
+    .map((error) => isRecord(error) ? firstString([error.message]) ?? firstString([error.code]) : firstString([error]))
+    .filter((message): message is string => Boolean(message));
+  return messages[0] ?? firstString([body.message]) ?? firstString([body.error]) ?? null;
 }
 
 function isTrackingServiceConfigured(config: TrackingServiceConfig) {
@@ -1329,7 +1609,7 @@ function normalizeShip24TrackingServiceResponse(body: unknown): NormalizedTracki
     ?? (normalizeTrackingStatus(shipmentMilestone ?? "") === "DELIVERED" ? lastEventAt : null);
   return {
     carrier: firstString(findByKeys(tracking, ["courierCode", "courierName", "sourceCode"])),
-    currentStatus: shipmentMilestone,
+    currentStatus: normalizeTrackingStatusFromEvidence(shipmentMilestone ?? "", statusDescription, events),
     statusDescription,
     origin: firstString(findByKeys(shipment, ["originCountryCode"])),
     destination: firstString(findByKeys(shipment, ["destinationCountryCode"])),
@@ -1378,7 +1658,11 @@ function normalizeTrackingServiceResponse(body: unknown): NormalizedTrackingStat
     ?? null;
   return {
     carrier: firstString(findByKeys(body, ["carrier", "courier", "slug", "shipping_provider", "serviceProvider", "service_provider"])),
-    currentStatus: firstString(findByKeys(body, ["currentStatus", "current_status", "delivery_status", "tag", "status"])),
+    currentStatus: normalizeTrackingStatusFromEvidence(
+      firstString(findByKeys(body, ["currentStatus", "current_status", "delivery_status", "tag", "status"])) ?? "",
+      statusDescription,
+      events
+    ),
     statusDescription,
     origin: firstString(findByKeys(body, ["origin", "shipFrom", "ship_from"])),
     destination: firstString(findByKeys(body, ["destination", "shipTo", "ship_to"])),
@@ -1415,7 +1699,7 @@ async function persistTrackingEvents(trackingNumberId: string, events: Normalize
     await prisma.trackingEvent.create({
       data: {
         trackingNumberId,
-        status: event.status ? normalizeTrackingStatus(event.status) : null,
+        status: normalizeTrackingEventStatus(event),
         description: event.description,
         location: event.location,
         occurredAt: event.occurredAt ?? null,
@@ -1431,8 +1715,40 @@ function normalizeTrackingStatus(value: string) {
   if (normalized.includes("DELIVERED") || ["SIGNED", "SUCCESSFULLY_DELIVERED"].includes(normalized)) return "DELIVERED";
   if (normalized.includes("EXCEPTION") || ["FAILED", "RETURNED", "EXPIRED"].includes(normalized)) return normalized.includes("EXCEPTION") ? "EXCEPTION" : normalized;
   if (normalized.includes("TRANSIT") || normalized.includes("OUT_FOR_DELIVERY") || ["SHIPPED", "SHIPMENT_STARTED", "DISPATCHED"].includes(normalized)) return "IN_TRANSIT";
-  if (["PENDING", "INFO_RECEIVED", "PRE_TRANSIT", "WAITING_FOR_PICKUP"].includes(normalized)) return "PENDING";
+  if (["INFO_RECEIVED", "INFORMATION_RECEIVED"].includes(normalized) || normalized.includes("INFORMATION_RECEIVED")) return "INFO_RECEIVED";
+  if (["PENDING", "PRE_TRANSIT", "WAITING_FOR_PICKUP"].includes(normalized) || normalized.startsWith("DATA")) return "PENDING";
   return normalized;
+}
+
+function normalizeTrackingStatusFromEvidence(
+  value: string,
+  statusDescription?: string | null,
+  events: Array<{ status?: string | null; description: string }> = []
+) {
+  const normalized = normalizeTrackingStatus(value);
+  if (normalized === "PENDING" && hasInfoReceivedTrackingEntry(statusDescription, events)) return "INFO_RECEIVED";
+  return normalized;
+}
+
+function normalizeTrackingEventStatus(event: NormalizedTrackingEvent) {
+  const status = event.status ? normalizeTrackingStatus(event.status) : "UNKNOWN";
+  if ((status === "PENDING" || status === "UNKNOWN") && hasInfoReceivedTrackingEntry(event.description, [event])) return "INFO_RECEIVED";
+  return status === "UNKNOWN" ? null : status;
+}
+
+function hasInfoReceivedTrackingEntry(
+  statusDescription?: string | null,
+  events: Array<{ status?: string | null; description: string }> = []
+) {
+  return [statusDescription, ...events.flatMap((event) => [event.status, event.description])]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => {
+      const normalized = value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+      return /\binfo(?:rmation)? received\b/.test(normalized)
+        || /\bdata information received\b/.test(normalized)
+        || /\belectronic (?:information|data) (?:submitted|received)\b/.test(normalized)
+        || /\bshipment (?:information|data) (?:submitted|received)\b/.test(normalized);
+    });
 }
 
 function inferCarrier(value: string) {
@@ -1446,7 +1762,7 @@ function buildLinkedOrderLabel(row: { externalOrderId: string | null; purchaseOr
   const parts = [];
   if (row.externalOrderId) parts.push(`Alibaba ${row.externalOrderId}`);
   if (row.purchaseOrderId) parts.push(`PO ${row.purchaseOrderId.slice(-8)}`);
-  if (row.emailOrderImportId && !row.purchaseOrderId) parts.push(`Import ${row.emailOrderImportId.slice(-8)}`);
+  if (row.emailOrderImportId && !row.purchaseOrderId) parts.push(`Evidence import ${row.emailOrderImportId.slice(-8)}`);
   return parts.length > 0 ? parts.join(" · ") : "Unlinked evidence";
 }
 

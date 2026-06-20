@@ -8,12 +8,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 describe("MovementsPage item-level movement source contract", () => {
   it("renders the item-level movement form, movement entry timestamps, and void/delete controls", () => {
     const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+    const globalsSource = readFileSync(join(__dirname, "../../globals.css"), "utf8");
 
     expect(source).toMatch(/MovementForm/);
     expect(source).toMatch(/VoidMovementButton/);
-    expect(source).toMatch(/Entry time/);
+    expect(source).toMatch(/Entry Time/);
+    expect(source).toMatch(/Ledger Impact/);
+    expect(source).toMatch(/Balance After Entry/);
     expect(source).toMatch(/createdAt\.toLocaleString/);
+    expect(source).toMatch(/balanceAfter\.onHand/);
+    expect(source).toMatch(/balanceAfter\.available/);
+    expect(source).toMatch(/balanceAfter\.reserved/);
+    expect(source).toMatch(/Recent rows include the item balance after each visible ledger entry/);
     expect(source).toMatch(/Lot controls are hidden for now/);
+    expect(source).toMatch(/table-row-interactive/);
+    expect(source).toMatch(/table-sticky-cell/);
+    expect(globalsSource).toContain("--table-row-hover-bg");
+    expect(globalsSource).toContain("--table-sticky-cell-hover-bg");
+    expect(globalsSource).toContain(".table-row-interactive:hover");
+    expect(globalsSource).toContain(".table-row-interactive:hover .table-sticky-cell");
     expect(source).not.toMatch(/include:\s*{\s*stockLots:/s);
   });
 
@@ -29,6 +42,9 @@ describe("MovementsPage item-level movement source contract", () => {
     expect(dataSource).toMatch(/\.slice\("VOID:"\.length\)/);
     expect(dataSource).toMatch(/notIn:\s*voidedMovementIds/);
     expect(dataSource).toMatch(/NOT:\s*{\s*reference:\s*{\s*startsWith:\s*"VOID:"/s);
+    expect(dataSource).toMatch(/calculateMovementBalances/);
+    expect(dataSource).toMatch(/signedQuantity/);
+    expect(dataSource).toMatch(/balanceAfter/);
   });
 
   it("uses a client form with hidden lot controls, optional reason, and a BUILD movement option", () => {
@@ -36,7 +52,7 @@ describe("MovementsPage item-level movement source contract", () => {
 
     expect(source).toMatch(/selectedItemId/);
     expect(source).toMatch(/"BUILD"/);
-    expect(source).toMatch(/Reason <span[^>]*>optional/);
+    expect(source).toMatch(/Reason <span[^>]*>Optional/);
     expect(source).toMatch(/Build consumes active BOM component quantities per finished unit/);
     expect(source).toMatch(/Lots are intentionally hidden/);
     expect(source).not.toMatch(/name="stockLotId"/);
@@ -67,5 +83,8 @@ describe("MovementsPage item-level movement source contract", () => {
     expect(formSource).toMatch(/buildableItemIds/);
     expect(formSource).toMatch(/movementType === "BUILD"/);
     expect(formSource).toMatch(/filteredItems/);
+    expect(formSource).toContain("ItemSelectOptions");
+    expect(formSource).toContain("sortItemsByUseGroup");
+    expect(dataSource).toMatch(/category: item\.category/);
   });
 });

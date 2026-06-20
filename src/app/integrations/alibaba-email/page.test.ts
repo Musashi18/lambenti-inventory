@@ -19,6 +19,8 @@ describe("Order email import page source contract", () => {
     expect(syncButtonSource).toContain("animate-spin");
     expect(syncButtonSource).toContain("describeReassessResult");
     expect(pageSource).not.toContain("disabled={imports.length === 0}");
+    expect(pageSource).toContain("ItemSelectOptions");
+    expect(pageSource).toContain("category: true");
   });
 
   it("labels synced/manual CSV sources and exposes archived unarchive/delete controls with confirmation", () => {
@@ -31,7 +33,7 @@ describe("Order email import page source contract", () => {
     expect(pageSource).toContain("MANUAL_CSV_IMPORT");
     expect(pageSource).toContain("unarchiveAlibabaEmailImportAction");
     expect(pageSource).toContain("deleteArchivedAlibabaEmailImportAction");
-    expect(pageSource).toContain("Permanently delete archived email");
+    expect(pageSource).toContain("Permanently Delete Archived Email");
     expect(actionsSource).toContain("unarchiveEmailOrderImport");
     expect(actionsSource).toContain("deleteArchivedEmailOrderImport");
     expect(refreshingFormSource).toContain("confirmMessage");

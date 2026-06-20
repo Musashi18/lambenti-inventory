@@ -6,6 +6,7 @@ dist
 coverage
 qa-output
 var/
+.hermes/runtime/
 tsconfig.tsbuildinfo
 *.log
 prisma/dev.db

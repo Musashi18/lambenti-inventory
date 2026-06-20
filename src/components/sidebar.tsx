@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowDownUp,
   Boxes,
@@ -34,8 +35,17 @@ export function Sidebar() {
   return (
     <aside className="relative z-20 border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
       <div className="mb-6">
-        <div className="text-xl font-semibold">Lambenti</div>
-        <div className="text-xs text-slate-500">Inventory and sourcing</div>
+        <div className="lambenti-sidebar-logo mb-3" aria-hidden="true">
+          <Image
+            src="/lambenti-logo-sidebar.webp"
+            alt=""
+            fill
+            sizes="(min-width: 1024px) 208px, calc(100vw - 2rem)"
+            priority
+            className="lambenti-sidebar-logo-image"
+          />
+        </div>
+        <div className="px-3 text-xl font-semibold text-ink">Inventory and Sourcing</div>
       </div>
       <nav className="grid gap-1">
         {links.map(({ href, label, icon: Icon }) => (

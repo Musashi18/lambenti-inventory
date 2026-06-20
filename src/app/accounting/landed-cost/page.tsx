@@ -22,12 +22,12 @@ export default async function LandedCostPage({ searchParams }: { searchParams: P
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Landed-cost allocation</h1>
+          <h1 className="text-2xl font-semibold">Landed-Cost Allocation</h1>
           <p className="max-w-3xl text-sm text-slate-600">
             Read-only report allocating freight, duty, brokerage, other costs, and non-recoverable tax across invoice lines by line value. Recoverable GST/HST is shown but excluded from inventory landed cost.
           </p>
         </div>
-        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to accounting</Link>
+        <Link href="/accounting" className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Back to Accounting</Link>
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -35,21 +35,26 @@ export default async function LandedCostPage({ searchParams }: { searchParams: P
           <label className="grid gap-1 text-sm">From<input name="from" type="date" defaultValue={params.from} className="rounded-md border border-slate-300 px-2 py-1" /></label>
           <label className="grid gap-1 text-sm">To<input name="to" type="date" defaultValue={params.to} className="rounded-md border border-slate-300 px-2 py-1" /></label>
           <button className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Filter</button>
-          <Link href={`/api/accounting/exports/landed-cost?${query.toString()}`} className="rounded-md bg-ink px-3 py-2 text-center text-sm font-medium text-white">Download landed-cost CSV</Link>
+          <Link href={`/api/accounting/exports/landed-cost?${query.toString()}`} className="rounded-md bg-ink px-3 py-2 text-center text-sm font-medium text-white">Download Landed-Cost CSV</Link>
         </form>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Allocated invoice lines</h2></div>
+        <div className="border-b border-slate-200 px-4 py-3"><h2 className="font-medium">Allocated Invoice Lines</h2></div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Invoice / item</th><th className="px-4 py-3">Line subtotal</th><th className="px-4 py-3">Allocated costs</th><th className="px-4 py-3">Landed unit</th><th className="px-4 py-3">Review</th></tr></thead>
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Invoice / Item</th><th className="px-4 py-3">Line Subtotal</th><th className="px-4 py-3">Allocated Costs</th><th className="px-4 py-3">Landed Unit</th><th className="px-4 py-3">Review</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 ? <tr><td className="px-4 py-6 text-slate-500" colSpan={5}>No landed-cost rows in this range.</td></tr> : rows.map((row) => (
                 <tr key={row.invoiceLineId} className="align-top">
                   <td className="px-4 py-3"><div className="font-medium">{row.invoiceNumber}</div><div className="text-xs text-slate-600">{row.sku ?? row.description} · qty {row.quantity}</div></td>
                   <td className="px-4 py-3">{money(row.currency, row.lineSubtotal)}</td>
-                  <td className="px-4 py-3 text-xs text-slate-600">freight {money(row.currency, row.allocatedFreight)} · duty {money(row.currency, row.allocatedDuty)} · brokerage {money(row.currency, row.allocatedBrokerage)}<div>non-recoverable tax {money(row.currency, row.allocatedNonRecoverableTax)} · recoverable excluded {money(row.currency, row.recoverableTaxExcluded)}</div></td>
+                  <td className="px-4 py-3 text-xs text-slate-600">
+                    freight {money(row.currency, row.allocatedFreight)} · duty {money(row.currency, row.allocatedDuty)} · brokerage {money(row.currency, row.allocatedBrokerage)}
+                    <div>non-recoverable tax {money(row.currency, row.allocatedNonRecoverableTax)} · recoverable excluded {money(row.currency, row.recoverableTaxExcluded)}</div>
+                    <div>customs/evidence paid {money(row.currency, row.allocatedAttachedLandedCostEvidence)}</div>
+                    {row.attachedLandedCostEvidenceRefs.length ? <div className="mt-1 text-[11px] text-slate-500">{row.attachedLandedCostEvidenceRefs.join("; ")}</div> : null}
+                  </td>
                   <td className="px-4 py-3">{money(row.currency, row.landedTotal)}<div className="text-xs text-slate-500">unit {row.currency}{row.landedUnitCost.toFixed(4)}</div></td>
                   <td className="px-4 py-3 text-xs text-amber-700">{row.warnings.length ? row.warnings.join("; ") : "OK"}</td>
                 </tr>

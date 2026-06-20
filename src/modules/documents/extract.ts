@@ -9,6 +9,7 @@ import { sourceToImportTexts } from "@/modules/email-imports/mailbox";
 const execFileAsync = promisify(execFile);
 const MAX_EXTRACTED_TEXT_CHARS = 250_000;
 const DEFAULT_PDF_OCR_MAX_PAGES = 5;
+const PDF_IMAGE_STREAM_LIMIT = 20;
 
 export type ExtractAccountingDocumentTextInput = {
   buffer: Buffer;
@@ -114,10 +115,13 @@ async function extractScannedPdfText(
 async function renderPdfPagesToImages(input: ExtractAccountingDocumentTextInput): Promise<RenderedDocumentImagePage[]> {
   if (process.env.LAMBENTI_OCR_DISABLED === "true" || process.env.LAMBENTI_PDF_OCR_DISABLED === "true") return [];
 
+  const maxPages = Math.max(1, Number(process.env.LAMBENTI_PDF_OCR_MAX_PAGES || DEFAULT_PDF_OCR_MAX_PAGES));
+  const embeddedImages = extractEmbeddedPdfImages(input.buffer, input.originalFileName).slice(0, maxPages);
+  if (embeddedImages.length > 0) return embeddedImages;
+
   const tempDir = await mkdtemp(join(tmpdir(), "lambenti-pdf-ocr-"));
   const pdfPath = join(tempDir, "document.pdf");
   const outputPrefix = join(tempDir, "page");
-  const maxPages = Math.max(1, Number(process.env.LAMBENTI_PDF_OCR_MAX_PAGES || DEFAULT_PDF_OCR_MAX_PAGES));
   const dpi = Math.max(96, Number(process.env.LAMBENTI_PDF_OCR_DPI || 180));
 
   try {
@@ -137,14 +141,58 @@ async function renderPdfPagesToImages(input: ExtractAccountingDocumentTextInput)
       contentType: "image/png",
       filename: `${basename(input.originalFileName, extname(input.originalFileName))}-${fileName}`
     })));
-  } catch {
-    return [];
+  } catch (error) {
+    if (isMissingExecutableError(error)) {
+      throw new Error(`Poppler pdftoppm is not installed or not on PATH. Set LAMBENTI_PDFTOPPM_BIN or install Poppler; embedded-image PDF OCR fallback found no directly extractable JPEG/JPX images in ${input.originalFileName}.`);
+    }
+    throw error;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 }
 
+function extractEmbeddedPdfImages(buffer: Buffer, originalFileName: string): RenderedDocumentImagePage[] {
+  const pdf = buffer.toString("latin1");
+  const images: RenderedDocumentImagePage[] = [];
+  const streamPattern = /<<(.*?)>>\s*stream\r?\n?([\s\S]*?)\r?\n?endstream/g;
+  const baseName = basename(originalFileName, extname(originalFileName));
+
+  for (const match of pdf.matchAll(streamPattern)) {
+    if (images.length >= PDF_IMAGE_STREAM_LIMIT) break;
+    const dictionary = match[1] ?? "";
+    if (!/\/Subtype\s*\/Image\b/i.test(dictionary)) continue;
+
+    const filterMatch = dictionary.match(/\/Filter\s*(?:\[(.*?)\]|\/(\w+))/is);
+    const filters = `${filterMatch?.[1] ?? ""} ${filterMatch?.[2] ?? ""}`;
+    const isJpeg = /DCTDecode/i.test(filters);
+    const isJp2 = /JPXDecode/i.test(filters);
+    if (!isJpeg && !isJp2) continue;
+
+    const content = stripPdfStreamLineBreaks(match[2] ?? "");
+    if (content.length === 0) continue;
+    const extension = isJpeg ? "jpg" : "jp2";
+    images.push({
+      content: Buffer.from(content, "latin1"),
+      contentType: isJpeg ? "image/jpeg" : "image/jp2",
+      filename: `${baseName}-embedded-image-${images.length + 1}.${extension}`
+    });
+  }
+
+  return images;
+}
+
+function stripPdfStreamLineBreaks(value: string) {
+  return value.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+}
+
 async function extractPdfText(buffer: Buffer) {
+  const parsedText = await extractPdfTextWithPdfParse(buffer);
+  if (parsedText?.trim()) return parsedText;
+
+  return extractPdfTextWithPdftotext(buffer);
+}
+
+async function extractPdfTextWithPdfParse(buffer: Buffer) {
   try {
     const pdfParseModule = await import("pdf-parse") as PdfParseModule;
     if (typeof pdfParseModule.default === "function") {
@@ -164,6 +212,26 @@ async function extractPdfText(buffer: Buffer) {
     return undefined;
   }
   return undefined;
+}
+
+async function extractPdfTextWithPdftotext(buffer: Buffer) {
+  if (process.env.LAMBENTI_PDFTOTEXT_DISABLED === "true") return undefined;
+
+  const tempDir = await mkdtemp(join(tmpdir(), "lambenti-pdf-text-"));
+  const pdfPath = join(tempDir, "document.pdf");
+  try {
+    await writeFile(pdfPath, buffer);
+    const { stdout } = await execFileAsync(
+      process.env.LAMBENTI_PDFTOTEXT_BIN || "pdftotext",
+      ["-layout", "-enc", "UTF-8", pdfPath, "-"],
+      { timeout: Number(process.env.LAMBENTI_PDF_TEXT_TIMEOUT_MS || 30_000), maxBuffer: 5_000_000 }
+    );
+    return stdout;
+  } catch {
+    return undefined;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 type PdfParseModule = {
@@ -213,4 +281,11 @@ function pageNumber(fileName: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+function isMissingExecutableError(error: unknown) {
+  return typeof error === "object"
+    && error !== null
+    && ("code" in error)
+    && (error as { code?: unknown }).code === "ENOENT";
 }
