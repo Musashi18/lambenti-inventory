@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizeAgentRequest } from "@/modules/auth/permissions";
-import { getTrackingRefreshHeartbeat, refreshDueTrackingNumbers, refreshTrackingNumber } from "@/modules/tracking/service";
+import { getTrackingRefreshHeartbeat, refreshActiveTrackingNumbers, refreshDueTrackingNumbers, refreshTrackingNumber } from "@/modules/tracking/service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,7 +31,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ refreshed: tracking.refreshStatus === "SUCCESS" ? 1 : 0, failed: tracking.refreshStatus === "FAILED" ? 1 : 0, tracking, heartbeat });
   }
 
-  const result = await refreshDueTrackingNumbers({ actorId, limit: body.limit ?? 25 });
+  const result = body.dueOnly === false
+    ? await refreshActiveTrackingNumbers({ actorId, limit: body.limit ?? 100 })
+    : await refreshDueTrackingNumbers({ actorId, limit: body.limit ?? 25 });
   const heartbeat = await getTrackingRefreshHeartbeat();
   return NextResponse.json({ ...result, heartbeat }, { status: result.failed > 0 && result.refreshed === 0 ? 207 : 200 });
 }

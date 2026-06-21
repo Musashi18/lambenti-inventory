@@ -2,6 +2,7 @@ import { ItemCategory, MovementType, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type MovementWithItem = Prisma.StockMovementGetPayload<{ include: { item: true } }>;
+type NormalizedMovementWithItem = Omit<MovementWithItem, "quantity"> & { quantity: number };
 
 type Balance = {
   onHand: number;
@@ -9,7 +10,7 @@ type Balance = {
   available: number;
 };
 
-export type MovementPageRow = MovementWithItem & {
+export type MovementPageRow = NormalizedMovementWithItem & {
   signedQuantity: number;
   balanceAfter: Balance;
 };
@@ -83,25 +84,31 @@ export async function getMovementPageData() {
       include: { item: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }]
     });
-  const balancesByMovementId = calculateMovementBalances(movementHistory);
-  const movements = recentMovements.map((movement) => ({
-    ...movement,
-    signedQuantity: movementSignedQuantity(movement),
-    balanceAfter: balancesByMovementId.get(movement.id) ?? emptyBalance()
-  }));
+  const normalizedMovementHistory = movementHistory.map(normalizeMovementQuantity);
+  const balancesByMovementId = calculateMovementBalances(normalizedMovementHistory);
+  const movements = recentMovements.map((movement) => {
+    const normalizedMovement = normalizeMovementQuantity(movement);
+    return {
+      ...normalizedMovement,
+      signedQuantity: movementSignedQuantity(normalizedMovement),
+      balanceAfter: balancesByMovementId.get(movement.id) ?? emptyBalance()
+    };
+  });
 
   const formItems = items.map((item) => ({
     id: item.id,
     sku: item.sku,
     description: item.description,
-    category: item.category
+    category: item.category,
+    useGroupOverride: item.useGroupOverride,
+    unit: item.unit
   }));
   const buildableItemIds = Array.from(new Set(buildableBomParents.map((bom) => bom.parentItemId)));
 
   return { formItems, buildableItemIds, movements, voidedMovementIds };
 }
 
-function calculateMovementBalances(movements: MovementWithItem[]) {
+function calculateMovementBalances(movements: NormalizedMovementWithItem[]) {
   const balancesByItem = new Map<string, Balance>();
   const balancesByMovementId = new Map<string, Balance>();
 
@@ -119,20 +126,20 @@ function applyMovementToBalance(balance: Balance, movement: { movementType: Move
   switch (movement.movementType) {
     case MovementType.RECEIVE:
     case MovementType.RETURN:
-      balance.onHand += movement.quantity;
+      balance.onHand = roundQuantity(balance.onHand + movement.quantity);
       break;
     case MovementType.CONSUME:
     case MovementType.SCRAP:
-      balance.onHand -= movement.quantity;
+      balance.onHand = roundQuantity(balance.onHand - movement.quantity);
       break;
     case MovementType.ADJUST:
-      balance.onHand += movement.quantity;
+      balance.onHand = roundQuantity(balance.onHand + movement.quantity);
       break;
     case MovementType.RESERVE:
-      balance.reserved += movement.quantity;
+      balance.reserved = roundQuantity(balance.reserved + movement.quantity);
       break;
   }
-  balance.available = balance.onHand - balance.reserved;
+  balance.available = roundQuantity(balance.onHand - balance.reserved);
 }
 
 function movementSignedQuantity(movement: { movementType: MovementType; quantity: number }) {
@@ -148,6 +155,17 @@ function movementSignedQuantity(movement: { movementType: MovementType; quantity
     case MovementType.RESERVE:
       return 0;
   }
+}
+
+function normalizeMovementQuantity<T extends { quantity: number | { toNumber(): number } }>(movement: T): Omit<T, "quantity"> & { quantity: number } {
+  return {
+    ...movement,
+    quantity: typeof movement.quantity === "number" ? movement.quantity : movement.quantity.toNumber()
+  };
+}
+
+function roundQuantity(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
 function emptyBalance(): Balance {

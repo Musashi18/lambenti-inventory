@@ -1,12 +1,17 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { AccountingDocumentStatus, GLAccountType, InvoiceStatus, ItemCategory, Unit } from "@prisma/client";
+import { AccountingDocumentStatus, GLAccountType, InvoiceStatus, ItemCategory, MovementType, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { calculatePricedItemValuations } from "@/modules/inventory/valuation";
 import { normalizeInvoiceNumberKey } from "./invoices";
 import { formatGstHstCsv, getGstHstExportRows } from "./tax";
 import { getLandedCostRows, formatLandedCostCsv, getItemLandedCostIndex } from "./landed-cost";
 import { resolveInvoiceLineAccount, upsertGLAccount, upsertGLMapping } from "./gl";
 
 const TEST_PREFIX = "TEST-ACCOUNTING-REPORT";
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 async function cleanupTestData() {
   const documents = await prisma.accountingDocument.findMany({ where: { originalFileName: { startsWith: TEST_PREFIX } }, select: { id: true } });
@@ -211,6 +216,69 @@ describe("accounting GST/HST export, GL mapping, and landed-cost reporting", () 
         supplierInvoiceId: invoice.id
       }
     });
+    await prisma.accountingDocument.create({
+      data: {
+        source: "TEST",
+        sourceKind: "PDF",
+        originalFileName: `${TEST_PREFIX}-LANDED-ADDITIONAL-SHIPPING.pdf`,
+        storedPath: `var/accounting-documents/${TEST_PREFIX}-LANDED-ADDITIONAL-SHIPPING.pdf`,
+        sha256: `${TEST_PREFIX}-LANDED-ADDITIONAL-SHIPPING-HASH`,
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        extractedText: "Additional Shipping Receipt\nWe have charged 25.00 USD for additional freight shipping charges on the shipment.",
+        analysisJson: {
+          schemaVersion: "accounting-document-v1",
+          classification: "PAYMENT_RECEIPT",
+          direction: "AP",
+          currency: "USD",
+          total: 25,
+          lineCount: 0,
+          lines: [],
+          confidence: "MEDIUM",
+          requiredReview: [],
+          suggestedActions: [],
+          sourceDocumentRequirements: [],
+          canadianAccountingNotes: [],
+          duplicateKeys: []
+        },
+        status: AccountingDocumentStatus.ATTACHED,
+        supplierId: invoice.supplierId,
+        purchaseOrderId: invoice.purchaseOrderId,
+        supplierInvoiceId: invoice.id
+      }
+    });
+    await prisma.accountingDocument.create({
+      data: {
+        source: "TEST",
+        sourceKind: "PDF",
+        originalFileName: `${TEST_PREFIX}-LANDED-SUPPLIER-PAYMENT-RECEIPT.pdf`,
+        storedPath: `var/accounting-documents/${TEST_PREFIX}-LANDED-SUPPLIER-PAYMENT-RECEIPT.pdf`,
+        sha256: `${TEST_PREFIX}-LANDED-SUPPLIER-PAYMENT-RECEIPT-HASH`,
+        mimeType: "application/pdf",
+        sizeBytes: 1024,
+        extractedText: "Receipt\nMarketplace Operator: Alibaba.com Singapore E-Commerce Private Limited\nSold by: Example Supplier\nShip to: Musashi Kaneko\nOrder details Qty Unit price Total amount\nItem description CAD 0.43\nShipping fee CAD 10.00\nFull payment CAD 315.97",
+        analysisJson: {
+          schemaVersion: "accounting-document-v1",
+          classification: "PAYMENT_RECEIPT",
+          direction: "AP",
+          currency: "CAD",
+          total: 315.97,
+          shippingCost: 10,
+          lineCount: 1,
+          lines: [],
+          confidence: "HIGH",
+          requiredReview: [],
+          suggestedActions: [],
+          sourceDocumentRequirements: [],
+          canadianAccountingNotes: [],
+          duplicateKeys: []
+        },
+        status: AccountingDocumentStatus.ATTACHED,
+        supplierId: invoice.supplierId,
+        purchaseOrderId: invoice.purchaseOrderId,
+        supplierInvoiceId: invoice.id
+      }
+    });
     const stockMovementCountBefore = await prisma.stockMovement.count();
 
     const rows = await getLandedCostRows({ from: new Date("2026-06-01T00:00:00.000Z"), to: new Date("2026-06-30T23:59:59.999Z") });
@@ -230,11 +298,25 @@ describe("accounting GST/HST export, GL mapping, and landed-cost reporting", () 
     expect(allocatedDuty).toBeCloseTo(6, 2);
     expect(allocatedBrokerage).toBeCloseTo(4, 2);
     expect(allocatedNonRecoverableTax).toBeCloseTo(2, 2);
-    expect(allocatedAttachedEvidence).toBeCloseTo(60.55, 2);
-    expect(landedTotal).toBeCloseTo(192.55, 2);
+    expect(allocatedAttachedEvidence).toBeCloseTo(85.55, 2);
+    expect(landedTotal).toBeCloseTo(217.55, 2);
     expect(invoiceRows[0].attachedLandedCostEvidenceRefs.join(" ")).toContain("LANDED-CUSTOMS");
+    expect(invoiceRows[0].attachedLandedCostEvidenceRefs.join(" ")).toContain("LANDED-ADDITIONAL-SHIPPING");
     const itemCostIndex = await getItemLandedCostIndex({ from: new Date("2026-06-01T00:00:00.000Z"), to: new Date("2026-06-30T23:59:59.999Z") });
-    expect(itemCostIndex.get(firstItem.id)?.landedUnitCost).toBeCloseTo(invoiceRows.find((row) => row.itemId === firstItem.id)!.landedUnitCost, 4);
+    const firstItemLandedCost = itemCostIndex.get(firstItem.id);
+    expect(firstItemLandedCost?.landedUnitCost).toBeCloseTo(invoiceRows.find((row) => row.itemId === firstItem.id)!.landedUnitCost, 4);
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: firstItem.id,
+        sku: firstItem.sku,
+        description: firstItem.description,
+        unitCost: firstItemLandedCost?.landedUnitCost ?? null,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 2 }]
+      }
+    ]);
+    expect(valuation.rows[0].unitCost).toBeCloseTo(firstItemLandedCost!.landedUnitCost, 2);
+    expect(valuation.rows[0].value).toBeCloseTo(roundCurrency(valuation.rows[0].unitCost * 2), 2);
     expect(recoverableExcluded).toBeCloseTo(5, 2);
     expect(csv).toContain("allocatedAttachedLandedCostEvidence");
     await expect(prisma.stockMovement.count()).resolves.toBe(stockMovementCountBefore);

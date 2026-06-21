@@ -52,6 +52,8 @@ describe("MovementsPage item-level movement source contract", () => {
 
     expect(source).toMatch(/selectedItemId/);
     expect(source).toMatch(/"BUILD"/);
+    expect(source).toContain('selectedItem?.unit === "METER"');
+    expect(source).toContain('step={isMeterMovement ? "0.0001" : "1"}');
     expect(source).toMatch(/Reason <span[^>]*>Optional/);
     expect(source).toMatch(/Build consumes active BOM component quantities per finished unit/);
     expect(source).toMatch(/Lots are intentionally hidden/);
@@ -86,5 +88,6 @@ describe("MovementsPage item-level movement source contract", () => {
     expect(formSource).toContain("ItemSelectOptions");
     expect(formSource).toContain("sortItemsByUseGroup");
     expect(dataSource).toMatch(/category: item\.category/);
+    expect(dataSource).toMatch(/unit: item\.unit/);
   });
 });

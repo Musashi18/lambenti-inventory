@@ -22,7 +22,7 @@ const movementSchema = z.object({
     (value) => value === buildMovementType || Object.values(MovementType).includes(value as MovementType),
     "Select a valid movement type."
   ),
-  quantity: z.coerce.number({ invalid_type_error: "Enter a numeric quantity." }).int("Quantity must be a whole number."),
+  quantity: z.coerce.number({ invalid_type_error: "Enter a numeric quantity." }).finite("Enter a numeric quantity."),
   reason: optionalFormString,
   reference: optionalFormString,
   newLotCode: optionalFormString,

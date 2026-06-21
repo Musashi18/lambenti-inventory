@@ -177,14 +177,16 @@ model Item {
   supplierSku          String?
   description          String
   category             ItemCategory
+  useGroupOverride     String?
   unit                 Unit
   reorderPoint         Int
   targetStock          Int
   leadTimeDays         Int
+  manualLeadTimeDays   Int?
   lifecycleStatus      LifecycleStatus        @default(ACTIVE)
   storageLocationId    String
   storageLocation      StorageLocation        @relation(fields: [storageLocationId], references: [id])
-  estimatedUnitCost    Decimal?               @db.Decimal(10, 2)
+  estimatedUnitCost    Decimal?               @db.Decimal(12, 4)
   costCurrency         String                 @default("USD")
   costConfidence       CostConfidence         @default(UNKNOWN)
   costSourceRef        String?
@@ -282,7 +284,7 @@ model BOMLine {
   id              String @id @default(cuid())
   bomId           String
   componentItemId String
-  quantity        Int
+  quantity        Decimal @db.Decimal(12, 4)
   bom             BOM    @relation(fields: [bomId], references: [id])
   componentItem   Item   @relation("BomComponent", fields: [componentItemId], references: [id])
 }
@@ -292,7 +294,7 @@ model StockLot {
   itemId     String
   lotCode    String
   receivedAt DateTime
-  unitCost   Decimal         @db.Decimal(10, 2)
+  unitCost   Decimal         @db.Decimal(12, 4)
   currency   String          @default("USD")
   item       Item            @relation(fields: [itemId], references: [id])
   movements  StockMovement[]
@@ -308,7 +310,7 @@ model StockMovement {
   stockLotId          String?
   purchaseOrderLineId String?
   movementType        MovementType
-  quantity            Int
+  quantity            Decimal            @db.Decimal(12, 4)
   reason              String
   reference           String?
   actorType           String

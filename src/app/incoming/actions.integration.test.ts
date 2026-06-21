@@ -154,10 +154,10 @@ describe("incoming receiving server-action contract", () => {
     const movement = await prisma.stockMovement.findFirstOrThrow({ where: { itemId: item.id, reference: "PACKING-SLIP-PARTIAL" } });
     expect(movement).toMatchObject({
       movementType: MovementType.RECEIVE,
-      quantity: 4,
       purchaseOrderLineId: line.id,
       actorId: `${TEST_PREFIX}-ops`
     });
+    expect(Number(movement.quantity)).toBe(4);
     await expect(prisma.stockLot.count({ where: { itemId: item.id, lotCode: `${TEST_PREFIX}-PARTIAL-LOT` } })).resolves.toBe(1);
     await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-ops`, action: "RECEIVE_PURCHASE_ORDER_LINE", entityId: line.id } })).resolves.toBe(1);
     await expect(prisma.supplierInvoice.count({ where: { purchaseOrderId: order.id } })).resolves.toBe(0);

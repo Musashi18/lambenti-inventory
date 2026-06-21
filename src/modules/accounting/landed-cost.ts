@@ -1,6 +1,7 @@
 import { AccountingDocumentStatus, InvoiceStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { convertToUsd } from "@/modules/currency";
+import { allocateOrderLevelCost } from "@/modules/inventory/unit-cost-engine";
 import type { AccountingDateRange } from "./tax";
 
 export type LandedCostRow = {
@@ -225,20 +226,30 @@ function attachedLandedCostEvidenceForInvoice(invoice: InvoiceForLandedCost) {
 }
 
 function attachedDocumentLandedCostEvidence(document: AccountingDocumentForLandedCost) {
-  const analysis = normalizeAnalysis(document.analysisJson);
-  const text = document.extractedText ?? "";
-  if (!isCustomsLandedCostEvidence(analysis?.classification, text, document.originalFileName)) return null;
-
-  const amount = analysisAmount(analysis) ?? findCustomsPaymentAmount(text);
-  if (!amount || amount.value <= 0) return null;
-  return { amountUsd: convertToUsd(amount.value, amount.currency) };
+  const evidence = getAttachedLandedCostEvidenceAmount(document);
+  return evidence ? { amountUsd: evidence.amountUsd } : null;
 }
 
-function isCustomsLandedCostEvidence(classification: string | undefined, text: string, fileName: string) {
+export function getAttachedLandedCostEvidenceAmount(document: {
+  originalFileName: string;
+  extractedText: string | null;
+  analysisJson: unknown;
+}) {
+  const analysis = normalizeAnalysis(document.analysisJson);
+  const text = document.extractedText ?? "";
+  if (!isAttachedLandedCostEvidence(analysis?.classification, text, document.originalFileName)) return null;
+
+  const amount = analysisAmount(analysis) ?? findAttachedPaymentAmount(text);
+  if (!amount || amount.value <= 0) return null;
+  return { amount: amount.value, currency: amount.currency, amountUsd: convertToUsd(amount.value, amount.currency) };
+}
+
+function isAttachedLandedCostEvidence(classification: string | undefined, text: string, fileName: string) {
   const combined = `${fileName}\n${text}`;
   const hasCustomsSignal = /customs|dut(?:y|ies)|brokerage|clearance|cbsa|import\s+(?:fees|charges|duty)|fedex\s+clearance/i.test(combined);
+  const hasAdditionalShippingSignal = /additional\s+(?:shipping|freight)(?:\s+\w+){0,4}\s+(?:charge|charges|cost|costs|fee|fees|receipt|surcharge|surcharges)\b|(?:freight|carrier|logistics)(?:\s+\w+){0,4}\s+(?:charge|charges|cost|costs|fee|fees|receipt|surcharge|surcharges)\b|(?:shipping|freight)\s+(?:surcharge|surcharges|adjustment|adjustments|overage|overages|rebill|re-bill)\b/i.test(combined);
   if (classification === "CUSTOMS_DOCUMENT") return true;
-  return classification === "PAYMENT_RECEIPT" && hasCustomsSignal;
+  return classification === "PAYMENT_RECEIPT" && (hasCustomsSignal || hasAdditionalShippingSignal);
 }
 
 function analysisAmount(analysis: ReturnType<typeof normalizeAnalysis>) {
@@ -246,13 +257,13 @@ function analysisAmount(analysis: ReturnType<typeof normalizeAnalysis>) {
   return { value: analysis.total, currency: analysis.currency || "USD" };
 }
 
-function normalizeAnalysis(value: Prisma.JsonValue | null | undefined): { classification?: string; currency?: string; total?: number } | undefined {
+function normalizeAnalysis(value: unknown): { classification?: string; currency?: string; total?: number } | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as { schemaVersion?: string; classification?: string; currency?: string; total?: number };
   return candidate.schemaVersion === "accounting-document-v1" ? candidate : undefined;
 }
 
-function findCustomsPaymentAmount(text: string) {
+function findAttachedPaymentAmount(text: string) {
   const charged = text.match(/\bcharged\s+([0-9][0-9,]*(?:\.\d{1,2})?)\s*([A-Z]{3})\b/i);
   if (charged) return { value: Number(charged[1].replace(/,/g, "")), currency: charged[2].toUpperCase() };
 
@@ -266,19 +277,7 @@ function findCustomsPaymentAmount(text: string) {
 }
 
 function allocate(amount: number, bases: number[]) {
-  if (bases.length === 0) return [];
-  const totalBasis = bases.reduce((total, value) => total + value, 0);
-  if (totalBasis <= 0) {
-    const equal = round2(amount / bases.length);
-    return bases.map((_, index) => index === bases.length - 1 ? round2(amount - equal * (bases.length - 1)) : equal);
-  }
-  let allocated = 0;
-  return bases.map((basis, index) => {
-    if (index === bases.length - 1) return round2(amount - allocated);
-    const value = round2(amount * (basis / totalBasis));
-    allocated += value;
-    return value;
-  });
+  return allocateOrderLevelCost(amount, bases.map((basis) => ({ quantity: 1, lineTotal: basis })));
 }
 
 function decimalNumber(value: Prisma.Decimal.Value) {

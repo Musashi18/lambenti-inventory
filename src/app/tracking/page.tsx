@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
+import { TrackingDataDisclosure } from "./tracking-data-disclosure";
 import {
   refreshAllTrackingAction,
   refreshSingleTrackingAction,
-  saveManualTrackingNumbersAction
+  saveManualTrackingNumbersAction,
+  updateManualItemLeadTimeAction
 } from "./actions";
 import { TrackingProviderHeartbeat } from "./tracking-auto-refresh";
 import {
@@ -35,8 +37,8 @@ export default async function TrackingPage() {
       <TrackingHero dashboard={dashboard} />
       <TrackingSummary dashboard={dashboard} />
       <TrackingVisualCommandPanel dashboard={dashboard} />
-      <TrackingAttention dashboard={dashboard} />
       <OpenShipments rows={dashboard.rows} />
+      <TrackingAttention dashboard={dashboard} />
       <ManualTrackingDropBox linkOptions={linkOptions} hasOpenShipments={dashboard.rows.length > 0} />
       <DeliveredTrackingHistory rows={dashboard.deliveredRows} />
       <LeadTimeLearningLog log={leadTimeLog} />
@@ -198,7 +200,7 @@ function TrackingVisualCommandPanel({ dashboard }: { dashboard: TrackingDashboar
             </div>
             <RefreshingActionForm action={refreshAllTrackingAction}>
               <button className="rounded-md bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800" type="submit">
-                Refresh Due Statuses
+                Refresh
               </button>
             </RefreshingActionForm>
           </div>
@@ -552,9 +554,9 @@ function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
         <div className="mt-1 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Advanced: Lead-Time Learning Audit</h2>
-            <p className="mt-1 text-sm text-slate-600">Completed Tracking/Receiving Samples Feed Reorder Buffers. Expand Only When Auditing Lead-Time Math.</p>
+            <p className="mt-1 text-sm text-slate-600">Every active item has a planning lead-time row. Manual entries are primary for planning; observed history remains evidence from completed purchase-to-receipt/delivery samples.</p>
           </div>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">{log.sampleCount} Sample{log.sampleCount === 1 ? "" : "s"}</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">{log.itemCount} Item{log.itemCount === 1 ? "" : "s"} · {log.sampleCount} Sample{log.sampleCount === 1 ? "" : "s"}</span>
         </div>
       </summary>
       <div className="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-4">
@@ -569,7 +571,7 @@ function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
       </div>
       <div className="divide-y divide-slate-100">
         {log.items.length === 0 ? (
-          <div className="p-5 text-sm text-slate-500">No completed lead-time samples yet. Samples appear after linked orders have carrier delivery or human receiving evidence.</div>
+          <div className="p-5 text-sm text-slate-500">No active items have lead-time records yet.</div>
         ) : log.items.map((item) => <LeadTimeLogItemDetails key={item.itemId} item={item} />)}
       </div>
     </details>
@@ -584,33 +586,71 @@ function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
           <div className="font-medium text-slate-900">{item.itemSku}</div>
           <div className="text-sm text-slate-600">{item.itemDescription}</div>
           <div className="mt-1 text-xs text-slate-500">
-            Current Item Lead Time {item.currentLeadTimeDays} Days · Weighted Average {formatDays(item.weightedAverageLeadTimeDays)} Across {item.totalQuantityOrdered} Ordered · Shipping Avg {formatDays(item.averageShipTimeDays)}
+            Current Item Lead Time {item.currentLeadTimeDays} Days · {item.leadTimeLabel} · Shipping Avg {formatDays(item.averageShipTimeDays)}
           </div>
         </div>
-        <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">
-          {item.sampleCount} Sample{item.sampleCount === 1 ? "" : "s"}
+        <span className={`rounded-full px-3 py-1 text-xs font-medium ${leadTimeSourceBadgeClass(item.leadTimeSource)}`}>
+          {leadTimeSourceBadgeLabel(item)}
         </span>
       </summary>
-      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-100">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-3 py-2">Order</th>
-              <th className="px-3 py-2">Supplier</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Lead Time</th>
-              <th className="px-3 py-2">Start → End</th>
-              <th className="px-3 py-2">Shipping</th>
-              <th className="px-3 py-2">Tracking Evidence</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {item.entries.map((entry) => <LeadTimeLogEntryRow key={`${entry.purchaseOrderId}-${entry.itemId}-${entry.endAt.toISOString()}`} entry={entry} />)}
-          </tbody>
-        </table>
-      </div>
+      <RefreshingActionForm action={updateManualItemLeadTimeAction} className="mt-4 flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-end">
+        <input type="hidden" name="itemId" value={item.itemId} />
+        <label className="text-sm font-medium text-slate-700">
+          Manual/planning lead time days
+          <input
+            name="leadTimeDays"
+            type="number"
+            min="0"
+            step="1"
+            defaultValue={item.currentLeadTimeDays}
+            className="mt-1 w-36 rounded-md border border-slate-300 bg-white px-3 py-2 font-normal text-slate-900"
+          />
+        </label>
+        <button type="submit" className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          Save lead time
+        </button>
+        <p className="text-xs text-slate-500 sm:max-w-md">
+          Saving here records a manual planning estimate. It becomes the primary item lead time and also mirrors to the preferred supplier lead time; completed receiving/shipping samples stay as evidence without overriding a manual value.
+        </p>
+      </RefreshingActionForm>
+      {item.entries.length === 0 ? (
+        <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">
+          No purchase-to-received tracking sample yet. Manual lead time is the active planning estimate for this item.
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-100">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Order</th>
+                <th className="px-3 py-2">Supplier</th>
+                <th className="px-3 py-2">Qty</th>
+                <th className="px-3 py-2">Lead Time</th>
+                <th className="px-3 py-2">Start → End</th>
+                <th className="px-3 py-2">Shipping</th>
+                <th className="px-3 py-2">Tracking Evidence</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {item.entries.map((entry) => <LeadTimeLogEntryRow key={`${entry.purchaseOrderId}-${entry.itemId}-${entry.endAt.toISOString()}`} entry={entry} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
     </details>
   );
+}
+
+function leadTimeSourceBadgeClass(source: LeadTimeLogItem["leadTimeSource"]) {
+  if (source === "OBSERVED") return "bg-emerald-50 text-emerald-700";
+  if (source === "MANUAL") return "bg-sky-50 text-sky-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function leadTimeSourceBadgeLabel(item: LeadTimeLogItem) {
+  if (item.leadTimeSource === "OBSERVED") return `${item.sampleCount} Sample${item.sampleCount === 1 ? "" : "s"}`;
+  if (item.leadTimeSource === "MANUAL") return "Manual primary";
+  return "Catalog/default";
 }
 
 function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
@@ -648,24 +688,30 @@ function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
 
 function PackageTrackingDataDetails({ row, compact = false }: { row: TrackingDashboardRow; compact?: boolean }) {
   return (
-    <details className={compact ? "mt-0" : "mt-4 rounded-lg border border-slate-200 bg-slate-50"}>
-      <summary className="cursor-pointer list-none p-3 marker:hidden">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-slate-900">Tracking Data</div>
-            <div className="text-xs text-slate-500">Package movements first; technical details are nested below.</div>
-          </div>
-          <span className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600">
-            Expand Tracking Data · {row.eventCount} Event{row.eventCount === 1 ? "" : "s"}
-          </span>
-        </div>
-      </summary>
-      <div className={`${compact ? "" : "border-t border-slate-200"} space-y-4 p-3`}>
-        <EventTimeline row={row} />
-        <ShipmentDetailsDisclosure row={row} />
-      </div>
-    </details>
+    <TrackingDataDisclosure
+      compact={compact}
+      eventCount={row.eventCount}
+      latestEventMarker={trackingDataReadSignature(row)}
+      trackingId={row.id}
+      trackingNumber={row.trackingNumber}
+    >
+      <EventTimeline row={row} />
+      <ShipmentDetailsDisclosure row={row} />
+    </TrackingDataDisclosure>
   );
+}
+
+function trackingDataReadSignature(row: TrackingDashboardRow) {
+  const latestEvent = row.events[0];
+  if (!latestEvent) return null;
+  return [
+    latestEvent.id,
+    latestEvent.status ?? "",
+    latestEvent.description,
+    latestEvent.location ?? "",
+    latestEvent.occurredAt?.toISOString() ?? "",
+    latestEvent.createdAt.toISOString()
+  ].join("|");
 }
 
 function ShipmentDetailsDisclosure({ row }: { row: TrackingDashboardRow }) {

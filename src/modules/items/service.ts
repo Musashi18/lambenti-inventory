@@ -105,6 +105,25 @@ export async function updateItem(input: ItemMutationInput & { id: string }) {
   });
 }
 
+export async function updateItemUseGroupOverride(input: { id: string; useGroupOverride?: string | null; actorId: string }) {
+  const useGroupOverride = input.useGroupOverride?.trim() || null;
+  const item = await prisma.item.update({
+    where: { id: input.id },
+    data: { useGroupOverride }
+  });
+
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "UPDATE_ITEM_USE_GROUP_OVERRIDE",
+    entityType: "Item",
+    entityId: item.id,
+    payload: { itemId: item.id, sku: item.sku, useGroupOverride }
+  });
+
+  return item;
+}
+
 export async function archiveItem(input: { id: string; actorId: string }) {
   const item = await prisma.item.update({
     where: { id: input.id },

@@ -16,7 +16,7 @@ export function TrackingProviderHeartbeat({ enabled, intervalMinutes, provider, 
   const intervalSeconds = Math.max(1, intervalMinutes) * 60;
   const propNextRefreshAtMs = useMemo(() => parseTime(initialNextRefreshAt), [initialNextRefreshAt]);
   const [nextRefreshAtMs, setNextRefreshAtMs] = useState<number | null>(propNextRefreshAtMs);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
   const inFlight = useRef(false);
 
@@ -25,12 +25,13 @@ export function TrackingProviderHeartbeat({ enabled, intervalMinutes, provider, 
   }, [propNextRefreshAtMs]);
 
   useEffect(() => {
+    setNowMs(Date.now());
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    if (!enabled || nextRefreshAtMs === null || nextRefreshAtMs > nowMs || inFlight.current || document.visibilityState === "hidden") return;
+    if (!enabled || nowMs === null || nextRefreshAtMs === null || nextRefreshAtMs > nowMs || inFlight.current || document.visibilityState === "hidden") return;
     inFlight.current = true;
 
     async function refreshDueTracking() {
@@ -58,7 +59,7 @@ export function TrackingProviderHeartbeat({ enabled, intervalMinutes, provider, 
     void refreshDueTracking();
   }, [enabled, nextRefreshAtMs, nowMs, router]);
 
-  const secondsUntilRefresh = enabled && nextRefreshAtMs !== null
+  const secondsUntilRefresh = enabled && nextRefreshAtMs !== null && nowMs !== null
     ? Math.max(0, Math.ceil((nextRefreshAtMs - nowMs) / 1000))
     : null;
   const elapsedSeconds = secondsUntilRefresh === null ? 0 : Math.max(0, intervalSeconds - Math.min(intervalSeconds, secondsUntilRefresh));
@@ -114,5 +115,11 @@ function formatCountdown(totalSeconds: number | null) {
 
 function formatTimestamp(value: Date | string) {
   const time = parseTime(value);
-  return time === null ? "—" : new Date(time).toLocaleTimeString();
+  return time === null ? "—" : new Intl.DateTimeFormat("en-CA", {
+    timeZone: "UTC",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(new Date(time));
 }

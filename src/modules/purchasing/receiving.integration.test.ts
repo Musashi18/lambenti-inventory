@@ -112,9 +112,9 @@ describe("human-confirmed receiving from purchase orders", () => {
     expect(result.purchaseOrderLine.receivedQuantity).toBe(4);
     expect(result.stockMovement).toMatchObject({
       itemId: item.id,
-      movementType: MovementType.RECEIVE,
-      quantity: 4
+      movementType: MovementType.RECEIVE
     });
+    expect(Number(result.stockMovement.quantity)).toBe(4);
 
     const movement = await prisma.stockMovement.findFirstOrThrow({ where: { itemId: item.id } });
     expect((movement as { purchaseOrderLineId?: string }).purchaseOrderLineId).toBe(line.id);
@@ -232,9 +232,9 @@ describe("human-confirmed receiving from purchase orders", () => {
       itemId: item.id,
       stockLotId: receipt.stockMovement.stockLotId,
       movementType: MovementType.CONSUME,
-      quantity: 4,
       reference: `VOID:${receipt.stockMovement.id}`
     });
+    expect(Number(reversal.quantity)).toBe(4);
 
     await expect(prisma.purchaseOrderLine.findUniqueOrThrow({ where: { id: line.id } })).resolves.toMatchObject({ receivedQuantity: 0 });
     await expect(prisma.purchaseOrder.findUniqueOrThrow({ where: { id: order.id } })).resolves.toMatchObject({ status: "ORDERED" });

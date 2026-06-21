@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { ItemCategory, Unit } from "@prisma/client";
+import { InvoiceStatus, ItemCategory, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createInvoiceFromPurchaseOrder, getInvoiceDashboard, normalizeInvoiceNumberKey } from "./invoices";
 
@@ -157,5 +157,45 @@ describe("supplier invoice identity and order-unique invoice merging", () => {
     const dashboard = await getInvoiceDashboard();
     const dashboardOrder = dashboard.uninvoicedPurchaseOrders.find((candidate) => candidate.id === order.id);
     expect(dashboardOrder?.invoices).toHaveLength(1);
+  });
+
+  it("bases paid immutable evidence totals on full paid order totals across received and not-yet-received components", async () => {
+    const baseline = await getInvoiceDashboard();
+    const baselinePaidEvidenceTotal = Number(baseline.paidEvidenceTotal.toString());
+    const baselinePaidStatusTotal = Number(baseline.totalsByStatus.PAID?.toString() ?? 0);
+    const received = await createPurchaseOrderFixture("PAID-RECEIVED");
+    const open = await createPurchaseOrderFixture("PAID-OPEN");
+    const receivedLine = await prisma.purchaseOrderLine.findFirstOrThrow({ where: { purchaseOrderId: received.order.id } });
+    const openLine = await prisma.purchaseOrderLine.findFirstOrThrow({ where: { purchaseOrderId: open.order.id } });
+    await prisma.purchaseOrderLine.update({ where: { id: receivedLine.id }, data: { receivedQuantity: 4 } });
+    await prisma.purchaseOrderLine.update({ where: { id: openLine.id }, data: { receivedQuantity: 0 } });
+
+    const receivedInvoice = await createInvoiceFromPurchaseOrder(received.order.id, `${TEST_PREFIX}-actor`, {
+      invoiceNumber: `${TEST_PREFIX}-PAID-RECEIVED-INV`,
+      subtotal: 20,
+      shippingCost: 5,
+      total: 25,
+      sourceDocumentHash: `${TEST_PREFIX}-PAID-RECEIVED-HASH`
+    });
+    const openInvoice = await createInvoiceFromPurchaseOrder(open.order.id, `${TEST_PREFIX}-actor`, {
+      invoiceNumber: `${TEST_PREFIX}-PAID-OPEN-INV`,
+      subtotal: 60,
+      shippingCost: 15,
+      total: 75,
+      sourceDocumentHash: `${TEST_PREFIX}-PAID-OPEN-HASH`
+    });
+    await prisma.supplierInvoice.updateMany({
+      where: { id: { in: [receivedInvoice.id, openInvoice.id] } },
+      data: { status: InvoiceStatus.PAID, paidAt: new Date("2026-06-10T00:00:00.000Z"), paidBy: `${TEST_PREFIX}-actor`, paymentReference: `${TEST_PREFIX}-PAID-EVIDENCE` }
+    });
+
+    const dashboard = await getInvoiceDashboard();
+    expect(Number(dashboard.paidEvidenceTotal.toString()) - baselinePaidEvidenceTotal).toBeCloseTo(100, 2);
+    expect(Number(dashboard.totalsByStatus.PAID?.toString()) - baselinePaidStatusTotal).toBeCloseTo(100, 2);
+
+    const persistedReceivedLines = await prisma.purchaseOrderLine.findMany({ where: { purchaseOrderId: received.order.id } });
+    const persistedOpenLines = await prisma.purchaseOrderLine.findMany({ where: { purchaseOrderId: open.order.id } });
+    expect(persistedReceivedLines.some((line) => line.receivedQuantity > 0)).toBe(true);
+    expect(persistedOpenLines.every((line) => line.receivedQuantity === 0)).toBe(true);
   });
 });

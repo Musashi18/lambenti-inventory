@@ -20,14 +20,14 @@ async function cleanup() {
   await prisma.auditLog.deleteMany({ where: { actorId: { startsWith: TEST_PREFIX } } });
 }
 
-async function createItem(suffix: string, category: ItemCategory = ItemCategory.COMPONENT) {
+async function createItem(suffix: string, category: ItemCategory = ItemCategory.COMPONENT, unit: Unit = Unit.EACH) {
   const location = await prisma.storageLocation.create({ data: { code: `${TEST_PREFIX}-${suffix}-LOC`, name: `${TEST_PREFIX} ${suffix}` } });
   return prisma.item.create({
     data: {
       sku: `${TEST_PREFIX}-${suffix}`,
       description: `${TEST_PREFIX} ${suffix}`,
       category,
-      unit: Unit.EACH,
+      unit,
       reorderPoint: 0,
       targetStock: 0,
       leadTimeDays: 1,
@@ -71,12 +71,38 @@ describe("editable BOM quantities and explicit build consumption", () => {
     expect(result.movements[0]).toMatchObject({
       itemId: component.id,
       movementType: MovementType.CONSUME,
-      quantity: 12,
       reference: `${TEST_PREFIX}-BUILD`
     });
+    expect(Number(result.movements[0].quantity)).toBe(12);
 
-    await expect(prisma.bOMLine.findUniqueOrThrow({ where: { id: bom.lines[0].id } })).resolves.toMatchObject({ quantity: 3 });
+    const savedLine = await prisma.bOMLine.findUniqueOrThrow({ where: { id: bom.lines[0].id } });
+    expect(Number(savedLine.quantity)).toBe(3);
     await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-operator`, action: { in: ["UPDATE_BOM_LINE_QUANTITY", "CONSUME_BOM_BUILD"] } } })).resolves.toBe(2);
+  });
+
+  it("allows decimal quantity per unit for meter-based LED strip BOM lines", async () => {
+    const parent = await createItem("LED-PARENT", ItemCategory.FINISHED_GOOD);
+    const ledStrip = await createItem("LED-STRIP", ItemCategory.COMPONENT, Unit.METER);
+    const bom = await createBomSection({ parentItemId: parent.id, actorId: `${TEST_PREFIX}-operator` });
+    const line = await addBomLine({ bomId: bom.id, componentItemId: ledStrip.id, quantity: 0.5, actorId: `${TEST_PREFIX}-operator` });
+
+    expect(Number(line.quantity)).toBe(0.5);
+
+    await createStockMovement({
+      itemId: ledStrip.id,
+      movementType: MovementType.RECEIVE,
+      quantity: 5,
+      reason: "Decimal BOM LED strip test receipt",
+      reference: `${TEST_PREFIX}-LED-RECEIPT`,
+      actorId: `${TEST_PREFIX}-operator`
+    });
+
+    const result = await consumeBomBuild({ bomId: bom.id, buildQuantity: 3, reference: `${TEST_PREFIX}-LED-BUILD`, actorId: `${TEST_PREFIX}-operator` });
+
+    expect(result.movements).toHaveLength(1);
+    expect(Number(result.movements[0].quantity)).toBe(1.5);
+    const savedLedLine = await prisma.bOMLine.findUniqueOrThrow({ where: { id: line.id } });
+    expect(Number(savedLedLine.quantity)).toBe(0.5);
   });
 
   it("creates a new finished-unit section, adds a component line, updates it, and removes it", async () => {
@@ -88,10 +114,12 @@ describe("editable BOM quantities and explicit build consumption", () => {
     expect(bom).toMatchObject({ parentItemId: parent.id, version: "v1", active: true });
 
     const line = await addBomLine({ bomId: bom.id, componentItemId: component.id, quantity: 2, actorId: `${TEST_PREFIX}-operator` });
-    expect(line).toMatchObject({ bomId: bom.id, componentItemId: component.id, quantity: 2 });
+    expect(line).toMatchObject({ bomId: bom.id, componentItemId: component.id });
+    expect(Number(line.quantity)).toBe(2);
 
     const updated = await updateBomLine({ lineId: line.id, componentItemId: replacement.id, quantity: 4, actorId: `${TEST_PREFIX}-operator` });
-    expect(updated).toMatchObject({ componentItemId: replacement.id, quantity: 4 });
+    expect(updated).toMatchObject({ componentItemId: replacement.id });
+    expect(Number(updated.quantity)).toBe(4);
 
     await removeBomLine({ lineId: line.id, actorId: `${TEST_PREFIX}-operator` });
     await expect(prisma.bOMLine.findUnique({ where: { id: line.id } })).resolves.toBeNull();

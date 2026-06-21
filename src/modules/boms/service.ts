@@ -72,7 +72,7 @@ export async function createBomSection(input: { parentItemId: string } & BomActo
 }
 
 export async function addBomLine(input: { bomId: string; componentItemId: string; quantity: number } & BomActorInput) {
-  assertPositiveWholeQuantity(input.quantity);
+  assertPositiveBomQuantity(input.quantity);
   const bom = await getActiveBomOrThrow(input.bomId);
   const componentItem = await getActiveItemOrThrow(input.componentItemId, "Component item");
   if (componentItem.id === bom.parentItemId) {
@@ -98,7 +98,7 @@ export async function addBomLine(input: { bomId: string; componentItemId: string
       bomId: line.bomId,
       parentSku: line.bom.parentItem.sku,
       componentSku: line.componentItem.sku,
-      quantity: line.quantity
+      quantity: toQuantityNumber(line.quantity)
     }
   });
 
@@ -106,7 +106,7 @@ export async function addBomLine(input: { bomId: string; componentItemId: string
 }
 
 export async function updateBomLine(input: { lineId: string; componentItemId: string; quantity: number } & BomActorInput) {
-  assertPositiveWholeQuantity(input.quantity);
+  assertPositiveBomQuantity(input.quantity);
 
   const existing = await prisma.bOMLine.findUnique({
     where: { id: input.lineId },
@@ -138,8 +138,8 @@ export async function updateBomLine(input: { lineId: string; componentItemId: st
       parentSku: line.bom.parentItem.sku,
       previousComponentSku: existing.componentItem.sku,
       componentSku: line.componentItem.sku,
-      previousQuantity: existing.quantity,
-      quantity: line.quantity
+      previousQuantity: toQuantityNumber(existing.quantity),
+      quantity: toQuantityNumber(line.quantity)
     }
   });
 
@@ -171,7 +171,7 @@ export async function removeBomLine(input: { lineId: string } & BomActorInput) {
       bomId: existing.bomId,
       parentSku: existing.bom.parentItem.sku,
       componentSku: existing.componentItem.sku,
-      quantity: existing.quantity,
+      quantity: toQuantityNumber(existing.quantity),
       note: "Removed BOM configuration row only. Inventory movement history is unchanged."
     }
   });
@@ -200,12 +200,13 @@ export async function consumeBomBuild(input: { bomId: string; buildQuantity: num
 
     const movements = [];
     for (const line of bom.lines) {
-      const quantity = line.quantity * input.buildQuantity;
+      const quantityPerUnit = toQuantityNumber(line.quantity);
+      const quantity = quantityPerUnit * input.buildQuantity;
       movements.push(await createStockMovementInTransaction(tx, {
         itemId: line.componentItemId,
         movementType: MovementType.CONSUME,
         quantity,
-        reason: input.reason?.trim() || `BOM ${bom.parentItem.sku} ${bom.version}: consumed ${line.quantity} per unit × ${input.buildQuantity} build(s)`,
+        reason: input.reason?.trim() || `BOM ${bom.parentItem.sku} ${bom.version}: consumed ${formatQuantity(quantityPerUnit)} per unit × ${input.buildQuantity} build(s)`,
         reference: input.reference?.trim() || `BOM:${bom.id}`,
         actorType: input.actorType ?? "USER",
         actorId: input.actorId
@@ -248,10 +249,18 @@ export async function consumeBomBuildForParentItem(input: { parentItemId: string
   });
 }
 
-function assertPositiveWholeQuantity(quantity: number) {
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    throw new Error("BOM quantity per unit must be a positive whole number.");
+function assertPositiveBomQuantity(quantity: number) {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error("BOM quantity per unit must be a positive number.");
   }
+}
+
+function toQuantityNumber(quantity: Prisma.Decimal | number) {
+  return Number(quantity);
+}
+
+function formatQuantity(quantity: number) {
+  return Number.isInteger(quantity) ? String(quantity) : quantity.toString();
 }
 
 function assertNoObsoleteBomComponentLines(lines: { componentItem: { sku: string; lifecycleStatus: LifecycleStatus } }[]) {

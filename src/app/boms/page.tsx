@@ -23,7 +23,7 @@ export default async function BomsPage() {
     lines: bom.lines.map((line) => ({
       id: line.id,
       componentItemId: line.componentItemId,
-      quantity: line.quantity,
+      quantity: Number(line.quantity),
       componentItem: toBomBuilderItem(line.componentItem)
     })),
     buildConstraint: summarizeBomBuildConstraint(bom, stockSummaryByItemId)
@@ -51,12 +51,13 @@ export default async function BomsPage() {
   );
 }
 
-function toBomBuilderItem(item: { id: string; sku: string; description: string; category: string }) {
+function toBomBuilderItem(item: { id: string; sku: string; description: string; category: string; useGroupOverride?: string | null }) {
   return {
     id: item.id,
     sku: item.sku,
     description: item.description,
-    category: item.category
+    category: item.category,
+    useGroupOverride: item.useGroupOverride
   };
 }
 
@@ -68,10 +69,11 @@ function summarizeBomBuildConstraint(bom: BomWorkspaceBom, stockSummaryByItemId:
   if (bom.lines.length === 0) return null;
   const lineConstraints = bom.lines.map((line) => {
     const available = stockSummaryByItemId.get(line.componentItemId)?.available ?? 0;
-    const capacity = line.quantity > 0 ? Math.floor(available / line.quantity) : 0;
+    const quantityPerUnit = Number(line.quantity);
+    const capacity = quantityPerUnit > 0 ? Math.floor(available / quantityPerUnit) : 0;
     return {
       sku: line.componentItem.sku,
-      quantityPerUnit: line.quantity,
+      quantityPerUnit,
       available,
       capacity
     };

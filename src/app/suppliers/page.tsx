@@ -137,7 +137,7 @@ export default async function SuppliersPage() {
                       <input form={formId} name="supplierSku" defaultValue={entry.supplierSku} className="w-36 rounded-md border px-2 py-1.5" />
                     </td>
                     <td className="px-4 py-3">
-                      <input form={formId} name="estimatedUnitCost" type="number" min="0" step="0.01" defaultValue={entry.unitPriceUsd?.toString() ?? ""} className="w-28 rounded-md border px-2 py-1.5" />
+                      <input form={formId} name="estimatedUnitCost" type="number" min="0" step="0.0001" defaultValue={entry.unitPriceUsd?.toString() ?? ""} className="w-28 rounded-md border px-2 py-1.5" />
                     </td>
                     <td className="px-4 py-3">
                       <select form={formId} name="costConfidence" defaultValue={entry.costConfidence} className="rounded-md border px-2 py-1.5">
@@ -218,7 +218,8 @@ function AddNewSupplierSection({ supplierEntries, costConfidences }: { supplierE
                 id: entry.itemId,
                 sku: entry.sku,
                 description: entry.description,
-                category: entry.category
+                category: entry.category,
+                useGroupOverride: entry.useGroupOverride
               }))}
             />
           </select>
@@ -233,7 +234,7 @@ function AddNewSupplierSection({ supplierEntries, costConfidences }: { supplierE
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
           Unit Price
-          <input name="estimatedUnitCost" type="number" min="0" step="0.01" disabled={!hasItems} placeholder="USD" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
+          <input name="estimatedUnitCost" type="number" min="0" step="0.0001" disabled={!hasItems} placeholder="USD" className="rounded-md border px-2 py-1.5 text-sm font-normal text-slate-900 disabled:bg-slate-100" />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
           Confidence

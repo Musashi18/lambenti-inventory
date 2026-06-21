@@ -1,4 +1,3 @@
-import Link from "next/link";
 import Image from "next/image";
 import {
   ArrowDownUp,
@@ -33,7 +32,7 @@ const links = [
 
 export function Sidebar() {
   return (
-    <aside className="relative z-20 border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
+    <aside className="isolate relative z-50 border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
       <div className="mb-6">
         <div className="lambenti-sidebar-logo mb-3" aria-hidden="true">
           <Image
@@ -49,14 +48,14 @@ export function Sidebar() {
       </div>
       <nav className="grid gap-1">
         {links.map(({ href, label, icon: Icon }) => (
-          <Link
+          <a
             key={href}
             href={href}
-            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+            className="relative z-10 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
           >
             <Icon className="h-4 w-4" />
             {label}
-          </Link>
+          </a>
         ))}
       </nav>
     </aside>

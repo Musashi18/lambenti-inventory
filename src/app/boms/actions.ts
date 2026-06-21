@@ -22,7 +22,7 @@ export async function addBomLineAction(formData: FormData) {
   const componentItemId = readString(formData, "componentItemId");
   const quantity = Number(readString(formData, "quantity"));
   if (!bomId || !componentItemId) throw new Error("Choose a BOM section and component item before adding a line.");
-  if (!Number.isInteger(quantity) || quantity <= 0) throw new Error("BOM quantity per unit must be a positive whole number.");
+  assertPositiveBomQuantity(quantity);
 
   const actor = await requirePermission("item:edit");
   await addBomLine({
@@ -40,7 +40,7 @@ export async function updateBomLineAction(formData: FormData) {
   const componentItemId = readString(formData, "componentItemId");
   const quantity = Number(readString(formData, "quantity"));
   if (!lineId || !componentItemId) throw new Error("Choose a BOM line and component item before saving.");
-  if (!Number.isInteger(quantity) || quantity <= 0) throw new Error("BOM quantity per unit must be a positive whole number.");
+  assertPositiveBomQuantity(quantity);
 
   const actor = await requirePermission("item:edit");
   await updateBomLine({
@@ -72,9 +72,7 @@ export async function updateBomLineQuantityAction(formData: FormData) {
   if (!lineId) {
     throw new Error("Missing BOM line id.");
   }
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    throw new Error("BOM quantity per unit must be a positive whole number.");
-  }
+  assertPositiveBomQuantity(quantity);
 
   const actor = await requirePermission("item:edit");
   await updateBomLineQuantity({
@@ -111,4 +109,10 @@ export async function consumeBomBuildAction(formData: FormData) {
 function readString(formData: FormData, name: string) {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function assertPositiveBomQuantity(quantity: number) {
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error("BOM quantity per unit must be a positive number.");
+  }
 }

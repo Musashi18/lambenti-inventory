@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
-import { convertToUsd } from "@/modules/currency";
+import { convertToUsd, type CurrencyRates } from "@/modules/currency";
+import { getItemUseGroup, groupItemOptionsByUse, ITEM_USE_GROUP_RULES } from "@/modules/inventory/item-option-groups";
 import {
   archiveItemFormAction,
   unarchiveItemFormAction,
   updateItemFormAction,
+  updateItemUseGroupFormAction,
   type ItemActionState
 } from "./actions";
 
@@ -22,6 +24,7 @@ type EditableItem = {
   supplierSku: string;
   description: string;
   category: string;
+  useGroupOverride?: string | null;
   unit: string;
   reorderPoint: number;
   targetStock: number;
@@ -48,7 +51,7 @@ function statusClass(ok: boolean) {
   return ok ? "border-mint/40 bg-mint/10 text-emerald-800" : "border-coral/40 bg-coral/10 text-red-800";
 }
 
-function formatUsdUnitPrice(item: Pick<EditableItem, "estimatedUnitCost" | "costCurrency" | "displayUnitCost">) {
+function formatUsdUnitPrice(item: Pick<EditableItem, "estimatedUnitCost" | "costCurrency" | "displayUnitCost">, rates?: CurrencyRates) {
   const rawUnitCost = (item.displayUnitCost ?? item.estimatedUnitCost).trim();
   if (rawUnitCost === "") return "—";
 
@@ -56,17 +59,17 @@ function formatUsdUnitPrice(item: Pick<EditableItem, "estimatedUnitCost" | "cost
   if (!Number.isFinite(unitCost)) return "—";
 
   const currency = item.displayUnitCost ? "USD" : item.costCurrency.trim().toUpperCase() || "USD";
-  return `USD ${convertToUsd(unitCost, currency).toFixed(2)}`;
+  return `USD ${convertToUsd(unitCost, currency, { rates }).toFixed(2)}`;
 }
 
 type ItemFormAction = (_previous: ItemActionState, formData: FormData) => Promise<ItemActionState>;
 
-function getStockHealth(item: Pick<EditableItem, "available" | "reorderPoint" | "preferredSupplierId" | "preferredSupplierName" | "estimatedUnitCost">) {
+function getStockHealth(item: Pick<EditableItem, "available" | "reorderPoint" | "preferredSupplierId" | "preferredSupplierName" | "estimatedUnitCost" | "displayUnitCost">) {
   if (!item.preferredSupplierId && !item.preferredSupplierName) {
     return { label: "No Supplier", className: "border-amber-200 bg-amber-50 text-amber-800", nextAction: "Assign source before reorder." };
   }
-  if (item.estimatedUnitCost.trim() === "") {
-    return { label: "Needs Cost", className: "border-blue-200 bg-blue-50 text-blue-800", nextAction: "Add landed/quoted cost." };
+  if ((item.displayUnitCost ?? item.estimatedUnitCost).trim() === "") {
+    return { label: "Needs Cost", className: "border-blue-200 bg-blue-50 text-blue-800", nextAction: "Add landed/quoted/BOM cost." };
   }
   if (item.available < item.reorderPoint) {
     return { label: "Below Reorder", className: "border-red-200 bg-red-50 text-red-800", nextAction: "Draft purchase request." };
@@ -82,7 +85,8 @@ export function ItemsCatalog({
   categories,
   units,
   lifecycleStatuses,
-  costConfidences
+  costConfidences,
+  currencyRates
 }: {
   title?: string;
   archivedView?: boolean;
@@ -92,10 +96,12 @@ export function ItemsCatalog({
   units: string[];
   lifecycleStatuses: string[];
   costConfidences: string[];
+  currencyRates?: CurrencyRates;
 }) {
   const router = useRouter();
   const [state, setState] = useState<ItemActionState>(emptyActionState);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const itemGroups = groupItemOptionsByUse(items);
 
   async function runItemAction(key: string, formData: FormData, action: ItemFormAction, onSuccess?: () => void) {
     setBusyKey(key);
@@ -147,13 +153,23 @@ export function ItemsCatalog({
                 </td>
               </tr>
             ) : (
-              items.map((item) => {
+              itemGroups.map((group) => (
+                <Fragment key={group.key}>
+                  <tr className="border-t border-slate-200 bg-slate-100/80 text-xs uppercase tracking-wide text-slate-600">
+                    <td className="px-4 py-2 font-semibold" colSpan={9}>
+                      {group.label} <span className="font-normal text-slate-400">({group.items.length})</span>
+                    </td>
+                  </tr>
+                  {group.items.map((item) => {
                 const dialogId = `edit-item-${item.id}`;
                 const isObsolete = item.lifecycleStatus === "OBSOLETE";
                 const archiveBusy = busyKey === `archive:${item.id}`;
                 const unarchiveBusy = busyKey === `unarchive:${item.id}`;
                 const updateBusy = busyKey === `update:${item.id}`;
+                const moveBusy = busyKey === `move:${item.id}`;
                 const stockHealth = getStockHealth(item);
+                const currentUseGroup = getItemUseGroup(item);
+                const automaticUseGroup = getItemUseGroup({ ...item, useGroupOverride: null });
                 const supplierOptionsForItem = item.preferredSupplierId && !suppliers.some((supplier) => supplier.id === item.preferredSupplierId)
                   ? [
                       {
@@ -174,9 +190,39 @@ export function ItemsCatalog({
                       <div className="text-[11px] text-slate-400">{stockHealth.nextAction}</div>
                     </td>
                     <td className="px-4 py-3">{item.description}</td>
-                    <td className="px-4 py-3">{item.category}</td>
                     <td className="px-4 py-3">
-                      <div>{formatUsdUnitPrice(item)}</div>
+                      <div className="font-medium text-slate-900">{item.category}</div>
+                      <form
+                        className="mt-2 space-y-1"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runItemAction(`move:${item.id}`, new FormData(event.currentTarget), updateItemUseGroupFormAction);
+                        }}
+                      >
+                        <input type="hidden" name="itemId" value={item.id} />
+                        <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500" htmlFor={`use-group-${item.id}`}>
+                          Catalog Section
+                        </label>
+                        <select
+                          id={`use-group-${item.id}`}
+                          name="useGroupOverride"
+                          defaultValue={item.useGroupOverride ?? ""}
+                          disabled={Boolean(busyKey)}
+                          className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 disabled:opacity-60"
+                          title={`Current section: ${currentUseGroup.label}`}
+                          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+                        >
+                          <option value="">Auto: {automaticUseGroup.label}</option>
+                          {ITEM_USE_GROUP_RULES.map((rule) => (
+                            <option key={rule.key} value={rule.key}>{rule.label}</option>
+                          ))}
+                        </select>
+                        {item.useGroupOverride ? <div className="text-[11px] text-orange-600">Manual section override</div> : null}
+                        {moveBusy ? <div className="text-[11px] text-slate-500">Moving…</div> : null}
+                      </form>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>{formatUsdUnitPrice(item, currencyRates)}</div>
                       {item.displayCostSource ? <div className="mt-1 text-[11px] text-slate-500">{item.displayCostSource}</div> : null}
                     </td>
                     <td className="px-4 py-3">
@@ -327,7 +373,7 @@ export function ItemsCatalog({
                             </label>
                             <label className="space-y-1 text-sm font-medium">
                               <span>Unit Cost</span>
-                              <input name="estimatedUnitCost" type="number" step="0.01" defaultValue={item.estimatedUnitCost} className="w-full rounded-md border px-3 py-2 font-normal" />
+                              <input name="estimatedUnitCost" type="number" step="0.0001" defaultValue={item.estimatedUnitCost} className="w-full rounded-md border px-3 py-2 font-normal" />
                             </label>
                             <label className="space-y-1 text-sm font-medium">
                               <span>Currency</span>
@@ -364,7 +410,9 @@ export function ItemsCatalog({
                     </td>
                   </tr>
                 );
-              })
+                  })}
+                </Fragment>
+              ))
             )}
           </tbody>
         </table>

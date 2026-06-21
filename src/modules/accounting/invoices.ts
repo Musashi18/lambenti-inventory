@@ -347,8 +347,14 @@ export async function getInvoiceDashboard() {
     acc[invoice.status] = (acc[invoice.status] ?? new Prisma.Decimal(0)).plus(invoice.total);
     return acc;
   }, {});
+  const paidEvidenceTotal = invoices.reduce((total, invoice) => {
+    // Payment evidence is accounting/payment scope, not receiving scope: a paid supplier order can include
+    // components already received and components still open. Keep the paid summary tied to the immutable
+    // supplier-invoice total, never to received quantities or stock movements.
+    return invoice.status === InvoiceStatus.PAID ? total.plus(invoice.total) : total;
+  }, new Prisma.Decimal(0));
 
-  return { invoices, uninvoicedPurchaseOrders, totalsByStatus };
+  return { invoices, uninvoicedPurchaseOrders, totalsByStatus, paidEvidenceTotal };
 }
 
 export async function createInvoiceFromPurchaseOrder(purchaseOrderId: string, actorId: string, source?: InvoiceSourceProvenance) {

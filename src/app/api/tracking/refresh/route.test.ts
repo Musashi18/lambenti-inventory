@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 vi.mock("@/modules/tracking/service", () => ({
   getTrackingRefreshHeartbeat: vi.fn(async () => ({ lastCheckedAt: new Date("2026-06-17T20:00:00.000Z"), nextRefreshAt: new Date("2026-06-17T21:00:00.000Z") })),
+  refreshActiveTrackingNumbers: vi.fn(async () => ({ scanned: 2, refreshed: 2, failed: 0, skipped: 0 })),
   refreshDueTrackingNumbers: vi.fn(async () => ({ scanned: 1, refreshed: 1, failed: 0, skipped: 0 })),
   refreshTrackingNumber: vi.fn(async () => ({ refreshStatus: "SUCCESS" }))
 }));

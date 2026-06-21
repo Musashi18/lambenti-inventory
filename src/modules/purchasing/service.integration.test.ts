@@ -145,6 +145,23 @@ describe("purchase recommendation and draft request service", () => {
     expect(row).toMatchObject({ available: 3, reorderPoint: 10, targetStock: 20, recommendedOrderQuantity: 8 });
   });
 
+  it("orders purchase recommendations by supply-and-lead-time priority while keeping one-day lead-time parts lowest", async () => {
+    const long = await createFixture({ sku: `${TEST_PREFIX}-LONG-LEAD`, reorderPoint: 10, targetStock: 30 });
+    const short = await createFixture({ sku: `${TEST_PREFIX}-ONE-DAY`, reorderPoint: 10, targetStock: 30 });
+    await prisma.item.update({ where: { id: long.item.id }, data: { leadTimeDays: 30 } });
+    await prisma.item.update({ where: { id: short.item.id }, data: { leadTimeDays: 1 } });
+    await receive(long.item.id, 2);
+    await receive(short.item.id, 2);
+
+    const recommendations = await getPurchaseRecommendations();
+    const longRow = recommendations.find((row) => row.itemId === long.item.id);
+    const shortRow = recommendations.find((row) => row.itemId === short.item.id);
+
+    expect(longRow).toMatchObject({ priority: "URGENT", leadTimeDays: 30, supplyGapToReorder: 8, coveredAvailable: 2 });
+    expect(shortRow).toMatchObject({ priority: "LOW", leadTimeDays: 1, supplyGapToReorder: 8, coveredAvailable: 2 });
+    expect(recommendations.findIndex((row) => row.itemId === long.item.id)).toBeLessThan(recommendations.findIndex((row) => row.itemId === short.item.id));
+  });
+
   it("creates only a DRAFT purchase request and prevents duplicate open drafts for the same item", async () => {
     const { item, supplier } = await createFixture({ sku: `${TEST_PREFIX}-DRAFT`, reorderPoint: 10, targetStock: 20 });
 

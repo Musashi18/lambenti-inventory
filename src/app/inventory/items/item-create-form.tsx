@@ -70,7 +70,7 @@ export function ItemCreateForm({
           <option key={value} value={value}>{value}</option>
         ))}
       </select>
-      <input name="estimatedUnitCost" type="number" step="0.01" placeholder="Unit Cost" className="rounded-md border px-3 py-2" />
+      <input name="estimatedUnitCost" type="number" step="0.0001" placeholder="Unit Cost (optional; BOM finished goods auto-calculate)" className="rounded-md border px-3 py-2" />
       <input name="costCurrency" placeholder="USD" defaultValue="USD" className="rounded-md border px-3 py-2" />
       <select name="costConfidence" className="rounded-md border px-3 py-2" defaultValue="UNKNOWN">
         {costConfidences.map((value) => (

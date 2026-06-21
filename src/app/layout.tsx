@@ -15,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
       <body>
         <Script src="/theme-init.js" strategy="beforeInteractive" />
         <div className="min-h-screen lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">

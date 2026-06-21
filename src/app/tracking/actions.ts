@@ -6,8 +6,9 @@ import {
   captureManualTrackingNumbers,
   captureTrackingNumbersFromImports,
   pruneOldAlibabaTrackingNumbers,
-  refreshDueTrackingNumbers,
-  refreshTrackingNumber
+  refreshActiveTrackingNumbers,
+  refreshTrackingNumber,
+  updateManualItemLeadTime
 } from "@/modules/tracking/service";
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import {
@@ -72,14 +73,14 @@ export async function captureAlibabaTrackingAction() {
 }
 
 export async function refreshAllTrackingAction() {
-  const result = await refreshDueTrackingNumbers({ actorId: TRACKING_AGENT_ID, limit: 50 });
+  const result = await refreshActiveTrackingNumbers({ actorId: TRACKING_AGENT_ID, limit: 100 });
   revalidatePath("/tracking");
   if (result.failed > 0 && result.refreshed === 0) {
-    return { success: false, message: `Tracking refresh attempted ${result.scanned} due numbers; ${result.failed} failed. Check service configuration.` };
+    return { success: false, message: `Tracking refresh attempted ${result.scanned} active numbers; ${result.failed} failed. Check service configuration.` };
   }
   return {
     success: true,
-    message: `Refreshed ${result.refreshed} due tracking numbers; skipped ${result.skipped} not-due or delivered records.`
+    message: `Refreshed ${result.refreshed} active tracking numbers; skipped ${result.skipped} delivered, archived, or over-limit records.`
   };
 }
 
@@ -89,6 +90,21 @@ export async function refreshSingleTrackingAction(formData: FormData) {
   await refreshTrackingNumber({ trackingNumber, actorId: TRACKING_AGENT_ID });
   revalidatePath("/tracking");
   return { success: true, message: `Refreshed ${trackingNumber}.` };
+}
+
+export async function updateManualItemLeadTimeAction(formData: FormData) {
+  const itemId = readString(formData, "itemId");
+  const leadTimeDaysRaw = readString(formData, "leadTimeDays");
+  const leadTimeDays = Number(leadTimeDaysRaw);
+  if (!itemId) return { success: false, message: "Missing item." };
+  if (!Number.isFinite(leadTimeDays) || leadTimeDays < 0) {
+    return { success: false, message: "Lead time must be zero or more days." };
+  }
+
+  const actor = await requirePermission("item:edit");
+  const item = await updateManualItemLeadTime({ itemId, leadTimeDays, actorId: actor.id });
+  revalidateWorkspace();
+  return { success: true, message: `Updated ${item.sku} lead time to ${item.leadTimeDays} day(s).` };
 }
 
 function readString(formData: FormData, name: string) {

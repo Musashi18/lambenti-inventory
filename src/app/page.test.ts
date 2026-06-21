@@ -34,6 +34,11 @@ describe("DashboardPage source contract", () => {
     expect(source).toContain("Package Bottlenecks");
     expect(source).toContain("Stock Pressure");
     expect(source).toContain("Operations Flow");
+    expect(source).toContain("Attention preview");
+    expect(source).toContain("human-approval-queue");
+    expect(source).not.toContain("Observed weighted avg");
+    expect(source).toContain("bg-slate-950/95");
+    expect(source).toContain("catalog/default");
     expect(source).toContain("Value mix");
     expect(source).toContain("summary.dashboardGraphs");
     expect(source).not.toContain("Open Next Actions");

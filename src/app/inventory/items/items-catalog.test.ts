@@ -27,6 +27,13 @@ describe("ItemsCatalog client interaction source contract", () => {
     expect(source).toContain("displayCostSource");
   });
 
+  it("keeps item price inputs at 4-decimal resolution while table display stays cents-rounded", () => {
+    const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+
+    expect(source).toContain('step="0.0001"');
+    expect(source).toContain("toFixed(2)");
+  });
+
   it("exposes a custom supplier name input in the edit modal", () => {
     const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
 
@@ -45,5 +52,15 @@ describe("ItemsCatalog client interaction source contract", () => {
     expect(source).toContain("No Supplier");
     expect(source).toContain("Below Reorder");
     expect(source).toContain("Needs Cost");
+  });
+
+  it("groups the active catalog by item-use section and exposes manual section moves", () => {
+    const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+
+    expect(source).toContain("groupItemOptionsByUse(items)");
+    expect(source).toContain("ITEM_USE_GROUP_RULES.map");
+    expect(source).toContain("updateItemUseGroupFormAction");
+    expect(source).toContain('name="useGroupOverride"');
+    expect(source).toContain("Manual section override");
   });
 });

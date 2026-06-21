@@ -2,9 +2,10 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { archiveItem, createItem, unarchiveItem, updateItem } from "@/modules/items/service";
+import { archiveItem, createItem, unarchiveItem, updateItem, updateItemUseGroupOverride } from "@/modules/items/service";
 import { parseItemFormData } from "@/modules/items/form";
 import { importItemsFromCsv } from "@/modules/items/import-export";
+import { getItemUseGroupRule } from "@/modules/inventory/item-option-groups";
 import { requirePermission } from "@/modules/auth/permissions";
 import { revalidateWorkspace } from "@/app/revalidate-workspace";
 
@@ -104,6 +105,38 @@ export async function updateItemFormAction(_previous: ItemActionState, formData:
 export async function updateItemAction(formData: FormData) {
   const result = await updateItemFormAction(initialItemActionState, formData);
   if (!result.ok) throw new Error(result.message);
+}
+
+export async function updateItemUseGroupFormAction(_previous: ItemActionState, formData: FormData): Promise<ItemActionState> {
+  try {
+    const itemId = formData.get("itemId");
+    if (typeof itemId !== "string" || itemId.trim() === "") {
+      throw new Error("Missing item id for section move.");
+    }
+
+    const rawUseGroup = formData.get("useGroupOverride");
+    if (typeof rawUseGroup !== "string") {
+      throw new Error("Missing catalog section selection.");
+    }
+
+    const useGroupOverride = rawUseGroup.trim() || null;
+    if (useGroupOverride && !getItemUseGroupRule(useGroupOverride)) {
+      throw new Error("Choose a valid catalog section.");
+    }
+
+    const actor = await requirePermission("item:edit");
+    const item = await updateItemUseGroupOverride({ id: itemId, useGroupOverride, actorId: actor.id });
+
+    revalidateWorkspace();
+    return {
+      ok: true,
+      message: useGroupOverride
+        ? `Moved ${item.sku} to ${getItemUseGroupRule(useGroupOverride)?.label}.`
+        : `Returned ${item.sku} to automatic catalog sorting.`
+    };
+  } catch (error) {
+    return { ok: false, message: itemActionMessage(error) };
+  }
 }
 
 export async function archiveItemAction(formData: FormData) {

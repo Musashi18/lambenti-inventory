@@ -1,5 +1,6 @@
 import type { MovementType } from "@prisma/client";
-import { convertToUsd, type CurrencyRates } from "@/modules/currency";
+import { convertUnitCostToUsd, type CurrencyRates } from "@/modules/currency";
+import { sortItemsByUseGroup } from "./item-option-groups";
 import { calculateStockPosition } from "./ledger";
 
 export type LotValuationInput = {
@@ -9,7 +10,7 @@ export type LotValuationInput = {
   unitCost: number;
   movements: Array<{
     movementType: MovementType;
-    quantity: number;
+    quantity: number | { toNumber(): number };
   }>;
 };
 
@@ -28,11 +29,13 @@ export type PricedItemValuationInput = {
   itemId: string;
   sku: string;
   description: string;
+  category?: string | null;
+  useGroupOverride?: string | null;
   unitCost: number | null;
   currency: string;
   movements: Array<{
     movementType: MovementType;
-    quantity: number;
+    quantity: number | { toNumber(): number };
   }>;
 };
 
@@ -40,6 +43,8 @@ export type PricedItemValuationRow = {
   itemId: string;
   sku: string;
   description: string;
+  category?: string | null;
+  useGroupOverride?: string | null;
   quantity: number;
   unitCost: number;
   currency: string;
@@ -81,11 +86,13 @@ export function calculatePricedItemValuations(
     .filter((item) => item.unitCost !== null && Number.isFinite(item.unitCost))
     .map((item) => {
       const position = calculateStockPosition(item.movements);
-      const unitCost = convertToUsd(item.unitCost ?? 0, item.currency, { rates: options.rates });
+      const unitCost = convertUnitCostToUsd(item.unitCost ?? 0, item.currency, { rates: options.rates });
       return {
         itemId: item.itemId,
         sku: item.sku,
         description: item.description,
+        ...(item.category !== undefined ? { category: item.category } : {}),
+        ...(item.useGroupOverride !== undefined ? { useGroupOverride: item.useGroupOverride } : {}),
         quantity: position.onHand,
         unitCost,
         currency: "USD",
@@ -94,7 +101,7 @@ export function calculatePricedItemValuations(
     });
 
   return {
-    rows,
+    rows: sortItemsByUseGroup(rows),
     totalValue: roundCurrency(rows.reduce((total, row) => total + row.value, 0))
   };
 }

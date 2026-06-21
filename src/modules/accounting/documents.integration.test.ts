@@ -229,7 +229,8 @@ describe("accounting document ingestion and invoice application", () => {
       text: [
         "Payment Receipt / Reçu du paiement",
         "Please be advised that your payment transaction was successful.",
-        "We have charged 80.74 CAD to your account and it will be applied as follows:",
+        "We have charged",
+        "80.74 CAD to your account and it will be applied as follows:",
         "Canada Customs FEE AMOUNT (CAD)",
         "Fees CUSTOMS DUTIES 24.63",
         "FedEx Clearance Service Fees SPECIAL ASSESSMENT 43.23",

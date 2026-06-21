@@ -58,4 +58,11 @@ describe("item option grouping", () => {
       "Packaging & Labels"
     ]);
   });
+
+  it("honors a manual item catalog section override before automatic classification", () => {
+    const overridden = { ...items[0], useGroupOverride: "magnetic-hardware" };
+
+    expect(getItemUseGroup(overridden).label).toBe("Magnets & Magnetic Hardware");
+    expect(sortItemsByUseGroup([items[5], overridden]).map((item) => item.id)).toEqual(["led", "magnet"]);
+  });
 });

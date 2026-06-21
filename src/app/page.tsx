@@ -67,6 +67,9 @@ export default async function DashboardPage() {
           <GraphPanel title="Stock Pressure" kicker="Lowest coverage vs reorder point">
             <StockPressureGraph graphs={summary.dashboardGraphs} />
           </GraphPanel>
+          <GraphPanel title="Lead-Time Horizon" kicker="Longest item planning windows" className="lg:col-span-2">
+            <LeadTimeHorizonGraph graphs={summary.dashboardGraphs} />
+          </GraphPanel>
         </div>
       </section>
 
@@ -89,7 +92,7 @@ export default async function DashboardPage() {
         <StatCard label="Automation Failures" value={summary.failedAutomationRuns.length} />
       </div>
 
-      <details className="rounded-md border border-slate-200 bg-white">
+      <details id="human-approval-queue" className="scroll-mt-24 rounded-md border border-slate-200 bg-white">
         <summary className="cursor-pointer list-none border-b border-slate-200 px-4 py-3 marker:hidden">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -188,9 +191,9 @@ function LaunchGauge({ readiness, graphs }: { readiness: LaunchReadiness; graphs
   );
 }
 
-function GraphPanel({ title, kicker, children }: { title: string; kicker: string; children: React.ReactNode }) {
+function GraphPanel({ title, kicker, children, className = "" }: { title: string; kicker: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+    <div className={`flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm ${className}`}>
       <div className="mb-4">
         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{kicker}</div>
         <h3 className="text-base font-semibold text-slate-900">{title}</h3>
@@ -305,17 +308,64 @@ function StockPressureGraph({ graphs }: { graphs: DashboardGraphs }) {
   );
 }
 
+function LeadTimeHorizonGraph({ graphs }: { graphs: DashboardGraphs }) {
+  if (graphs.leadTimeBars.length === 0) {
+    return <div className="text-sm text-slate-500">No lead-time rows available yet.</div>;
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {graphs.leadTimeBars.map((item) => (
+        <div key={item.sku} className="min-w-0 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+            <span className="truncate font-medium text-slate-700" title={item.description}>{item.sku}</span>
+            <span className={`shrink-0 ${item.source === "OBSERVED" ? "text-emerald-600" : item.source === "MANUAL" ? "text-sky-700" : "text-slate-500"}`}>{item.days}d · {formatLeadTimeSource(item)}</span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+            <div className={leadTimeBarClass(item.source)} style={{ width: `${Math.max(item.percentOfMax, item.days > 0 ? 4 : 1)}%` }} title={item.label} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatLeadTimeSource(item: DashboardGraphs["leadTimeBars"][number]) {
+  if (item.source === "OBSERVED") return `${item.sampleCount} sample${item.sampleCount === 1 ? "" : "s"}`;
+  if (item.source === "MANUAL") return "manual primary";
+  return "catalog/default";
+}
+
+function leadTimeBarClass(source: DashboardGraphs["leadTimeBars"][number]["source"]) {
+  if (source === "OBSERVED") return "h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400";
+  if (source === "MANUAL") return "h-full rounded-full bg-gradient-to-r from-sky-400 to-indigo-500";
+  return "h-full rounded-full bg-gradient-to-r from-slate-300 to-slate-500";
+}
+
 function OperationsFlowGraph({ graphs }: { graphs: DashboardGraphs }) {
   return (
     <div className="space-y-3">
       {graphs.operationsFlow.map((item) => (
-        <Link key={item.label} href={item.href} className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-cyan-300">
+        <Link key={item.label} href={item.href} className="group relative z-0 block rounded-lg border border-slate-200 bg-white p-3 transition duration-200 hover:z-50 hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-lg focus-visible:z-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
           <div className="mb-2 flex items-center justify-between gap-3 text-sm">
             <span className="font-medium text-slate-800">{item.label}</span>
             <span className="text-lg font-semibold text-slate-950">{item.count}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" style={{ width: `${Math.max(item.percentOfMax, item.count > 0 ? 5 : 0)}%` }} />
+            <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" style={{ width: `${Math.max(item.percentOfMax, item.count > 0 ? 5 : 0)}%` }} />
+          </div>
+          <div className="pointer-events-none absolute left-3 right-3 top-full z-[80] mt-2 translate-y-1 rounded-xl border border-cyan-300/30 bg-slate-950/95 p-3 text-xs text-slate-200 opacity-0 shadow-2xl shadow-slate-950/40 ring-1 ring-cyan-400/20 backdrop-blur transition duration-200 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+            <div className="mb-2 flex items-center gap-2 font-semibold text-white">
+              <span className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.8)]" />
+              {item.count === 0 ? "No queued attention" : "Attention preview"}
+            </div>
+            {item.summaries.length === 0 ? (
+              <div className="text-slate-400">No active one-line summaries for this queue.</div>
+            ) : (
+              <ul className="space-y-1">
+                {item.summaries.map((summary, index) => <li key={`${item.label}-${index}`} className="truncate">{summary}</li>)}
+              </ul>
+            )}
           </div>
         </Link>
       ))}

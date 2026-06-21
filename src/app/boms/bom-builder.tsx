@@ -12,6 +12,7 @@ type BomBuilderItem = {
   sku: string;
   description: string;
   category: string;
+  useGroupOverride?: string | null;
 };
 
 type BomBuilderLine = {
@@ -171,7 +172,7 @@ export function BomBuilder({
                     const selectedComponentId = componentSelections[line.id] ?? line.componentItemId;
                     const selectedLineComponentDetails = itemById.get(selectedComponentId) ?? line.componentItem;
                     return (
-                      <tr key={line.id} className="border-t border-slate-100 align-top odd:bg-white even:bg-slate-50/60 hover:bg-cyan-50/40">
+                      <tr key={line.id} className="table-row-interactive border-t border-slate-100 align-top">
                         <td className="px-3 py-2 min-w-72">
                           <form
                             id={`bom-line-${line.id}`}
@@ -191,7 +192,7 @@ export function BomBuilder({
                         <td className="px-3 py-2">{cleanItemType(selectedLineComponentDetails.category)}</td>
                         <td className="px-3 py-2">{selectedLineComponentDetails.description}</td>
                         <td className="px-3 py-2">
-                          <input form={`bom-line-${line.id}`} name="quantity" type="number" min="1" defaultValue={line.quantity} className="w-28 rounded-md border px-3 py-2" />
+                          <input form={`bom-line-${line.id}`} name="quantity" type="number" min="0.0001" step="0.0001" defaultValue={line.quantity} className="w-28 rounded-md border px-3 py-2" />
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-2">
@@ -241,7 +242,7 @@ export function BomBuilder({
               </div>
               <label className="text-sm font-medium text-slate-700">
                 Qty/Unit
-                <input name="quantity" type="number" min="1" defaultValue="1" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
+                <input name="quantity" type="number" min="0.0001" step="0.0001" defaultValue="1" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" />
               </label>
               <button className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-white disabled:opacity-60" disabled={!draftComponentId || pendingKey !== null}>
                 {pendingKey === `add-${bom.id}` ? "Adding…" : "Add Component Line"}

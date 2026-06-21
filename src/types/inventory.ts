@@ -3,6 +3,7 @@ export type StockSummary = {
   sku: string;
   description: string;
   category?: string | null;
+  useGroupOverride?: string | null;
   reorderPoint: number;
   targetStock: number;
   onHand: number;
@@ -15,6 +16,7 @@ export type ShortageSummary = {
   sku: string;
   description: string;
   category?: string | null;
+  useGroupOverride?: string | null;
   demand: number;
   available: number;
   shortage: number;

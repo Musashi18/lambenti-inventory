@@ -1,44 +1,14 @@
 import { DashboardTable } from "@/components/dashboard-table";
-import { prisma } from "@/lib/prisma";
 import { calculatePricedItemValuations } from "@/modules/inventory/valuation";
-import { getItemLandedCostIndex } from "@/modules/accounting/landed-cost";
+import { getActivePricedItemValuationInputs } from "@/modules/inventory/pricing";
 import { requirePermission } from "@/modules/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
+// getActivePricedItemValuationInputs owns the active-item query, including lifecycleStatus: { not: "OBSOLETE" }, so this page matches dashboard valuation inputs.
 export default async function ValuationPage() {
   await requirePermission("accounting:view");
-  const [items, landedCostIndex] = await Promise.all([
-    prisma.item.findMany({
-      where: {
-        lifecycleStatus: { not: "OBSOLETE" }
-      },
-      include: {
-        stockMovements: {
-          select: {
-            movementType: true,
-            quantity: true
-          }
-        }
-      },
-      orderBy: { sku: "asc" }
-    }),
-    getItemLandedCostIndex()
-  ]);
-
-  const itemValuation = calculatePricedItemValuations(
-    items.map((item) => {
-      const landedCost = landedCostIndex.get(item.id);
-      return {
-      itemId: item.id,
-      sku: item.sku,
-      description: item.description,
-      unitCost: landedCost?.landedUnitCost ?? (item.estimatedUnitCost === null ? null : Number(item.estimatedUnitCost)),
-      currency: landedCost ? "USD" : item.costCurrency,
-      movements: item.stockMovements
-    };
-    })
-  );
+  const itemValuation = calculatePricedItemValuations(await getActivePricedItemValuationInputs());
   const valueConcentrationRows = [...itemValuation.rows]
     .sort((left, right) => right.value - left.value)
     .slice(0, 5);

@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { ItemCategory, LifecycleStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { archiveItem, getItems, unarchiveItem } from "./service";
+import { archiveItem, getItems, unarchiveItem, updateItemUseGroupOverride } from "./service";
 
 const TEST_PREFIX = "TEST-ITEM-ARCHIVE";
 
@@ -55,5 +55,18 @@ describe("item archive visibility", () => {
 
     await unarchiveItem({ id: item.id, actorId: `${TEST_PREFIX}-operator` });
     await expect(prisma.item.findUniqueOrThrow({ where: { id: item.id } })).resolves.toMatchObject({ lifecycleStatus: LifecycleStatus.ACTIVE });
+  });
+
+  it("persists manual catalog section overrides without changing the coarse item category", async () => {
+    const item = await createItem("USE-GROUP");
+
+    await updateItemUseGroupOverride({ id: item.id, useGroupOverride: "magnetic-hardware", actorId: `${TEST_PREFIX}-operator` });
+    await expect(prisma.item.findUniqueOrThrow({ where: { id: item.id } })).resolves.toMatchObject({
+      category: ItemCategory.COMPONENT,
+      useGroupOverride: "magnetic-hardware"
+    });
+
+    await updateItemUseGroupOverride({ id: item.id, useGroupOverride: "", actorId: `${TEST_PREFIX}-operator` });
+    await expect(prisma.item.findUniqueOrThrow({ where: { id: item.id } })).resolves.toMatchObject({ useGroupOverride: null });
   });
 });

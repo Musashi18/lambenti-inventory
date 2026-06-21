@@ -31,7 +31,7 @@ export default async function EmailImportPage({
     prisma.item.findMany({
       where: { lifecycleStatus: { not: "OBSOLETE" } },
       orderBy: { sku: "asc" },
-      select: { id: true, sku: true, description: true, category: true }
+      select: { id: true, sku: true, description: true, category: true, useGroupOverride: true }
     })
   ]);
   const mailbox = getAlibabaMailboxConfigStatus();

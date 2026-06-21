@@ -19,7 +19,9 @@ export async function getPurchaseRecommendations() {
         preferredSupplier: { select: { name: true, companyName: true } },
         supplierSku: true,
         estimatedUnitCost: true,
-        costConfidence: true
+        costConfidence: true,
+        leadTimeDays: true,
+        manualLeadTimeDays: true
       }
     }),
     getIncomingPurchaseOrderQuantityByItem(itemIds),
@@ -35,19 +37,40 @@ export async function getPurchaseRecommendations() {
       const incomingQty = incomingByItemId.get(item.itemId) ?? 0;
       const openDraftOrPendingRequestQty = openRequestsByItemId.get(item.itemId) ?? 0;
       const itemDetails = recommendableItemById.get(item.itemId);
+      const leadTimeDays = itemDetails?.manualLeadTimeDays ?? itemDetails?.leadTimeDays ?? 0;
+      const coveredAvailable = item.available + incomingQty + openDraftOrPendingRequestQty;
+      const supplyGapToReorder = Math.max(item.reorderPoint - coveredAvailable, 0);
+      const supplyGapToTarget = Math.max(item.targetStock - coveredAvailable, 0);
+      const recommendedOrderQuantity = supplyGapToTarget;
+      const leadTimePriorityDays = Math.max(leadTimeDays - 1, 0);
+      const reorderPressure = item.reorderPoint > 0 ? supplyGapToReorder / item.reorderPoint : 0;
+      const targetPressure = item.targetStock > 0 ? supplyGapToTarget / item.targetStock : 0;
+      const priorityScore = Math.round((leadTimePriorityDays * 10) + (reorderPressure * 100) + (targetPressure * 25));
       return {
         ...item,
         incomingQty,
         openDraftOrPendingRequestQty,
+        coveredAvailable,
+        supplyGapToReorder,
+        supplyGapToTarget,
+        leadTimeDays,
+        leadTimeSource: itemDetails?.manualLeadTimeDays !== null && itemDetails?.manualLeadTimeDays !== undefined ? "MANUAL" as const : "ITEM" as const,
+        priorityScore,
+        priority: classifyPurchasePriority({ leadTimeDays, supplyGapToReorder, available: item.available, priorityScore }),
         preferredSupplierId: itemDetails?.preferredSupplierId ?? null,
         preferredSupplierName: itemDetails?.preferredSupplier?.companyName ?? itemDetails?.preferredSupplier?.name ?? null,
         supplierSku: itemDetails?.supplierSku ?? null,
         estimatedUnitCost: itemDetails?.estimatedUnitCost?.toString() ?? null,
         costConfidence: itemDetails?.costConfidence ?? null,
-        recommendedOrderQuantity: Math.max(item.targetStock - item.available - incomingQty - openDraftOrPendingRequestQty, 0)
+        recommendedOrderQuantity
       };
     })
-    .filter((item) => item.recommendedOrderQuantity > 0);
+    .filter((item) => item.recommendedOrderQuantity > 0)
+    .sort((left, right) => purchasePriorityRank(right.priority) - purchasePriorityRank(left.priority)
+      || right.leadTimeDays - left.leadTimeDays
+      || right.supplyGapToReorder - left.supplyGapToReorder
+      || right.recommendedOrderQuantity - left.recommendedOrderQuantity
+      || left.sku.localeCompare(right.sku));
 }
 
 export async function createDraftPurchaseRequest(input: {
@@ -249,4 +272,22 @@ async function getOpenPurchaseRequestQuantityByItem(itemIds: string[]) {
     totals.set(line.itemId, (totals.get(line.itemId) ?? 0) + line.quantity);
   }
   return totals;
+}
+
+
+type PurchasePriority = "URGENT" | "HIGH" | "NORMAL" | "LOW";
+
+function classifyPurchasePriority(input: { leadTimeDays: number; supplyGapToReorder: number; available: number; priorityScore: number }): PurchasePriority {
+  if (input.leadTimeDays <= 1) return "LOW";
+  if (input.available <= 0 && input.supplyGapToReorder > 0 && input.leadTimeDays >= 7) return "URGENT";
+  if (input.leadTimeDays >= 21 || input.priorityScore >= 180) return "URGENT";
+  if (input.leadTimeDays >= 7 || input.supplyGapToReorder > 0) return "HIGH";
+  return "NORMAL";
+}
+
+function purchasePriorityRank(priority: PurchasePriority) {
+  if (priority === "URGENT") return 3;
+  if (priority === "HIGH") return 2;
+  if (priority === "NORMAL") return 1;
+  return 0;
 }

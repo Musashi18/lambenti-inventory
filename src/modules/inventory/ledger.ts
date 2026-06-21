@@ -8,7 +8,7 @@ export type StockPosition = {
 
 export type LedgerMovement = {
   movementType: MovementType;
-  quantity: number;
+  quantity: number | { toNumber(): number };
 };
 
 export type StockMovementInput = {
@@ -23,15 +23,16 @@ export type StockMovementInput = {
 
 export function calculateStockPosition(movements: LedgerMovement[]): StockPosition {
   const onHand = movements.reduce((total, movement) => {
+    const quantity = movementQuantity(movement.quantity);
     switch (movement.movementType) {
       case MovementType.RECEIVE:
       case MovementType.RETURN:
-        return total + movement.quantity;
+        return roundQuantity(total + quantity);
       case MovementType.CONSUME:
       case MovementType.SCRAP:
-        return total - movement.quantity;
+        return roundQuantity(total - quantity);
       case MovementType.ADJUST:
-        return total + movement.quantity;
+        return roundQuantity(total + quantity);
       case MovementType.RESERVE:
         return total;
       default:
@@ -41,12 +42,12 @@ export function calculateStockPosition(movements: LedgerMovement[]): StockPositi
 
   const reserved = movements
     .filter((movement) => movement.movementType === MovementType.RESERVE)
-    .reduce((total, movement) => total + movement.quantity, 0);
+    .reduce((total, movement) => roundQuantity(total + movementQuantity(movement.quantity)), 0);
 
   return {
     onHand,
     reserved,
-    available: onHand - reserved
+    available: roundQuantity(onHand - reserved)
   };
 }
 
@@ -83,6 +84,14 @@ function projectMovement(current: StockPosition, movement: LedgerMovement): Stoc
     { movementType: MovementType.RESERVE, quantity: current.reserved },
     movement
   ]);
+}
+
+function movementQuantity(quantity: LedgerMovement["quantity"]) {
+  return typeof quantity === "number" ? quantity : quantity.toNumber();
+}
+
+function roundQuantity(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
 function hasReference(input: StockMovementInput) {

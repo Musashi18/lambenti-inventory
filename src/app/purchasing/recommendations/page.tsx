@@ -41,25 +41,29 @@ export default async function PurchaseRecommendationsPage() {
           {recommendations.length === 0 ? (
             <div className="px-4 py-6 text-sm text-slate-500">No recommendation currently needs a draft purchase request.</div>
           ) : recommendations.map((item) => {
-            const priceLabel = item.estimatedUnitCost ? `USD ${Number(item.estimatedUnitCost).toFixed(4)} (${item.costConfidence ?? "UNKNOWN"})` : "Missing price evidence";
+            const priceLabel = item.estimatedUnitCost ? `USD ${Number(item.estimatedUnitCost).toFixed(2)} (${item.costConfidence ?? "UNKNOWN"})` : "Missing price evidence";
+            const priorityTone = item.priority === "URGENT" ? "border-red-200 bg-red-50 text-red-800" : item.priority === "HIGH" ? "border-orange-200 bg-orange-50 text-orange-800" : item.priority === "NORMAL" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-slate-50 text-slate-600";
             return (
               <article key={item.itemId} className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-medium text-slate-900">{item.sku}</h3>
                     <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">Low stock</span>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${priorityTone}`}>{item.priority} priority · {item.leadTimeDays}d lead time</span>
                   </div>
                   <p className="mt-1 text-sm text-slate-600">{item.description}</p>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-6">
                     <Metric title="Available" value={item.available.toString()} compact />
-                    <Metric title="Reorder Point" value={item.reorderPoint.toString()} compact />
+                    <Metric title="Covered Supply" value={item.coveredAvailable.toString()} detail="available + incoming + open PR" compact />
+                    <Metric title="Reorder Gap" value={item.supplyGapToReorder.toString()} compact />
                     <Metric title="Target" value={item.targetStock.toString()} compact />
                     <Metric title="Incoming" value={item.incomingQty.toString()} compact />
                     <Metric title="Open PR qty" value={item.openDraftOrPendingRequestQty.toString()} compact />
                   </div>
-                  <div className="mt-3 grid gap-2 text-xs text-slate-600 md:grid-cols-3">
+                  <div className="mt-3 grid gap-2 text-xs text-slate-600 md:grid-cols-4">
                     <div><span className="font-medium text-slate-800">Supplier:</span> {item.preferredSupplierName ?? "Unassigned"}</div>
                     <div><span className="font-medium text-slate-800">Supplier SKU:</span> {item.supplierSku ?? "—"}</div>
+                    <div><span className="font-medium text-slate-800">Lead time:</span> {item.leadTimeDays}d {item.leadTimeSource === "MANUAL" ? "manual primary" : "item record"}</div>
                     <div><span className="font-medium text-slate-800">Price evidence:</span> {priceLabel}</div>
                   </div>
                 </div>
@@ -71,7 +75,7 @@ export default async function PurchaseRecommendationsPage() {
                       Draft PR Quantity
                       <input name="quantity" type="number" min="1" step="1" defaultValue={item.recommendedOrderQuantity} className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm" required />
                     </label>
-                    <input type="hidden" name="rationale" value={`Low-stock recommendation for ${item.sku}: available ${item.available}, reorder point ${item.reorderPoint}, target ${item.targetStock}, incoming ${item.incomingQty}, open PR qty ${item.openDraftOrPendingRequestQty}.`} />
+                    <input type="hidden" name="rationale" value={`Priority ${item.priority} low-stock recommendation for ${item.sku}: lead time ${item.leadTimeDays} day(s), available ${item.available}, covered supply ${item.coveredAvailable}, reorder gap ${item.supplyGapToReorder}, reorder point ${item.reorderPoint}, target ${item.targetStock}, incoming ${item.incomingQty}, open PR qty ${item.openDraftOrPendingRequestQty}.`} />
                     <button className="mt-3 w-full rounded-md bg-ink px-3 py-2 text-sm font-medium text-white">Create Draft PR</button>
                     <p className="mt-2 text-xs text-slate-500">Human approval and draft-PO conversion remain separate gates.</p>
                   </RefreshingActionForm>

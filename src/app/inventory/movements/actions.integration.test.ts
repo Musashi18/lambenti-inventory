@@ -27,7 +27,7 @@ async function cleanupTestData() {
   await prisma.storageLocation.deleteMany({ where: { code: { startsWith: TEST_PREFIX } } });
 }
 
-async function createMovementFixture(suffix: string) {
+async function createMovementFixture(suffix: string, unit: Unit = Unit.EACH) {
   const location = await prisma.storageLocation.create({
     data: { code: `${TEST_PREFIX}-${suffix}-LOC`, name: `Movement action test ${suffix}` }
   });
@@ -36,7 +36,7 @@ async function createMovementFixture(suffix: string) {
       sku: `${TEST_PREFIX}-${suffix}-ITEM`,
       description: `Movement action item ${suffix}`,
       category: ItemCategory.COMPONENT,
-      unit: Unit.EACH,
+      unit,
       reorderPoint: 0,
       targetStock: 0,
       leadTimeDays: 0,
@@ -97,10 +97,42 @@ describe("inventory movement server-action contract", () => {
       itemId: item.id,
       stockLotId: null,
       movementType: MovementType.RECEIVE,
-      quantity: 6,
       reference: "PO-MOVEMENT-ACTION"
     });
+    expect(Number(movement.quantity)).toBe(6);
     expect(movement.reason).toMatch(/without an optional reason/i);
+  });
+
+  it("accepts decimal movements for meter-measured stock and persists the decimal ledger quantity", async () => {
+    const { item } = await createMovementFixture("METER-DECIMAL", Unit.METER);
+
+    const state = await createMovementAction(undefined, movementForm({
+      itemId: item.id,
+      quantity: "1.5",
+      reason: "Meter-measured LED strip receipt",
+      reference: "PO-METER-DECIMAL"
+    }));
+
+    expect(state).toMatchObject({ success: true });
+    const movement = await prisma.stockMovement.findFirstOrThrow({ where: { itemId: item.id } });
+    expect(Number(movement.quantity)).toBe(1.5);
+  });
+
+  it("rejects decimal movements for piece-measured stock", async () => {
+    const { item } = await createMovementFixture("EACH-DECIMAL", Unit.EACH);
+
+    const state = await createMovementAction(undefined, movementForm({
+      itemId: item.id,
+      quantity: "1.5",
+      reference: "PO-EACH-DECIMAL"
+    }));
+
+    expect(state).toMatchObject({
+      success: false,
+      domainErrorCode: "STOCK_MOVEMENT_REJECTED"
+    });
+    expect(state.message).toMatch(/whole number/i);
+    await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(0);
   });
 
   it("rejects item-level negative deductions before mutating the ledger and returns inline action state", async () => {
@@ -160,9 +192,9 @@ describe("inventory movement server-action contract", () => {
     expect(movements[1]).toMatchObject({
       itemId: item.id,
       movementType: MovementType.CONSUME,
-      quantity: 5,
       reference: `VOID:${original.id}`
     });
+    expect(Number(movements[1].quantity)).toBe(5);
     await expect(prisma.auditLog.count({ where: { action: "VOID_STOCK_MOVEMENT", entityType: "StockMovement", entityId: original.id } })).resolves.toBe(1);
   });
 });

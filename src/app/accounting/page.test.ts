@@ -8,6 +8,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 describe("Accounting workbench page", () => {
   it("exposes document drag/drop analysis and serious accounting guardrails", () => {
     const pageSource = readFileSync(join(__dirname, "page.tsx"), "utf8");
+    const actionsSource = readFileSync(join(__dirname, "actions.ts"), "utf8");
+    const workspaceSource = readFileSync(join(__dirname, "..", "revalidate-workspace.ts"), "utf8");
     const dropzoneSource = readFileSync(join(__dirname, "accounting-document-dropzone.tsx"), "utf8");
 
     expect(pageSource).toContain("Accounting Workbench");
@@ -21,7 +23,11 @@ describe("Accounting workbench page", () => {
     expect(pageSource).toContain("Customer Invoices / AR");
     expect(pageSource).toContain("GL Mapping");
     expect(pageSource).toContain("Posted Journals");
-    expect(pageSource).toContain("/accounting/journals");
+    expect(pageSource).toContain('AccountingLink href="/accounting/journals" title="Posted Journals"');
+    expect(pageSource).toContain('AccountingLink href="/accounting/landed-cost" title="Landed Cost"');
+    expect(pageSource).toContain("data-testid={`accounting-link-");
+    expect(pageSource).toContain("<a href={href}");
+    expect(pageSource).toContain("Immutable evidence retained for received + open components");
     expect(pageSource).toContain("Payment Reconciliation");
     expect(pageSource).toContain("Attention Queue");
     expect(pageSource).toContain("Command Center");
@@ -63,6 +69,13 @@ describe("Accounting workbench page", () => {
     expect(dropzoneSource).toContain("Zipped Folders");
     expect(dropzoneSource).toContain(".zip");
     expect(dropzoneSource).toContain("archiveSummaries");
+    expect(actionsSource).toContain("attachAccountingDocumentEvidence");
+    expect(actionsSource).toContain("revalidateWorkspace");
+    expect(workspaceSource).toContain("/accounting/landed-cost");
+    expect(workspaceSource).toContain("/inventory/items");
+    expect(workspaceSource).toContain("/inventory/valuation");
+    expect(pageSource).toContain("getAttachedLandedCostEvidenceAmount");
+    expect(pageSource).toContain("landed-cost evidence detected");
     expect(pageSource).toContain("Evidence Only Until Apply");
     expect(pageSource).toContain("Bookkeeping Workflow Rail");
   });

@@ -3,6 +3,14 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
+  --table-row-hover-bg: rgb(30 41 59 / 0.72);
+  --table-sticky-cell-bg: #0f172a;
+  --table-sticky-cell-hover-bg: var(--table-row-hover-bg);
+  --table-sticky-cell-divider: rgb(51 65 85 / 1);
+}
+
+[data-theme="light"] {
   color-scheme: light;
   --table-row-hover-bg: rgb(248 250 252 / 0.8);
   --table-sticky-cell-bg: #ffffff;
@@ -87,6 +95,7 @@ body {
 }
 
 [data-theme="dark"] .bg-slate-100,
+[data-theme="dark"] .bg-slate-100\/80,
 [data-theme="dark"] .bg-slate-200 {
   background-color: #1e293b;
 }

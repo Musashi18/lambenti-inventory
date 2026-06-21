@@ -18,6 +18,7 @@ export type ItemSupplierEntry = {
   sku: string;
   description: string;
   category: string;
+  useGroupOverride: string | null;
   cleanItemType: string;
   supplierId: string;
   supplierName: string;
@@ -548,6 +549,7 @@ export async function getItemSupplierEntries(): Promise<ItemSupplierEntry[]> {
       sku: item.sku,
       description: item.description,
       category: item.category,
+      useGroupOverride: item.useGroupOverride,
       cleanItemType: cleanItemType(item.category),
       supplierId: item.preferredSupplierId ?? "",
       supplierName: item.preferredSupplier?.name ?? "Unassigned",

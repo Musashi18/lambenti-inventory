@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemCategory, MovementType, PurchaseOrderStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
+  captureManualTrackingNumbers,
   captureTrackingNumbersFromImports,
   captureTrackingNumbersFromPortalSnapshot,
   extractTrackingNumbersFromText,
@@ -9,8 +10,11 @@ import {
   getTrackingDashboard,
   normalizeTrackingNumber,
   pruneOldAlibabaTrackingNumbers,
+  refreshActiveTrackingNumbers,
   refreshDueTrackingNumbers,
-  refreshTrackingNumber
+  refreshTrackingNumber,
+  syncLeadTimeAveragesForPurchaseOrder,
+  updateManualItemLeadTime
 } from "./service";
 
 const TEST_PREFIX = "TEST-TRACKING";
@@ -198,6 +202,91 @@ describe("tracking service", () => {
       externalOrderId: fixture.externalOrderId,
       purchaseOrderId: fixture.order.id,
       emailOrderImportId: fixture.orderImport.id
+    });
+  });
+
+  it("links manual drop-box tracking by source URL or by supplier and item evidence when the operator omits an order id", async () => {
+    const sourceUrlFixture = await createOrderImportFixture("MANUAL-SOURCE-URL");
+    const sourceUrlResult = await captureManualTrackingNumbers({
+      rawText: "UPS tracking 1Z675EW60490310056",
+      sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${sourceUrlFixture.externalOrderId}`,
+      actorId: `${TEST_PREFIX}-operator`
+    });
+
+    expect(sourceUrlResult).toMatchObject({ saved: 1, updated: 0 });
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310056" } })).resolves.toMatchObject({
+      source: "MANUAL_DROPBOX",
+      externalOrderId: sourceUrlFixture.externalOrderId,
+      purchaseOrderId: sourceUrlFixture.order.id,
+      emailOrderImportId: sourceUrlFixture.orderImport.id
+    });
+
+    const inferredFixture = await createOrderImportFixture("MANUAL-POWER-SUPPLY");
+    await prisma.item.update({
+      where: { id: inferredFixture.item.id },
+      data: { sku: `${TEST_PREFIX}-MANUAL-POWER-SUPPLY-PSU`, description: "12 V GS/UL certified wall power adapter" }
+    });
+    const inferredResult = await captureManualTrackingNumbers({
+      rawText: `${inferredFixture.supplier.name} power supply shipment\nUPS 1Z675EW60490310057`,
+      actorId: `${TEST_PREFIX}-operator`
+    });
+
+    expect(inferredResult).toMatchObject({ saved: 1, updated: 0 });
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310057" } })).resolves.toMatchObject({
+      source: "MANUAL_DROPBOX",
+      externalOrderId: inferredFixture.externalOrderId,
+      purchaseOrderId: inferredFixture.order.id,
+      emailOrderImportId: inferredFixture.orderImport.id
+    });
+  });
+
+  it("does not treat an info-received tracking event as delivered lead-time completion", async () => {
+    const fixture = await createOrderImportFixture("INFO-NOT-DELIVERED");
+    await prisma.trackingNumber.create({
+      data: {
+        trackingNumber: `${TEST_PREFIX}-INFO-NOT-DELIVERED`,
+        source: "MANUAL_DROPBOX",
+        sourceUrl: `${TEST_PREFIX}-info-not-delivered-note`,
+        currentStatus: "INFO_RECEIVED",
+        statusDescription: "Shipper created a label, UPS has not received the package yet.",
+        externalOrderId: fixture.externalOrderId,
+        purchaseOrderId: fixture.order.id,
+        emailOrderImportId: fixture.orderImport.id,
+        lastEventAt: new Date("2026-06-12T00:00:00.000Z"),
+        refreshStatus: "SUCCESS"
+      }
+    });
+
+    const dashboard = await getTrackingDashboard({ now: new Date("2026-06-13T00:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
+    const row = dashboard.rows.find((entry) => entry.trackingNumber === `${TEST_PREFIX}-INFO-NOT-DELIVERED`);
+    expect(row).toMatchObject({
+      currentStatus: "INFO_RECEIVED",
+      leadTimeEndAt: null,
+      leadTimeEndSource: null,
+      leadTimeDays: null,
+      leadTimeLabel: null
+    });
+  });
+
+  it("distinguishes catalog/default lead times from manual overrides when no completed sample exists", async () => {
+    const fixture = await createOrderImportFixture("CATALOG-LEAD-TIME");
+    const catalogLog = await getLeadTimeLog();
+    const catalogRow = catalogLog.items.find((item) => item.itemId === fixture.item.id);
+    expect(catalogRow).toMatchObject({
+      currentLeadTimeDays: 7,
+      manualLeadTimeDays: null,
+      leadTimeSource: "CATALOG",
+      leadTimeLabel: expect.stringContaining("catalog/default planning lead time")
+    });
+
+    await updateManualItemLeadTime({ itemId: fixture.item.id, leadTimeDays: 33, actorId: `${TEST_PREFIX}-operator` });
+    const manualLog = await getLeadTimeLog();
+    const manualRow = manualLog.items.find((item) => item.itemId === fixture.item.id);
+    expect(manualRow).toMatchObject({
+      currentLeadTimeDays: 33,
+      manualLeadTimeDays: 33,
+      leadTimeSource: "MANUAL",
+      leadTimeLabel: expect.stringContaining("manual planning estimate")
     });
   });
 
@@ -681,6 +770,41 @@ describe("tracking service", () => {
     await expect(prisma.trackingEvent.findFirstOrThrow({ where: { trackingNumberId: refreshed.id } })).resolves.toMatchObject({ status: "INFO_RECEIVED" });
   });
 
+  it("recognizes carrier-has-received-information responses as info received, not pending", async () => {
+    const fixture = await createOrderImportFixture("INFO-RECEIVED-PHRASE");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153428CN"],
+        text: "Tracking Number: LL270153428CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      status: "pending",
+      statusDescription: "Shipper created a label, UPS has not received the package yet.",
+      events: [{
+        status: "pending",
+        description: "The carrier has received information about this package.",
+        occurredAt: "2026-06-14T01:00:00.000Z"
+      }]
+    }), { status: 200 }));
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153428CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-14T02:30:00.000Z"),
+      config: { provider: "CUSTOM_HTTP", urlTemplate: "https://tracking.local/track/{trackingNumber}" },
+      fetcher
+    });
+
+    expect(refreshed.currentStatus).toBe("INFO_RECEIVED");
+    await expect(getTrackingDashboard()).resolves.toMatchObject({
+      rows: expect.arrayContaining([expect.objectContaining({ trackingNumber: "LL270153428CN", currentStatus: "INFO_RECEIVED" })])
+    });
+  });
+
   it("keeps pending when the provider has no initial tracking entry", async () => {
     const fixture = await createOrderImportFixture("SHIP24-NO-EVENT");
     await captureTrackingNumbersFromPortalSnapshot({
@@ -748,13 +872,21 @@ describe("tracking service", () => {
         sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
         orderId: fixture.externalOrderId,
         capturedAt: "2026-06-14T02:00:00.000Z",
-        trackingNumbers: ["1Z675EW60490310034", "1Z675EW60490310035"],
-        text: "Two parsed UPS tracking numbers are attached to this portal snapshot."
+        trackingNumbers: ["1Z675EW60490310034"],
+        text: "One parsed UPS tracking number is attached to this portal snapshot."
       },
       actorId: `${TEST_PREFIX}-agent`
     });
     await prisma.trackingNumber.update({ where: { trackingNumber: "1Z675EW60490310034" }, data: { nextRefreshAt: new Date("2026-06-13T00:00:00.000Z") } });
-    await prisma.trackingNumber.update({ where: { trackingNumber: "1Z675EW60490310035" }, data: { nextRefreshAt: new Date("2026-06-14T05:00:00.000Z") } });
+    await prisma.trackingNumber.create({
+      data: {
+        trackingNumber: `${TEST_PREFIX}-DUE-FUTURE`,
+        source: "TEST",
+        currentStatus: "PENDING",
+        refreshStatus: "PENDING",
+        nextRefreshAt: new Date("2026-06-14T05:00:00.000Z")
+      }
+    });
 
     const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify({
       tracking_number: url.includes("10034") ? "1Z675EW60490310034" : "1Z675EW60490310035",
@@ -928,5 +1060,112 @@ describe("tracking service", () => {
       description: "Delivered",
       rawEventJson: { checkpoint: "front_door" }
     });
+  });
+
+  it("makes manual item lead time primary, updates the preferred supplier, and prevents observed sync from overwriting it", async () => {
+    const fixture = await createOrderImportFixture("MANUAL-PRIMARY");
+    const line = await prisma.purchaseOrderLine.findFirstOrThrow({ where: { purchaseOrderId: fixture.order.id, itemId: fixture.item.id } });
+    const lot = await prisma.stockLot.create({
+      data: { itemId: fixture.item.id, lotCode: `${TEST_PREFIX}-MANUAL-PRIMARY-LOT`, receivedAt: new Date("2026-06-30T00:00:00.000Z"), unitCost: 1 }
+    });
+    await prisma.stockMovement.create({
+      data: {
+        itemId: fixture.item.id,
+        stockLotId: lot.id,
+        purchaseOrderLineId: line.id,
+        movementType: MovementType.RECEIVE,
+        quantity: 10,
+        reason: "Manual-primary lead-time observed sample fixture",
+        actorType: "USER",
+        actorId: `${TEST_PREFIX}-receiver`
+      }
+    });
+
+    await updateManualItemLeadTime({ itemId: fixture.item.id, leadTimeDays: 42, actorId: `${TEST_PREFIX}-operator` });
+    const log = await getLeadTimeLog();
+    const row = log.items.find((item) => item.itemId === fixture.item.id);
+
+    expect(row).toMatchObject({
+      currentLeadTimeDays: 42,
+      manualLeadTimeDays: 42,
+      leadTimeSource: "MANUAL",
+      weightedAverageLeadTimeDays: 20,
+      leadTimeLabel: expect.stringContaining("completed samples retained as evidence")
+    });
+    await expect(prisma.supplier.findUniqueOrThrow({ where: { id: fixture.supplier.id } })).resolves.toMatchObject({ leadTimeDays: 42 });
+
+    const sync = await syncLeadTimeAveragesForPurchaseOrder(fixture.order.id, `${TEST_PREFIX}-agent`, "AGENT");
+    expect(sync.updatedItems).toBe(0);
+    await expect(prisma.item.findUniqueOrThrow({ where: { id: fixture.item.id } })).resolves.toMatchObject({ leadTimeDays: 42, manualLeadTimeDays: 42 });
+  });
+
+  it("keeps same-order tracking evidence active while the dashboard screens duplicate shipment cards", async () => {
+    const fixture = await createOrderImportFixture("ACTIVE-REFRESH");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        capturedAt: "2026-06-14T02:00:00.000Z",
+        trackingNumbers: ["1Z675EW60490310044"],
+        text: "First UPS tracking number."
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        capturedAt: "2026-06-15T02:00:00.000Z",
+        trackingNumbers: ["1Z675EW60490310045"],
+        text: "Second package UPS tracking number."
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310044" } })).resolves.toMatchObject({
+      currentStatus: "UNKNOWN",
+      refreshStatus: "PENDING"
+    });
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310045" } })).resolves.toMatchObject({
+      currentStatus: "UNKNOWN",
+      refreshStatus: "PENDING"
+    });
+    await prisma.trackingNumber.update({ where: { trackingNumber: "1Z675EW60490310044" }, data: { nextRefreshAt: new Date("2026-06-20T00:00:00.000Z") } });
+    await prisma.trackingNumber.update({ where: { trackingNumber: "1Z675EW60490310045" }, data: { nextRefreshAt: new Date("2026-06-22T00:00:00.000Z") } });
+
+    const fetcher = vi.fn(async (url: string) => {
+      const trackingNumber = decodeURIComponent(url.split("/track/")[1] ?? "");
+      return new Response(JSON.stringify({
+        tracking_number: trackingNumber,
+        status: "in_transit",
+        statusDescription: "In transit",
+        events: []
+      }), { status: 200 });
+    });
+    const result = await refreshActiveTrackingNumbers({
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-21T00:00:00.000Z"),
+      config: { urlTemplate: "https://tracking.local/track/{trackingNumber}", refreshIntervalMinutes: 240 },
+      fetcher,
+      limit: 2
+    });
+
+    expect(result.scanned).toBe(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310044" } })).resolves.toMatchObject({
+      currentStatus: "IN_TRANSIT",
+      refreshStatus: "SUCCESS"
+    });
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "1Z675EW60490310045" } })).resolves.toMatchObject({
+      currentStatus: "IN_TRANSIT",
+      refreshStatus: "SUCCESS"
+    });
+    const dashboard = await getTrackingDashboard({ now: new Date("2026-06-21T00:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
+    expect(dashboard.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        relatedTrackingNumbers: expect.arrayContaining(["1Z675EW60490310044", "1Z675EW60490310045"]),
+        screenedShipmentCount: 2
+      })
+    ]));
   });
 });

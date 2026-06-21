@@ -13,4 +13,14 @@ describe("Sidebar branding source contract", () => {
     expect(source).toContain("px-3 text-xl font-semibold text-ink");
     expect(source).not.toMatch(/>Lambenti</);
   });
+
+  it("keeps the movements navigation as a plain high-z-index anchor so wide item tables cannot trap clicks", () => {
+    const source = readFileSync(join(__dirname, "sidebar.tsx"), "utf8");
+
+    expect(source).toContain('href: "/inventory/movements", label: "Movements"');
+    expect(source).toContain("isolate relative z-50");
+    expect(source).toContain("relative z-10 flex items-center");
+    expect(source).toContain("<a");
+    expect(source).not.toContain("next/link");
+  });
 });

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getInvoiceDashboard, summarizeInvoiceWorkQueue } from "@/modules/accounting/invoices";
 import { getAccountingWorkbench, type AccountingDocumentAnalysis } from "@/modules/accounting/documents";
+import { getAttachedLandedCostEvidenceAmount } from "@/modules/accounting/landed-cost";
 import { getAccountingCommandCenter } from "@/modules/accounting/overview";
 import { hasPermission, requirePermission } from "@/modules/auth/permissions";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
@@ -100,14 +101,14 @@ function documentReadiness(document: AccountingDocumentRow, analysis?: Accountin
 export default async function AccountingWorkbenchPage() {
   const actor = await requirePermission("accounting:view");
   const canApplyDocuments = hasPermission(actor, "invoice:create");
-  const [{ invoices, uninvoicedPurchaseOrders, totalsByStatus }, { documents }, commandCenter] = await Promise.all([
+  const [{ invoices, uninvoicedPurchaseOrders, totalsByStatus, paidEvidenceTotal }, { documents }, commandCenter] = await Promise.all([
     getInvoiceDashboard(),
     getAccountingWorkbench(),
     getAccountingCommandCenter()
   ]);
   const receivedTotal = totalsByStatus.RECEIVED?.toString() ?? "0";
   const approvedTotal = totalsByStatus.APPROVED?.toString() ?? "0";
-  const paidTotal = totalsByStatus.PAID?.toString() ?? "0";
+  const paidTotal = paidEvidenceTotal.toString();
   const approvedInvoices = invoices.filter((invoice) => invoice.status === "APPROVED").length;
   const invoiceWorkQueue = summarizeInvoiceWorkQueue(invoices);
   const documentTriage = getDocumentTriageSummary(documents);
@@ -229,7 +230,7 @@ export default async function AccountingWorkbenchPage() {
         <SummaryCard label="Supplier Invoices" value={invoices.length.toString()} subtext="AP records in the app" />
         <SummaryCard label="Received / unpaid" value={`USD${Number(receivedTotal).toFixed(2)}`} subtext="Needs approval/payment review" />
         <SummaryCard label="Approved" value={`USD${Number(approvedTotal).toFixed(2)}`} subtext="Payment-Ready with reference required" />
-        <SummaryCard label="Paid" value={`USD${Number(paidTotal).toFixed(2)}`} subtext="Immutable evidence retained" />
+        <SummaryCard label="Paid" value={`USD${Number(paidTotal).toFixed(2)}`} subtext="Immutable evidence retained for received + open components" />
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Bookkeeping Workflow Rail">
@@ -420,6 +421,11 @@ export default async function AccountingWorkbenchPage() {
                 const canDeleteSourceDocument = canApplyDocuments
                   && document.status !== "APPLIED"
                   && document.status !== "ATTACHED";
+                const landedCostEvidence = getAttachedLandedCostEvidenceAmount({
+                  originalFileName: document.originalFileName,
+                  extractedText: document.extractedText,
+                  analysisJson: document.analysisJson
+                });
                 return (
                   <tr key={document.id} className="align-top">
                     <td className="px-4 py-3">
@@ -444,7 +450,10 @@ export default async function AccountingWorkbenchPage() {
                       ) : null}
                     </td>
                     <td className="px-4 py-3">
-                      {analysis?.total == null ? "—" : money(analysis.currency, analysis.total)}
+                      {analysis?.total == null
+                        ? landedCostEvidence ? money(landedCostEvidence.currency, landedCostEvidence.amount) : "—"
+                        : money(analysis.currency, analysis.total)}
+                      {analysis?.total == null && landedCostEvidence ? <div className="text-xs text-emerald-600">landed-cost evidence detected</div> : null}
                       {analysis?.taxCost != null ? <div className="text-xs text-slate-500">tax {money(analysis.currency, analysis.taxCost)}</div> : null}
                     </td>
                     <td className="px-4 py-3">
@@ -684,10 +693,10 @@ function miniMetricToneClass(tone: string) {
 
 function AccountingLink({ href, title, text }: { href: string; title: string; text: string }) {
   return (
-    <Link href={href} className="rounded-md border border-slate-200 bg-white p-4 hover:border-slate-300 hover:bg-slate-50">
+    <a href={href} data-testid={`accounting-link-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`} className="block h-full rounded-md border border-slate-200 bg-white p-4 hover:border-slate-300 hover:bg-slate-50">
       <div className="text-sm font-medium text-slate-900">{title}</div>
       <div className="mt-1 text-xs text-slate-500">{text}</div>
-    </Link>
+    </a>
   );
 }
 

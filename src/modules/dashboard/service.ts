@@ -1,9 +1,12 @@
 import { getStockSummaries } from "@/modules/inventory/service";
 import { sortItemsByUseGroup } from "@/modules/inventory/item-option-groups";
 import { calculatePricedItemValuations, type PricedItemValuationRow } from "@/modules/inventory/valuation";
+import { getActivePricedItemValuationInputs } from "@/modules/inventory/pricing";
 import { getIncomingOrders, getPurchaseRecommendations } from "@/modules/purchasing/service";
+import { getLeadTimeLog, type LeadTimeLog } from "@/modules/tracking/service";
 import { prisma } from "@/lib/prisma";
 import type { ShortageSummary } from "@/types/inventory";
+import type { Prisma } from "@prisma/client";
 
 const LAMBENTI_ASSEMBLED_PACKAGE_SKU = "LAMBENTI_PACKAGE";
 const LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS = [/lambenti\s+assembled\s+package/i, /complete\s+package\s+assembly/i];
@@ -15,7 +18,7 @@ export async function getDashboardSummary() {
   const [activeItems, activeFinishedBoms, reservations] = await Promise.all([
     prisma.item.findMany({
       where: { lifecycleStatus: { not: "OBSOLETE" } },
-      select: { id: true, sku: true, description: true, category: true }
+      select: { id: true, sku: true, description: true, category: true, useGroupOverride: true }
     }),
     prisma.bOM.findMany({
       where: {
@@ -48,6 +51,7 @@ export async function getDashboardSummary() {
         sku: reservation.item.sku,
         description: reservation.item.description,
         category: reservation.item.category,
+        useGroupOverride: reservation.item.useGroupOverride,
         demand: reservation.quantity,
         available,
         shortage: Math.max(reservation.quantity - available, 0)
@@ -68,29 +72,19 @@ export async function getDashboardSummary() {
     : activeFinishedBoms.filter((bom) => isLambentiAssembledPackageItem(bom.parentItem));
   const buildCapacity = summarizeBuildCapacity(packageBoms, stockByItemId);
 
-  const pricedItems = await prisma.item.findMany({
-    where: { lifecycleStatus: { not: "OBSOLETE" }, estimatedUnitCost: { not: null } },
-    include: { stockMovements: { select: { movementType: true, quantity: true } } },
-    orderBy: { sku: "asc" }
-  });
-
-  const pricedItemInputs = pricedItems.map((item) => ({
-    itemId: item.id,
-    sku: item.sku,
-    description: item.description,
-    unitCost: item.estimatedUnitCost === null ? null : Number(item.estimatedUnitCost),
-    currency: item.costCurrency,
-    movements: item.stockMovements
-  }));
+  const pricedItemInputs = await getActivePricedItemValuationInputs();
   const itemValuations = calculatePricedItemValuations(pricedItemInputs);
   const inventoryValuation = itemValuations.totalValue;
   const inventoryValueByCategory = summarizeInventoryValueByCategory(
     itemValuations.rows,
-    new Map(pricedItems.map((item) => [item.id, item.category]))
+    itemCategoryById
   );
 
-  const recommendations = await getPurchaseRecommendations();
-  const incomingOrders = await getIncomingOrders();
+  const [recommendations, incomingOrders, leadTimeLog] = await Promise.all([
+    getPurchaseRecommendations(),
+    getIncomingOrders(),
+    getLeadTimeLog()
+  ]);
   const [pendingPurchaseRequests, invoicesNeedingAction, openAutomationFindings, failedAutomationRuns] = await Promise.all([
     prisma.purchaseRequest.findMany({
       where: { status: { in: ["DRAFT", "PENDING_APPROVAL"] } },
@@ -120,7 +114,7 @@ export async function getDashboardSummary() {
     ...recommendations.slice(0, 5).map((item) => ({
       kind: "Suggested PO",
       label: `Draft/order ${item.recommendedOrderQuantity} × ${item.sku}`,
-      reason: `Available ${item.available}; reorder point ${item.reorderPoint}; target ${item.targetStock}.`,
+      reason: `${item.priority} priority · ${item.leadTimeDays}d lead time · covered supply ${item.coveredAvailable}; reorder gap ${item.supplyGapToReorder}; target ${item.targetStock}.`,
       href: "/purchasing/recommendations"
     })),
     ...pendingPurchaseRequests.map((request) => ({
@@ -163,12 +157,17 @@ export async function getDashboardSummary() {
     launchReadiness,
     buildCapacity,
     lowStockItems,
+    leadTimeLog,
     inventoryValueByCategory,
     operations: {
       recommendationRows: recommendations.length,
       incomingOrders: incomingOrders.length,
       reviewActions: humanReviewActions.length,
-      automationWork: openAutomationFindings.length + failedAutomationRuns.length
+      automationWork: openAutomationFindings.length + failedAutomationRuns.length,
+      recommendationSummaries: recommendations.slice(0, 4).map((item) => `${item.priority}: ${item.sku} · ${item.leadTimeDays}d lead · gap ${item.supplyGapToReorder}`),
+      incomingSummaries: incomingOrders.slice(0, 4).map((order) => `${order.supplier.name} · ${order.lines.map((line) => `${line.quantity - line.receivedQuantity}×${line.item.sku}`).join(", ") || "no open lines"}`),
+      reviewActionSummaries: humanReviewActions.slice(0, 4).map((action) => `${action.kind}: ${action.label}`),
+      automationSummaries: [...openAutomationFindings.map((finding) => `${finding.severity}: ${finding.title}`), ...failedAutomationRuns.map((run) => `${run.kind}: ${run.errorMessage ?? "failed"}`)].slice(0, 4)
     }
   });
 
@@ -263,7 +262,7 @@ export function summarizeLaunchReadiness(input: LaunchReadinessInput) {
       nextActions.push({
         label: "Clear review queue",
         reason: `${input.reviewActionCount} human review action(s) remain across purchasing, invoices, or automation.`,
-        href: "/accounting/invoices",
+        href: "/#human-approval-queue",
         mutationBoundary: READ_ONLY_LAUNCH_BOUNDARY
       });
     }
@@ -300,6 +299,7 @@ export type DashboardGraphInput = {
     reorderPoint: number;
     targetStock: number;
   }>;
+  leadTimeLog: LeadTimeLog;
   inventoryValueByCategory: Array<{
     category: string;
     label: string;
@@ -310,6 +310,10 @@ export type DashboardGraphInput = {
     incomingOrders: number;
     reviewActions: number;
     automationWork: number;
+    recommendationSummaries?: string[];
+    incomingSummaries?: string[];
+    reviewActionSummaries?: string[];
+    automationSummaries?: string[];
   };
 };
 
@@ -347,11 +351,27 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
     .sort((left, right) => left.coveragePercent - right.coveragePercent || right.shortageToReorder - left.shortageToReorder || left.sku.localeCompare(right.sku))
     .slice(0, 8);
 
+  const leadTimeRows = input.leadTimeLog.items
+    .map((item) => ({
+      sku: item.itemSku,
+      description: item.itemDescription,
+      days: item.currentLeadTimeDays,
+      source: item.leadTimeSource,
+      sampleCount: item.sampleCount,
+      label: item.leadTimeLabel
+    }))
+    .sort((left, right) => right.days - left.days || left.sku.localeCompare(right.sku));
+  const leadTimeMaxDays = Math.max(1, ...leadTimeRows.map((item) => item.days));
+  const leadTimeBars = leadTimeRows.slice(0, 10).map((item) => ({
+    ...item,
+    percentOfMax: boundedPercent(item.days, leadTimeMaxDays)
+  }));
+
   const operationQueue = [
-    { label: "Recommendations", count: input.operations.recommendationRows, href: "/purchasing/recommendations" },
-    { label: "Incoming Orders", count: input.operations.incomingOrders, href: "/incoming" },
-    { label: "Review Actions", count: input.operations.reviewActions, href: "/accounting/invoices" },
-    { label: "Automation", count: input.operations.automationWork, href: "/automation" }
+    { label: "Recommendations", count: input.operations.recommendationRows, href: "/purchasing/recommendations", summaries: input.operations.recommendationSummaries ?? [] },
+    { label: "Incoming Orders", count: input.operations.incomingOrders, href: "/incoming", summaries: input.operations.incomingSummaries ?? [] },
+    { label: "Review Actions", count: input.operations.reviewActions, href: "/#human-approval-queue", summaries: input.operations.reviewActionSummaries ?? [] },
+    { label: "Automation", count: input.operations.automationWork, href: "/automation", summaries: input.operations.automationSummaries ?? [] }
   ];
   const operationMax = Math.max(1, ...operationQueue.map((item) => item.count));
   const operationsFlow = operationQueue.map((item) => ({
@@ -373,6 +393,7 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
     launchCoverageSegments,
     componentCapacityBars,
     stockPressureBars,
+    leadTimeBars,
     operationsFlow,
     valuationMix
   };
@@ -429,6 +450,7 @@ type DashboardItemOption = {
   sku: string;
   description: string;
   category: string;
+  useGroupOverride?: string | null;
 };
 
 type ActiveFinishedBom = {
@@ -436,7 +458,7 @@ type ActiveFinishedBom = {
   parentItem: DashboardItemOption;
   lines: Array<{
     componentItemId: string;
-    quantity: number;
+    quantity: Prisma.Decimal | number;
     componentItem: { sku: string; description: string };
   }>;
 };
@@ -456,12 +478,13 @@ function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockBy
   const candidates = activeFinishedBoms.map((bom) => {
     const componentCapacities = bom.lines.map((line) => {
       const available = stockByItemId.get(line.componentItemId)?.available ?? 0;
+      const requiredPerBuild = Number(line.quantity);
       return {
         sku: line.componentItem.sku,
         description: line.componentItem.description,
-        requiredPerBuild: line.quantity,
+        requiredPerBuild,
         available,
-        capacity: Math.floor(available / line.quantity)
+        capacity: requiredPerBuild > 0 ? Math.floor(available / requiredPerBuild) : 0
       };
     });
     const bottleneck = componentCapacities.reduce<typeof componentCapacities[number] | undefined>((lowest, current) => {

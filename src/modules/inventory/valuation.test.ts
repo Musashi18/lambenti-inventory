@@ -108,6 +108,26 @@ describe("calculatePricedItemValuations", () => {
     expect(valuation.totalValue).toBe(17.5);
   });
 
+  it("uses the stored 4-decimal unit price for valuation while currency value remains cents-rounded", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "priced-high-resolution-led",
+        sku: "LED-HIGH-RES",
+        description: "High-resolution priced LED strip",
+        unitCost: 1.2345,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 3 }]
+      }
+    ]);
+
+    expect(valuation.rows[0]).toMatchObject({
+      quantity: 3,
+      unitCost: 1.2345,
+      value: 3.7
+    });
+    expect(valuation.totalValue).toBe(3.7);
+  });
+
   it("normalizes CAD item costs into USD before valuing inventory", () => {
     const valuation = calculatePricedItemValuations([
       {
@@ -132,5 +152,43 @@ describe("calculatePricedItemValuations", () => {
       }
     ]);
     expect(valuation.totalValue).toBe(22.5);
+  });
+
+  it("sorts priced valuation rows by the shared item use-group ordering before SKU", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "priced-led",
+        sku: "LED-COB-12V",
+        description: "Warm LED strip",
+        category: "COMPONENT",
+        unitCost: 1,
+        currency: "USD",
+        movements: []
+      },
+      {
+        itemId: "priced-finished",
+        sku: "LAMBENTI-BASIC",
+        description: "Finished Lambenti build",
+        category: "FINISHED_GOOD",
+        unitCost: 20,
+        currency: "USD",
+        movements: []
+      },
+      {
+        itemId: "priced-enclosure",
+        sku: "ENC-SHELL",
+        description: "Outer enclosure shell",
+        category: "RAW_MATERIAL",
+        unitCost: 4,
+        currency: "USD",
+        movements: []
+      }
+    ]);
+
+    expect(valuation.rows.map((row) => row.sku)).toEqual([
+      "LAMBENTI-BASIC",
+      "ENC-SHELL",
+      "LED-COB-12V"
+    ]);
   });
 });

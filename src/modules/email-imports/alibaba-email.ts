@@ -4,6 +4,7 @@ import { createInvoiceFromPurchaseOrder } from "@/modules/accounting/invoices";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { DEFAULT_CURRENCY, convertToUsd, isUsdConversionSupported } from "@/modules/currency";
+import { calculateLandedOrderLineCosts } from "@/modules/inventory/unit-cost-engine";
 import { canonicalSupplierIdentityKey, isValidSupplierIdentityName } from "@/modules/suppliers/service";
 
 type ParsedAlibabaEmail = {
@@ -1622,22 +1623,13 @@ function parseAlibabaProductBlocks(compact: string, fallbackCurrency: string): P
 
 function allocateLandedCosts(lines: ParsedAlibabaLine[], shippingCost?: number, taxCost?: number) {
   if (lines.length === 0) return lines;
-  const subtotal = lines.reduce((total, line) => total + (line.lineTotal ?? ((line.unitPrice ?? 0) * line.quantity)), 0);
-  if (!subtotal) return lines;
-
-  return lines.map((line) => {
-    const baseTotal = line.lineTotal ?? ((line.unitPrice ?? 0) * line.quantity);
-    const share = baseTotal / subtotal;
-    const shippingAllocated = shippingCost ? roundMoney(shippingCost * share) : undefined;
-    const taxAllocated = taxCost ? roundMoney(taxCost * share) : undefined;
-    const landedTotal = baseTotal + (shippingAllocated ?? 0) + (taxAllocated ?? 0);
-    return {
-      ...line,
-      shippingAllocated,
-      taxAllocated,
-      landedUnitCost: line.quantity > 0 ? roundUnitCost(landedTotal / line.quantity) : line.unitPrice
-    };
-  });
+  const costs = calculateLandedOrderLineCosts(lines, { shipping: shippingCost, tax: taxCost });
+  return lines.map((line, index) => ({
+    ...line,
+    shippingAllocated: costs[index]?.shippingAllocated || undefined,
+    taxAllocated: costs[index]?.taxAllocated || undefined,
+    landedUnitCost: costs[index]?.landedUnitCost ?? line.unitPrice
+  }));
 }
 
 function fallbackLine(text: string, currency: string): ParsedAlibabaLine {

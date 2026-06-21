@@ -15,6 +15,8 @@ type ItemOption = {
   sku: string;
   description: string;
   category: string;
+  useGroupOverride?: string | null;
+  unit: string;
 };
 
 export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOption[]; buildableItemIds?: string[] }) {
@@ -38,6 +40,8 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
     () => movementType === "BUILD" ? sortedItems.filter((item) => buildableItemIdSet.has(item.id)) : sortedItems,
     [buildableItemIdSet, sortedItems, movementType]
   );
+  const selectedItem = filteredItems.find((item) => item.id === selectedItemId);
+  const isMeterMovement = movementType !== "BUILD" && selectedItem?.unit === "METER";
 
   useEffect(() => {
     if (filteredItems.length === 0) {
@@ -132,11 +136,15 @@ export function MovementForm({ items, buildableItemIds = [] }: { items: ItemOpti
         <input
           name="quantity"
           type="number"
+          step={isMeterMovement ? "0.0001" : "1"}
           placeholder="Quantity"
           className="w-full rounded-md border px-3 py-2"
           defaultValue={state.success ? "" : state.values.quantity}
           required
         />
+        <p className="text-xs text-slate-500">
+          {isMeterMovement ? "Meter-measured items accept decimals up to 4 places, e.g. 1.5 m." : "Piece-counted and build movements require whole-number quantities."}
+        </p>
         <FieldErrors errors={state.fieldErrors.quantity} />
       </label>
 

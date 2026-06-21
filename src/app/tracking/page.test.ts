@@ -10,6 +10,7 @@ describe("Tracking page source contract", () => {
     const pageSource = readFileSync(join(__dirname, "page.tsx"), "utf8");
     const actionsSource = readFileSync(join(__dirname, "actions.ts"), "utf8");
     const autoRefreshSource = readFileSync(join(__dirname, "tracking-auto-refresh.tsx"), "utf8");
+    const trackingDataDisclosureSource = readFileSync(join(__dirname, "tracking-data-disclosure.tsx"), "utf8");
 
     expect(pageSource).toContain("Tracking Workbench");
     expect(pageSource).toContain("What Needs Attention");
@@ -28,11 +29,13 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("Evidence Constellation");
     expect(pageSource).toContain("ShipmentProgressRail");
     expect(pageSource).toContain("Shipment Progress");
-    expect(pageSource).toContain("Tracking Data");
-    expect(pageSource).toContain("Expand Tracking Data");
+    expect(trackingDataDisclosureSource).toContain("Tracking Data");
+    expect(pageSource).toContain("TrackingDataDisclosure");
+    expect(pageSource).toContain("trackingDataReadSignature");
+    expect(trackingDataDisclosureSource).toContain("Expand Tracking Data");
     expect(pageSource).toContain("Shipment Details");
     expect(pageSource).toContain("Expand Details");
-    expect(pageSource).toContain("Package movements first; technical details are nested below.");
+    expect(trackingDataDisclosureSource).toContain("Package movements first; technical details are nested below.");
     expect(pageSource).toContain("Duplicate shipment screen: showing active stream");
     expect(pageSource).toContain("Linked Shipments");
     expect(pageSource).toContain("Raw Provider Status Payload");
@@ -66,6 +69,13 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("getLeadTimeLog");
     expect(pageSource).toContain("dashboard.deliveredRows");
     expect(pageSource).toContain("refreshAllTrackingAction");
+    expect(pageSource).toContain("Refresh");
+    expect(pageSource).not.toContain("Refresh Due Statuses");
+    expect(pageSource.indexOf("<OpenShipments rows={dashboard.rows} />")).toBeLessThan(pageSource.indexOf("<TrackingAttention dashboard={dashboard} />"));
+    expect(pageSource).toContain("Manual primary");
+    expect(pageSource).toContain("Catalog/default");
+    expect(pageSource).toContain("completed receiving/shipping samples stay as evidence without overriding a manual value");
+    expect(pageSource).not.toContain("observed weighted averages");
     expect(actionsSource).toContain("refreshAllTrackingAction");
     expect(autoRefreshSource).toContain("/api/tracking/refresh");
     expect(autoRefreshSource).toContain("x-lambenti-agent-id");
@@ -77,10 +87,19 @@ describe("Tracking page source contract", () => {
     expect(autoRefreshSource).toContain("tracking-page-heartbeat");
     expect(autoRefreshSource).toContain("router.refresh");
     expect(autoRefreshSource).toContain("setInterval");
+    expect(autoRefreshSource).toContain("useState<number | null>(null)");
+    expect(autoRefreshSource).toContain("nowMs === null");
+    expect(autoRefreshSource).not.toContain("useState(() => Date.now())");
     expect(pageSource).toContain("Fix Failed");
     expect(pageSource).toContain("Refresh Due");
     expect(pageSource).toContain("Link Evidence");
     expect(pageSource).toContain("Review Open");
     expect(pageSource).toContain("Last Good Refresh");
+    expect(trackingDataDisclosureSource).toContain("lambenti:tracking-data-read-signature");
+    expect(trackingDataDisclosureSource).toContain("onToggle");
+    expect(trackingDataDisclosureSource).toContain("Unread");
+    expect(trackingDataDisclosureSource).toContain("Reviewed");
+    expect(trackingDataDisclosureSource).toContain("Expand to review");
+    expect(trackingDataDisclosureSource).toContain("window.localStorage.setItem");
   });
 });

@@ -84,9 +84,9 @@ describe("createStockMovement integration", () => {
     expect(movement).toMatchObject({
       itemId: item.id,
       stockLotId: lot.id,
-      movementType: MovementType.RECEIVE,
-      quantity: 5
+      movementType: MovementType.RECEIVE
     });
+    expect(Number(movement.quantity)).toBe(5);
 
     const summary = (await getStockSummaries()).find((row) => row.itemId === item.id);
     expect(summary).toMatchObject({ onHand: 5, reserved: 0, available: 5 });
@@ -136,9 +136,9 @@ describe("createStockMovement integration", () => {
     });
     expect(reversal).toMatchObject({
       stockLotId: lot.id,
-      movementType: MovementType.CONSUME,
-      quantity: 2
+      movementType: MovementType.CONSUME
     });
+    expect(Number(reversal.quantity)).toBe(2);
     await expect(prisma.auditLog.count({
       where: { action: "VOID_STOCK_MOVEMENT", entityType: "StockMovement", entityId: original.id }
     })).resolves.toBe(1);

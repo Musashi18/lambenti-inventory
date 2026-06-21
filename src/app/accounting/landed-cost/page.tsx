@@ -55,7 +55,7 @@ export default async function LandedCostPage({ searchParams }: { searchParams: P
                     <div>customs/evidence paid {money(row.currency, row.allocatedAttachedLandedCostEvidence)}</div>
                     {row.attachedLandedCostEvidenceRefs.length ? <div className="mt-1 text-[11px] text-slate-500">{row.attachedLandedCostEvidenceRefs.join("; ")}</div> : null}
                   </td>
-                  <td className="px-4 py-3">{money(row.currency, row.landedTotal)}<div className="text-xs text-slate-500">unit {row.currency}{row.landedUnitCost.toFixed(4)}</div></td>
+                  <td className="px-4 py-3">{money(row.currency, row.landedTotal)}<div className="text-xs text-slate-500">unit {row.currency}{row.landedUnitCost.toFixed(2)}</div></td>
                   <td className="px-4 py-3 text-xs text-amber-700">{row.warnings.length ? row.warnings.join("; ") : "OK"}</td>
                 </tr>
               ))}

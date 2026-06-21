@@ -133,10 +133,13 @@ export type LeadTimeLogItem = {
   itemSku: string;
   itemDescription: string;
   currentLeadTimeDays: number;
+  manualLeadTimeDays: number | null;
   averageLeadTimeDays: number;
   weightedAverageLeadTimeDays: number;
   averageShipTimeDays: number | null;
   averageShipTimeLabel: string | null;
+  leadTimeSource: "OBSERVED" | "MANUAL" | "CATALOG";
+  leadTimeLabel: string;
   sampleCount: number;
   totalQuantityOrdered: number;
   totalQuantityReceived: number;
@@ -256,7 +259,9 @@ export async function captureManualTrackingNumbers(input: {
   now?: Date;
 }) {
   const now = input.now ?? new Date();
-  const externalOrderId = normalizeExternalOrderId(input.externalOrderId) ?? extractExternalOrderIdFromText(input.rawText);
+  const sourceUrl = blankToUndefined(input.sourceUrl ?? undefined) ?? extractFirstUrl(input.rawText);
+  const evidenceText = [input.rawText, sourceUrl].filter(Boolean).join("\n");
+  const externalOrderId = normalizeExternalOrderId(input.externalOrderId) ?? extractExternalOrderIdFromText(evidenceText);
   const excluded = new Set([externalOrderId].filter((value): value is string => Boolean(value)).map(normalizeTrackingNumber));
   const trackingNumbers = extractManualTrackingNumbersFromText(input.rawText)
     .filter((value) => !excluded.has(value));
@@ -266,9 +271,9 @@ export async function captureManualTrackingNumbers(input: {
     externalOrderId,
     purchaseOrderId: blankToUndefined(input.purchaseOrderId ?? undefined),
     supplierName: blankToUndefined(input.supplierName ?? undefined),
-    rawText: input.rawText
+    rawText: evidenceText,
+    sourceUrl
   });
-  const sourceUrl = blankToUndefined(input.sourceUrl ?? undefined) ?? extractFirstUrl(input.rawText);
   const source = blankToUndefined(input.source) ?? "MANUAL_DROPBOX";
   const records = [];
   let saved = 0;
@@ -571,7 +576,8 @@ export async function refreshTrackingNumber(input: {
         provider: config.provider ?? "UNCONFIGURED",
         refreshStatus: "CONFIG_REQUIRED",
         refreshError: trackingConfigurationMessage(config),
-        lastCheckedAt: now
+        lastCheckedAt: now,
+        nextRefreshAt: addMinutes(now, config.refreshIntervalMinutes ?? DEFAULT_REFRESH_INTERVAL_MINUTES)
       }
     });
     return updated;
@@ -656,23 +662,42 @@ export async function refreshDueTrackingNumbers(input: {
   config?: TrackingServiceConfig;
   fetcher?: FetchLike;
 }) {
+  return refreshTrackingRows({ ...input, dueOnly: true, limit: input.limit ?? 25 });
+}
+
+export async function refreshActiveTrackingNumbers(input: {
+  actorId: string;
+  now?: Date;
+  limit?: number;
+  config?: TrackingServiceConfig;
+  fetcher?: FetchLike;
+}) {
+  return refreshTrackingRows({ ...input, dueOnly: false, limit: input.limit ?? 100 });
+}
+
+async function refreshTrackingRows(input: {
+  actorId: string;
+  now?: Date;
+  limit: number;
+  dueOnly: boolean;
+  config?: TrackingServiceConfig;
+  fetcher?: FetchLike;
+}) {
   const now = input.now ?? new Date();
-  const limit = input.limit ?? 25;
-  const totalCandidates = await prisma.trackingNumber.count({
-    where: { currentStatus: { not: "DELIVERED" } }
-  });
-  const due = await prisma.trackingNumber.findMany({
+  const activeWhere = activeTrackingNumberWhere();
+  const totalCandidates = await prisma.trackingNumber.count({ where: activeWhere });
+  const rows = await prisma.trackingNumber.findMany({
     where: {
-      currentStatus: { not: "DELIVERED" },
-      OR: [{ nextRefreshAt: null }, { nextRefreshAt: { lte: now } }]
+      ...activeWhere,
+      ...(input.dueOnly ? { OR: [{ nextRefreshAt: null }, { nextRefreshAt: { lte: now } }] } : {})
     },
-    orderBy: [{ nextRefreshAt: "asc" }, { updatedAt: "asc" }],
-    take: limit
+    orderBy: input.dueOnly ? [{ nextRefreshAt: "asc" }, { updatedAt: "asc" }] : [{ updatedAt: "desc" }, { capturedAt: "desc" }],
+    take: input.limit
   });
 
   let refreshed = 0;
   let failed = 0;
-  for (const row of due) {
+  for (const row of rows) {
     const result = await refreshTrackingNumber({
       trackingNumber: row.trackingNumber,
       actorId: input.actorId,
@@ -680,10 +705,10 @@ export async function refreshDueTrackingNumbers(input: {
       config: input.config,
       fetcher: input.fetcher
     });
-    if (result.refreshStatus === "SUCCESS") refreshed += 1;
+    if (result.refreshStatus === "SUCCESS" || result.refreshStatus === "CONFIG_REQUIRED") refreshed += 1;
     else failed += 1;
   }
-  return { scanned: due.length, refreshed, failed, skipped: Math.max(0, totalCandidates - due.length) };
+  return { scanned: rows.length, refreshed, failed, skipped: Math.max(0, totalCandidates - rows.length) };
 }
 
 export async function getTrackingDashboard(input: { now?: Date; config?: TrackingServiceConfig } = {}) {
@@ -765,7 +790,7 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
     };
   });
 
-  const activeRows = screenDuplicateOrderShipments(mappedRows.filter((row) => row.currentStatus !== "DELIVERED"));
+  const activeRows = screenDuplicateOrderShipments(mappedRows.filter((row) => isActiveTrackingStatus(row.currentStatus)));
   const deliveredRows = mappedRows.filter((row) => row.currentStatus === "DELIVERED");
 
   return {
@@ -778,7 +803,7 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
     },
     summary: {
       total: rows.length,
-      due: rows.filter((row) => row.currentStatus !== "DELIVERED" && (!row.nextRefreshAt || row.nextRefreshAt <= now)).length,
+      due: rows.filter((row) => isActiveTrackingStatus(row.currentStatus) && (!row.nextRefreshAt || row.nextRefreshAt <= now)).length,
       delivered: rows.filter((row) => row.currentStatus === "DELIVERED").length,
       needsConfiguration: rows.filter((row) => row.refreshStatus === "CONFIG_REQUIRED").length,
       failed: rows.filter((row) => row.refreshStatus === "FAILED").length
@@ -856,7 +881,7 @@ function trackingRowFirstSeenTime(row: TrackingDashboardRow) {
 export async function getTrackingRefreshHeartbeat(input: { now?: Date; config?: TrackingServiceConfig } = {}) {
   const now = input.now ?? new Date();
   const rows = await prisma.trackingNumber.findMany({
-    where: { currentStatus: { not: "DELIVERED" } },
+    where: activeTrackingNumberWhere(),
     select: { currentStatus: true, lastCheckedAt: true, nextRefreshAt: true }
   });
   return trackingHeartbeatFromRows(rows, now);
@@ -866,7 +891,7 @@ function trackingHeartbeatFromRows(
   rows: Array<{ currentStatus: string; lastCheckedAt: Date | null; nextRefreshAt: Date | null }>,
   now: Date
 ) {
-  const refreshableRows = rows.filter((row) => normalizeTrackingStatus(row.currentStatus) !== "DELIVERED");
+  const refreshableRows = rows.filter((row) => isActiveTrackingStatus(row.currentStatus));
   const lastCheckedAt = maxDate(refreshableRows.map((row) => row.lastCheckedAt));
   const hasDueNow = refreshableRows.some((row) => !row.nextRefreshAt || row.nextRefreshAt <= now);
   const futureNextRefreshAt = minDate(refreshableRows.map((row) => row.nextRefreshAt).filter((value): value is Date => Boolean(value)));
@@ -874,6 +899,15 @@ function trackingHeartbeatFromRows(
     lastCheckedAt,
     nextRefreshAt: refreshableRows.length === 0 ? null : (hasDueNow ? now : futureNextRefreshAt)
   };
+}
+
+function isActiveTrackingStatus(status: string) {
+  const normalized = normalizeTrackingStatus(status);
+  return normalized !== "DELIVERED" && normalized !== "ARCHIVED";
+}
+
+function activeTrackingNumberWhere() {
+  return { NOT: { currentStatus: { in: ["DELIVERED", "ARCHIVED"] } } };
 }
 
 function minDate(values: Date[]) {
@@ -896,15 +930,26 @@ export async function getLeadTimeSummaryIndex(): Promise<LeadTimeSummaryIndex> {
 }
 
 export async function getLeadTimeLog(): Promise<LeadTimeLog> {
-  const samples = await buildLeadTimeSamples();
+  const [samples, activeItems] = await Promise.all([
+    buildLeadTimeSamples(),
+    prisma.item.findMany({
+      where: { lifecycleStatus: { not: "OBSOLETE" } },
+      select: { id: true, sku: true, description: true, leadTimeDays: true, manualLeadTimeDays: true },
+      orderBy: { sku: "asc" }
+    })
+  ]);
   const grouped = new Map<string, LeadTimeSample[]>();
   for (const sample of samples) {
     grouped.set(sample.itemId, [...(grouped.get(sample.itemId) ?? []), sample]);
   }
 
-  const items: LeadTimeLogItem[] = Array.from(grouped.values())
-    .map((group) => buildLeadTimeLogItem(group))
-    .sort((a, b) => a.itemSku.localeCompare(b.itemSku));
+  const items: LeadTimeLogItem[] = activeItems
+    .map((item) => {
+      const group = grouped.get(item.id);
+      if (group?.length) return buildLeadTimeLogItem(group);
+      return buildManualLeadTimeLogItem(item);
+    })
+    .sort((a, b) => b.currentLeadTimeDays - a.currentLeadTimeDays || a.itemSku.localeCompare(b.itemSku));
   const totalQuantityOrdered = samples.reduce((sum, sample) => sum + sample.quantityOrdered, 0);
   const averageLeadTimeDays = samples.length > 0
     ? roundDays(samples.reduce((sum, sample) => sum + sample.days, 0) / samples.length)
@@ -922,6 +967,64 @@ export async function getLeadTimeLog(): Promise<LeadTimeLog> {
     averageShipTimeDays,
     items
   };
+}
+
+export async function updateManualItemLeadTime(input: { itemId: string; leadTimeDays: number; actorId: string }) {
+  const leadTimeDays = Math.max(0, Math.round(input.leadTimeDays));
+  const item = await prisma.item.findUnique({
+    where: { id: input.itemId },
+    select: { id: true, sku: true, leadTimeDays: true, manualLeadTimeDays: true, preferredSupplierId: true }
+  });
+  if (!item) throw new Error("Item not found.");
+  if (item.leadTimeDays === leadTimeDays && item.manualLeadTimeDays === leadTimeDays) {
+    if (item.preferredSupplierId) await syncPreferredSupplierLeadTimeFromItem({ supplierId: item.preferredSupplierId, itemId: item.id, sku: item.sku, leadTimeDays, previousItemLeadTimeDays: item.leadTimeDays, actorId: input.actorId });
+    return item;
+  }
+
+  const updated = await prisma.item.update({
+    where: { id: item.id },
+    data: { leadTimeDays, manualLeadTimeDays: leadTimeDays },
+    select: { id: true, sku: true, leadTimeDays: true, preferredSupplierId: true }
+  });
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "UPDATE_ITEM_MANUAL_LEAD_TIME",
+    entityType: "Item",
+    entityId: item.id,
+    payload: {
+      sku: item.sku,
+      previousLeadTimeDays: item.leadTimeDays,
+      newLeadTimeDays: leadTimeDays,
+      boundary: "Manual planning lead time only; no purchase order, tracking, accounting, or stock movement was mutated. Manual lead time is primary for item planning; observed receiving/tracking samples are retained as evidence but do not overwrite this item while a manual value is recorded."
+    }
+  });
+  if (updated.preferredSupplierId) {
+    await syncPreferredSupplierLeadTimeFromItem({ supplierId: updated.preferredSupplierId, itemId: updated.id, sku: updated.sku, leadTimeDays, previousItemLeadTimeDays: item.leadTimeDays, actorId: input.actorId });
+  }
+  return updated;
+}
+
+async function syncPreferredSupplierLeadTimeFromItem(input: { supplierId: string; itemId: string; sku: string; leadTimeDays: number; previousItemLeadTimeDays: number; actorId: string }) {
+  const supplier = await prisma.supplier.findUnique({ where: { id: input.supplierId }, select: { id: true, leadTimeDays: true } });
+  if (!supplier || supplier.leadTimeDays === input.leadTimeDays) return false;
+  await prisma.supplier.update({ where: { id: supplier.id }, data: { leadTimeDays: input.leadTimeDays } });
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "UPDATE_SUPPLIER_LEAD_TIME_FROM_ITEM_MANUAL_LEAD_TIME",
+    entityType: "Supplier",
+    entityId: supplier.id,
+    payload: {
+      sourceItemId: input.itemId,
+      sourceSku: input.sku,
+      previousSupplierLeadTimeDays: supplier.leadTimeDays,
+      newSupplierLeadTimeDays: input.leadTimeDays,
+      previousItemLeadTimeDays: input.previousItemLeadTimeDays,
+      boundary: "Mirrors the item manual planning lead time onto the preferred supplier record for operator visibility. No purchase order, tracking refresh, accounting, or stock movement was mutated."
+    }
+  });
+  return true;
 }
 
 export async function syncLeadTimeAveragesForPurchaseOrder(
@@ -967,8 +1070,8 @@ export async function syncLeadTimeAveragesForPurchaseOrder(
   for (const itemId of unique(order.lines.map((line) => line.itemId))) {
     const summary = itemSummaries[itemId];
     if (!summary) continue;
-    const item = await prisma.item.findUnique({ where: { id: itemId }, select: { id: true, leadTimeDays: true } });
-    if (!item || item.leadTimeDays === summary.roundedDays) continue;
+    const item = await prisma.item.findUnique({ where: { id: itemId }, select: { id: true, leadTimeDays: true, manualLeadTimeDays: true } });
+    if (!item || item.manualLeadTimeDays !== null || item.leadTimeDays === summary.roundedDays) continue;
     await prisma.item.update({ where: { id: item.id }, data: { leadTimeDays: summary.roundedDays } });
     await writeAuditLog({
       actorType,
@@ -1032,6 +1135,7 @@ type LeadTimeSample = {
   itemSku: string;
   itemDescription: string;
   itemLeadTimeDays: number;
+  itemManualLeadTimeDays: number | null;
   externalOrderId: string | null;
   quantityOrdered: number;
   quantityReceived: number;
@@ -1066,7 +1170,7 @@ async function buildLeadTimeSamples(): Promise<LeadTimeSample[]> {
       },
       lines: {
         include: {
-          item: { select: { id: true, sku: true, description: true, leadTimeDays: true } },
+          item: { select: { id: true, sku: true, description: true, leadTimeDays: true, manualLeadTimeDays: true } },
           stockMovements: {
             where: { movementType: MovementType.RECEIVE },
             include: { stockLot: { select: { receivedAt: true } } }
@@ -1099,7 +1203,8 @@ async function buildLeadTimeSamples(): Promise<LeadTimeSample[]> {
         itemId: line.itemId,
         itemSku: line.item.sku,
         itemDescription: line.item.description,
-        itemLeadTimeDays: line.item.leadTimeDays,
+        itemLeadTimeDays: line.item.manualLeadTimeDays ?? line.item.leadTimeDays,
+        itemManualLeadTimeDays: line.item.manualLeadTimeDays,
         externalOrderId,
         quantityOrdered: line.quantity,
         quantityReceived: line.receivedQuantity,
@@ -1127,6 +1232,7 @@ function buildLeadTimeLogItem(group: LeadTimeSample[]): LeadTimeLogItem {
   const weightedAverageLeadTimeDays = totalQuantityOrdered > 0
     ? roundDays(group.reduce((sum, sample) => sum + sample.days * sample.quantityOrdered, 0) / totalQuantityOrdered)
     : averageLeadTimeDays;
+  const bottleneckLeadTimeDays = roundDays(Math.max(...group.map((sample) => sample.days)));
   const shippingSamples = group.filter((sample) => sample.shipTimeMs !== null);
   const averageShipTimeDays = shippingSamples.length > 0
     ? roundDays(shippingSamples.reduce((sum, sample) => sum + (sample.shipTimeMs ?? 0) / 86_400_000, 0) / shippingSamples.length)
@@ -1136,11 +1242,16 @@ function buildLeadTimeLogItem(group: LeadTimeSample[]): LeadTimeLogItem {
     itemId: first.itemId,
     itemSku: first.itemSku,
     itemDescription: first.itemDescription,
-    currentLeadTimeDays: first.itemLeadTimeDays,
+    currentLeadTimeDays: first.itemManualLeadTimeDays ?? bottleneckLeadTimeDays,
+    manualLeadTimeDays: first.itemManualLeadTimeDays,
     averageLeadTimeDays,
     weightedAverageLeadTimeDays,
     averageShipTimeDays,
     averageShipTimeLabel: averageShipTimeDays === null ? null : formatLeadTimeDays(averageShipTimeDays),
+    leadTimeSource: first.itemManualLeadTimeDays !== null ? "MANUAL" : "OBSERVED",
+    leadTimeLabel: first.itemManualLeadTimeDays !== null
+      ? `${formatLeadTimeDays(first.itemManualLeadTimeDays)} manual planning estimate · completed samples retained as evidence`
+      : `${formatLeadTimeDays(bottleneckLeadTimeDays)} observed bottleneck · ${sampleCount} completed sample${sampleCount === 1 ? "" : "s"}`,
     sampleCount,
     totalQuantityOrdered,
     totalQuantityReceived,
@@ -1167,6 +1278,30 @@ function buildLeadTimeLogItem(group: LeadTimeSample[]): LeadTimeLogItem {
         shipTimeLabel: sample.shipTimeLabel
       }))
       .sort((a, b) => b.endAt.getTime() - a.endAt.getTime())
+  };
+}
+
+function buildManualLeadTimeLogItem(item: { id: string; sku: string; description: string; leadTimeDays: number; manualLeadTimeDays: number | null }): LeadTimeLogItem {
+  const currentLeadTimeDays = item.manualLeadTimeDays ?? item.leadTimeDays;
+  const hasManualLeadTime = item.manualLeadTimeDays !== null;
+  return {
+    itemId: item.id,
+    itemSku: item.sku,
+    itemDescription: item.description,
+    currentLeadTimeDays,
+    manualLeadTimeDays: item.manualLeadTimeDays,
+    averageLeadTimeDays: currentLeadTimeDays,
+    weightedAverageLeadTimeDays: currentLeadTimeDays,
+    averageShipTimeDays: null,
+    averageShipTimeLabel: null,
+    leadTimeSource: hasManualLeadTime ? "MANUAL" : "CATALOG",
+    leadTimeLabel: hasManualLeadTime
+      ? `${currentLeadTimeDays}d manual planning estimate · no completed sample yet`
+      : `${currentLeadTimeDays}d catalog/default planning lead time · no completed sample yet`,
+    sampleCount: 0,
+    totalQuantityOrdered: 0,
+    totalQuantityReceived: 0,
+    entries: []
   };
 }
 
@@ -1210,19 +1345,21 @@ function summarizeLeadTimes(samples: LeadTimeSample[], key: "itemId" | "supplier
   }
   for (const [id, group] of grouped.entries()) {
     const averageDays = group.reduce((sum, sample) => sum + sample.days, 0) / group.length;
+    const bottleneckDays = Math.max(...group.map((sample) => sample.days));
     const lastSampleAt = group.reduce((latest, sample) => sample.endAt > latest ? sample.endAt : latest, group[0].endAt);
     byId[id] = {
       averageDays: Number(averageDays.toFixed(1)),
-      roundedDays: Math.max(0, Math.round(averageDays)),
+      roundedDays: Math.max(0, Math.round(bottleneckDays)),
       sampleCount: group.length,
       lastSampleAt: lastSampleAt.toISOString(),
-      label: `${Number(averageDays.toFixed(1))}d avg · ${group.length} sample${group.length === 1 ? "" : "s"}`
+      label: `${Number(bottleneckDays.toFixed(1))}d bottleneck · avg ${Number(averageDays.toFixed(1))}d · ${group.length} sample${group.length === 1 ? "" : "s"}`
     };
   }
   return byId;
 }
 
 function computeTrackingLeadTime(row: {
+  currentStatus: string;
   deliveredAt: Date | null;
   lastEventAt: Date | null;
   purchaseOrder: null | {
@@ -1242,7 +1379,7 @@ function computeTrackingLeadTime(row: {
   const receivedAt = earliestDate(row.purchaseOrder?.lines.flatMap((line) =>
     line.stockMovements.map((movement) => movement.stockLot?.receivedAt ?? movement.createdAt)
   ) ?? []);
-  const deliveredAt = row.deliveredAt ?? row.lastEventAt;
+  const deliveredAt = normalizeTrackingStatus(row.currentStatus) === "DELIVERED" ? row.deliveredAt ?? row.lastEventAt : null;
   const endAt = receivedAt ?? deliveredAt;
   if (!endAt || endAt < startAt) return { startAt, endAt: null, endSource: null, days: null, label: null };
 
@@ -1267,9 +1404,9 @@ function earliestDate(values: Array<Date | null | undefined>) {
 function extractExternalOrderIdFromText(text: string) {
   const normalized = String(text ?? "");
   const patterns = [
-    /(?:alibaba\s*)?order\s*(?:number|no\.?|id|#)?\s*[:#-]?\s*(30\d{10,24})/i,
-    /[?&](?:orderId|orderIdStr|tradeOrderId)=(30\d{10,24})/i,
-    /\b(30\d{10,24})\b/
+    /(?:alibaba\s*)?order\s*(?:number|no\.?|id|#)?\s*[:#-]?\s*([A-Za-z0-9-]*30\d{10,24}[A-Za-z0-9-]*)/i,
+    /[?&](?:orderId|orderIdStr|tradeOrderId)=([A-Za-z0-9-]*30\d{10,24}[A-Za-z0-9-]*)/i,
+    /(?<![A-Za-z0-9-])([A-Za-z0-9-]*30\d{10,24}[A-Za-z0-9-]*)(?![A-Za-z0-9-])/
   ];
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
@@ -1293,6 +1430,7 @@ async function resolveManualTrackingOrderLink(input: {
   purchaseOrderId?: string;
   supplierName?: string;
   rawText?: string;
+  sourceUrl?: string;
 }) {
   const selectedOrder = input.purchaseOrderId
     ? await prisma.purchaseOrder.findUnique({
@@ -1305,13 +1443,135 @@ async function resolveManualTrackingOrderLink(input: {
   const selectedImport = selectedOrder?.emailOrderImports.find((entry) => entry.externalOrderId === explicitExternalOrderId)
     ?? selectedOrder?.emailOrderImports[0]
     ?? null;
+  const inferred = selectedOrder || matched.purchaseOrderId
+    ? null
+    : await inferManualTrackingOrderLinkFromEvidence({ rawText: input.rawText, supplierName: input.supplierName, sourceUrl: input.sourceUrl });
 
   return {
-    externalOrderId: explicitExternalOrderId ?? matched.externalOrderId ?? selectedImport?.externalOrderId ?? null,
-    supplierName: input.supplierName ?? matched.supplierName ?? selectedOrder?.supplier.name ?? selectedImport?.supplierName ?? null,
-    purchaseOrderId: selectedOrder?.id ?? matched.purchaseOrderId ?? selectedImport?.purchaseOrderId ?? null,
-    emailOrderImportId: matched.emailOrderImportId ?? selectedImport?.id ?? null
+    externalOrderId: explicitExternalOrderId ?? matched.externalOrderId ?? selectedImport?.externalOrderId ?? inferred?.externalOrderId ?? null,
+    supplierName: input.supplierName ?? matched.supplierName ?? selectedOrder?.supplier.name ?? selectedImport?.supplierName ?? inferred?.supplierName ?? null,
+    purchaseOrderId: selectedOrder?.id ?? matched.purchaseOrderId ?? selectedImport?.purchaseOrderId ?? inferred?.purchaseOrderId ?? null,
+    emailOrderImportId: matched.emailOrderImportId ?? selectedImport?.id ?? inferred?.emailOrderImportId ?? null
   };
+}
+
+async function inferManualTrackingOrderLinkFromEvidence(input: { rawText?: string; supplierName?: string; sourceUrl?: string }) {
+  const haystack = normalizeManualLinkText([input.rawText, input.supplierName, input.sourceUrl].filter(Boolean).join("\n"));
+  if (haystack.length < 3) return null;
+
+  const orders = await prisma.purchaseOrder.findMany({
+    where: { status: { in: [PurchaseOrderStatus.ORDERED, PurchaseOrderStatus.PARTIALLY_RECEIVED, PurchaseOrderStatus.RECEIVED] } },
+    include: {
+      supplier: true,
+      emailOrderImports: { orderBy: { updatedAt: "desc" } },
+      lines: {
+        include: {
+          item: { select: { sku: true, description: true, manufacturerPartNo: true, supplierSku: true } }
+        }
+      }
+    },
+    orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+    take: 120
+  });
+
+  const scored = orders.map((order) => {
+    let score = 0;
+    const reasons: string[] = [];
+    const supplierScore = scoreManualTextMatch(haystack, [order.supplier.name]);
+    if (supplierScore > 0) {
+      score += Math.min(6, supplierScore + 2);
+      reasons.push("supplier");
+    }
+
+    for (const entry of order.emailOrderImports) {
+      if (entry.externalOrderId && containsManualTerm(haystack, normalizeManualLinkText(entry.externalOrderId))) {
+        score += 100;
+        reasons.push("external-order-id");
+      }
+      if (entry.sourceUrl && containsManualTerm(haystack, normalizeManualLinkText(entry.sourceUrl))) {
+        score += 20;
+        reasons.push("source-url");
+      }
+      if (entry.supplierName) {
+        const importSupplierScore = scoreManualTextMatch(haystack, [entry.supplierName]);
+        if (importSupplierScore > 0) score += Math.min(4, importSupplierScore + 1);
+      }
+    }
+
+    const lineTerms = unique(order.lines.flatMap((line) => manualTrackingItemTerms(line.item)));
+    const itemScore = scoreManualTextMatch(haystack, lineTerms);
+    if (itemScore > 0) {
+      score += Math.min(12, itemScore);
+      reasons.push("line-item");
+    }
+
+    return { order, score, reasons };
+  }).filter((candidate) => candidate.score >= 6);
+
+  scored.sort((left, right) => right.score - left.score || right.order.updatedAt.getTime() - left.order.updatedAt.getTime());
+  const best = scored[0];
+  const next = scored[1];
+  if (!best) return null;
+  if (next && best.score < 100 && best.score - next.score < 2) return null;
+
+  const selectedImport = best.order.emailOrderImports.find((entry) => entry.externalOrderId)
+    ?? best.order.emailOrderImports[0]
+    ?? null;
+  return {
+    externalOrderId: selectedImport?.externalOrderId ?? null,
+    supplierName: best.order.supplier.name ?? selectedImport?.supplierName ?? null,
+    purchaseOrderId: best.order.id,
+    emailOrderImportId: selectedImport?.id ?? null
+  };
+}
+
+function manualTrackingItemTerms(item: { sku: string; description: string; manufacturerPartNo: string | null; supplierSku: string | null }) {
+  const terms = new Set<string>();
+  for (const value of [item.sku, item.supplierSku, item.manufacturerPartNo]) {
+    const normalized = normalizeManualLinkText(value ?? "");
+    if (normalized.length >= 2) terms.add(normalized);
+    for (const token of normalized.split(" ")) if (token.length >= 3 && !MANUAL_LINK_STOP_WORDS.has(token)) terms.add(token);
+  }
+  const description = normalizeManualLinkText(item.description);
+  for (const token of description.split(" ")) {
+    if (token.length >= 4 && !MANUAL_LINK_STOP_WORDS.has(token)) terms.add(token);
+  }
+  if (/\b(?:power|adapter|psu)\b/.test(description) || /\bpsu\b/.test(normalizeManualLinkText(item.sku))) {
+    terms.add("power supply");
+    terms.add("psu");
+  }
+  return [...terms];
+}
+
+const MANUAL_LINK_STOP_WORDS = new Set(["with", "from", "order", "tracking", "number", "package", "shipment", "ship", "shipped", "delivered", "item", "items", "unit", "units", "certified"]);
+
+function scoreManualTextMatch(haystack: string, terms: string[]) {
+  let score = 0;
+  for (const rawTerm of terms) {
+    const term = normalizeManualLinkText(rawTerm);
+    if (term.length < 2 || MANUAL_LINK_STOP_WORDS.has(term)) continue;
+    if (!containsManualTerm(haystack, term)) continue;
+    if (/\d/.test(term) && term.length >= 6) score += 7;
+    else if (term.includes(" ")) score += 4;
+    else if (term.length >= 5) score += 2;
+    else score += 1;
+  }
+  return score;
+}
+
+function containsManualTerm(haystack: string, term: string) {
+  if (!term) return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(haystack);
+}
+
+function normalizeManualLinkText(value: string) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/https?:\/\//g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractPortalEvidenceDateFromText(text: string) {
@@ -1715,7 +1975,7 @@ function normalizeTrackingStatus(value: string) {
   if (normalized.includes("DELIVERED") || ["SIGNED", "SUCCESSFULLY_DELIVERED"].includes(normalized)) return "DELIVERED";
   if (normalized.includes("EXCEPTION") || ["FAILED", "RETURNED", "EXPIRED"].includes(normalized)) return normalized.includes("EXCEPTION") ? "EXCEPTION" : normalized;
   if (normalized.includes("TRANSIT") || normalized.includes("OUT_FOR_DELIVERY") || ["SHIPPED", "SHIPMENT_STARTED", "DISPATCHED"].includes(normalized)) return "IN_TRANSIT";
-  if (["INFO_RECEIVED", "INFORMATION_RECEIVED"].includes(normalized) || normalized.includes("INFORMATION_RECEIVED")) return "INFO_RECEIVED";
+  if (["INFO_RECEIVED", "INFORMATION_RECEIVED"].includes(normalized) || normalized.includes("INFORMATION_RECEIVED") || normalized.includes("RECEIVED_INFORMATION")) return "INFO_RECEIVED";
   if (["PENDING", "PRE_TRANSIT", "WAITING_FOR_PICKUP"].includes(normalized) || normalized.startsWith("DATA")) return "PENDING";
   return normalized;
 }
@@ -1745,6 +2005,11 @@ function hasInfoReceivedTrackingEntry(
     .some((value) => {
       const normalized = value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
       return /\binfo(?:rmation)? received\b/.test(normalized)
+        || /\breceived (?:the )?(?:shipment |carrier |tracking |electronic |data )?info(?:rmation)?\b/.test(normalized)
+        || /\bcarrier (?:has )?received (?:the )?(?:shipment |tracking |electronic |data )?info(?:rmation)?\b/.test(normalized)
+        || /\b(?:shipper|sender) created (?:a )?label\b/.test(normalized)
+        || /\blabel (?:has been )?created\b/.test(normalized)
+        || /\bshipment information sent\b/.test(normalized)
         || /\bdata information received\b/.test(normalized)
         || /\belectronic (?:information|data) (?:submitted|received)\b/.test(normalized)
         || /\bshipment (?:information|data) (?:submitted|received)\b/.test(normalized);

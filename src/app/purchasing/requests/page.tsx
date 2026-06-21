@@ -57,7 +57,7 @@ export default async function PurchaseRequestsPage() {
                         {line.item.sku} x {line.quantity}
                         <span className="ml-2 text-xs text-slate-500">
                           {unitPriceEvidence
-                            ? `Unit Price evidence: $${Number(unitPriceEvidence).toFixed(4)} USD`
+                            ? `Unit Price evidence: $${Number(unitPriceEvidence).toFixed(2)} USD`
                             : "Missing unit price evidence"}
                         </span>
                       </div>

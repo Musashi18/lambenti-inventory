@@ -1,4 +1,4 @@
-import { ItemCategory, LifecycleStatus, MovementType, Prisma, PurchaseOrderStatus } from "@prisma/client";
+import { ItemCategory, LifecycleStatus, MovementType, Prisma, PurchaseOrderStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import type { StockSummary } from "@/types/inventory";
@@ -41,6 +41,7 @@ export async function getStockSummaries(options: { includeObsolete?: boolean } =
       sku: item.sku,
       description: item.description,
       category: item.category,
+      useGroupOverride: item.useGroupOverride,
       reorderPoint: item.reorderPoint,
       targetStock: item.targetStock,
       onHand: stockPosition.onHand,
@@ -60,6 +61,12 @@ export async function createStockMovement(input: CreateStockMovementInput) {
 export async function createStockMovementInTransaction(client: InventoryClient, input: CreateStockMovementInput) {
   assertAllowedStockMovementReference(input.reference, input.allowVoidReference);
   await lockItemForStockMutation(client, input.itemId);
+  const item = await client.item.findUnique({
+    where: { id: input.itemId },
+    select: { unit: true }
+  });
+  if (!item) throw new Error("Stock movement item does not exist.");
+  validateMovementQuantityForItemUnit(input.quantity, item.unit);
 
   let stockLotId = input.stockLotId;
   if (input.newLot) {
@@ -151,13 +158,14 @@ export async function createStockMovementReversal(input: { movementId: string; a
     if (original.purchaseOrderLineId && original.movementType !== MovementType.RECEIVE) {
       throw new Error("Only purchase-order receipt movements can be voided through the PO rollback path.");
     }
-    if (original.purchaseOrderLine && original.purchaseOrderLine.receivedQuantity < original.quantity) {
+    const originalQuantity = Number(original.quantity);
+    if (original.purchaseOrderLine && original.purchaseOrderLine.receivedQuantity < originalQuantity) {
       throw new Error("Cannot void this purchase-order receipt because the PO line has already been rolled back below the receipt quantity.");
     }
 
     await lockItemForStockMutation(tx, original.itemId);
     const reversalType = reversalMovementType(original.movementType);
-    const reversalQuantity = original.movementType === MovementType.ADJUST ? -original.quantity : original.quantity;
+    const reversalQuantity = original.movementType === MovementType.ADJUST ? -originalQuantity : originalQuantity;
     const reversal = await createStockMovementInTransaction(tx, {
       itemId: original.itemId,
       stockLotId: original.stockLotId ?? undefined,
@@ -175,7 +183,7 @@ export async function createStockMovementReversal(input: { movementId: string; a
     if (original.purchaseOrderLineId && original.purchaseOrderLine) {
       const updatedLine = await tx.purchaseOrderLine.update({
         where: { id: original.purchaseOrderLineId },
-        data: { receivedQuantity: { decrement: original.quantity } }
+        data: { receivedQuantity: { decrement: originalQuantity } }
       });
       const orderLines = await tx.purchaseOrderLine.findMany({
         where: { purchaseOrderId: updatedLine.purchaseOrderId },
@@ -200,7 +208,7 @@ export async function createStockMovementReversal(input: { movementId: string; a
       payload: {
         reversalMovementId: reversal.id,
         originalMovementType: original.movementType,
-        originalQuantity: original.quantity,
+        originalQuantity,
         originalStockLotId: original.stockLotId,
         originalPurchaseOrderLineId: original.purchaseOrderLineId,
         purchaseOrderRollback,
@@ -268,12 +276,13 @@ export async function recordAssembledPackageMovement(input: {
     }));
 
     for (const line of bom.lines) {
-      const componentQuantity = line.quantity * input.quantity;
+      const quantityPerPackage = toQuantityNumber(line.quantity);
+      const componentQuantity = quantityPerPackage * input.quantity;
       movements.push(await createStockMovementInTransaction(tx, {
         itemId: line.componentItemId,
         movementType: MovementType.CONSUME,
         quantity: componentQuantity,
-        reason: `${baseReason} Consumed ${line.quantity} × ${line.componentItem.sku} per package.`,
+        reason: `${baseReason} Consumed ${formatQuantity(quantityPerPackage)} × ${line.componentItem.sku} per package.`,
         reference,
         actorType: input.actorType ?? "USER",
         actorId: input.actorId
@@ -332,6 +341,34 @@ function validateLotStockMovement(
     }
     throw error;
   }
+}
+
+function validateMovementQuantityForItemUnit(quantity: number, unit: Unit) {
+  if (!Number.isFinite(quantity)) {
+    throw new Error("Quantity must be numeric.");
+  }
+
+  if (unit !== Unit.METER && !Number.isInteger(quantity)) {
+    throw new Error("Quantity must be a whole number for piece-counted stock. Use meter-measured items for decimal length movements.");
+  }
+
+  if (unit === Unit.METER && !hasAtMostDecimalPlaces(quantity, 4)) {
+    throw new Error("Meter movement quantity supports up to 4 decimal places.");
+  }
+}
+
+function hasAtMostDecimalPlaces(value: number, decimalPlaces: number) {
+  const scale = 10 ** decimalPlaces;
+  const scaled = Math.abs(value) * scale;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-8;
+}
+
+function toQuantityNumber(quantity: Prisma.Decimal | number) {
+  return Number(quantity);
+}
+
+function formatQuantity(quantity: number) {
+  return Number.isInteger(quantity) ? String(quantity) : quantity.toString();
 }
 
 function assertAllowedStockMovementReference(reference: string | undefined, allowVoidReference: boolean | undefined) {

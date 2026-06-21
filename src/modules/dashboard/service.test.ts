@@ -76,6 +76,49 @@ describe("summarizeDashboardGraphs", () => {
         { sku: "PSU", description: "Power supply", available: 12, reorderPoint: 20, targetStock: 100 },
         { sku: "SCREW", description: "Screw", available: 10, reorderPoint: 100, targetStock: 1000 }
       ],
+      leadTimeLog: {
+        sampleCount: 1,
+        itemCount: 2,
+        totalQuantityOrdered: 10,
+        averageLeadTimeDays: 12,
+        averageShipTimeDays: null,
+        items: [
+          {
+            itemId: "clip",
+            itemSku: "CLIP",
+            itemDescription: "Clip",
+            currentLeadTimeDays: 18,
+            manualLeadTimeDays: 18,
+            averageLeadTimeDays: 18,
+            weightedAverageLeadTimeDays: 18,
+            averageShipTimeDays: null,
+            averageShipTimeLabel: null,
+            leadTimeSource: "MANUAL",
+            leadTimeLabel: "18d manual planning estimate · no received sample yet",
+            sampleCount: 0,
+            totalQuantityOrdered: 0,
+            totalQuantityReceived: 0,
+            entries: []
+          },
+          {
+            itemId: "psu",
+            itemSku: "PSU",
+            itemDescription: "Power supply",
+            currentLeadTimeDays: 12,
+            manualLeadTimeDays: null,
+            averageLeadTimeDays: 12,
+            weightedAverageLeadTimeDays: 11.5,
+            averageShipTimeDays: null,
+            averageShipTimeLabel: null,
+            leadTimeSource: "OBSERVED",
+            leadTimeLabel: "12d observed bottleneck · 1 completed sample",
+            sampleCount: 1,
+            totalQuantityOrdered: 10,
+            totalQuantityReceived: 10,
+            entries: []
+          }
+        ]
+      },
       inventoryValueByCategory: [
         { category: "COMPONENT", label: "Component", value: 844.6 },
         { category: "FINISHED_GOOD", label: "Finished Good", value: 15.08 }
@@ -97,7 +140,9 @@ describe("summarizeDashboardGraphs", () => {
     expect(graphs.componentCapacityBars.at(-1)).toMatchObject({ sku: "LED_STRIP", capacity: 100, percentOfMax: 100 });
     expect(graphs.stockPressureBars.map((item) => item.sku)).toEqual(["CLIP", "SCREW", "PSU"]);
     expect(graphs.stockPressureBars[0]).toMatchObject({ severity: "blocked", coveragePercent: 0, shortageToReorder: 500 });
-    expect(graphs.operationsFlow.find((item) => item.label === "Review Actions")).toMatchObject({ count: 4, percentOfMax: 100, href: "/accounting/invoices" });
+    expect(graphs.leadTimeBars.map((item) => item.sku)).toEqual(["CLIP", "PSU"]);
+    expect(graphs.leadTimeBars[0]).toMatchObject({ source: "MANUAL", days: 18, percentOfMax: 100 });
+    expect(graphs.operationsFlow.find((item) => item.label === "Review Actions")).toMatchObject({ count: 4, percentOfMax: 100, href: "/#human-approval-queue" });
     expect(graphs.valuationMix).toEqual([
       expect.objectContaining({ category: "COMPONENT", sharePercent: 98 }),
       expect.objectContaining({ category: "FINISHED_GOOD", sharePercent: 2 })

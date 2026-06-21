@@ -22,5 +22,7 @@ describe("BOM Builder page source contract", () => {
     expect(builderSource).toContain("Launch-Critical BOM");
     expect(builderSource).toContain("ItemSelectOptions");
     expect(builderSource).toContain("sortItemsByUseGroup");
+    expect(builderSource).toContain('min="0.0001"');
+    expect(builderSource).toContain('step="0.0001"');
   });
 });

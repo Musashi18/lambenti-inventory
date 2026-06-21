@@ -6,12 +6,13 @@ export type ItemUseClassificationInput = {
   sku: string;
   description: string;
   category?: string | null;
+  useGroupOverride?: string | null;
 };
 
-export type ItemUseGroup = {
+export type ItemUseGroup<T extends ItemUseOption = ItemUseOption> = {
   key: string;
   label: string;
-  items: ItemUseOption[];
+  items: T[];
 };
 
 type ItemUseGroupRule = {
@@ -84,13 +85,22 @@ export const ITEM_USE_GROUP_RULES: readonly ItemUseGroupRule[] = [
 ] as const;
 
 export function getItemUseGroup(item: ItemUseClassificationInput) {
+  const override = getItemUseGroupRule(item.useGroupOverride);
+  if (override) return override;
+
   const category = normalizeCategory(item.category);
   const text = normalizeSearchText(`${item.sku} ${item.description}`);
   return ITEM_USE_GROUP_RULES.find((rule) => rule.matches(item, text, category)) ?? ITEM_USE_GROUP_RULES[ITEM_USE_GROUP_RULES.length - 1];
 }
 
-export function groupItemOptionsByUse(items: ItemUseOption[]): ItemUseGroup[] {
-  const groups = new Map<string, ItemUseGroup>();
+export function getItemUseGroupRule(key: string | null | undefined) {
+  const normalized = key?.trim();
+  if (!normalized) return null;
+  return ITEM_USE_GROUP_RULES.find((rule) => rule.key === normalized) ?? null;
+}
+
+export function groupItemOptionsByUse<T extends ItemUseOption>(items: T[]): ItemUseGroup<T>[] {
+  const groups = new Map<string, ItemUseGroup<T>>();
 
   for (const item of sortItemsByUseGroup(items)) {
     const group = getItemUseGroup(item);
@@ -104,7 +114,7 @@ export function groupItemOptionsByUse(items: ItemUseOption[]): ItemUseGroup[] {
 
   return ITEM_USE_GROUP_RULES
     .map((rule) => groups.get(rule.key))
-    .filter((group): group is ItemUseGroup => Boolean(group?.items.length));
+    .filter((group): group is ItemUseGroup<T> => Boolean(group?.items.length));
 }
 
 export function sortItemsByUseGroup<T extends ItemUseClassificationInput>(items: T[]): T[] {

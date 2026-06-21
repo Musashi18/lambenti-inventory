@@ -79,6 +79,13 @@ describe("parseItemFormData", () => {
     expect(parsed.costCurrency).toBe("USD");
   });
 
+  it("accepts item unit costs at 4-decimal resolution", () => {
+    const parsed = parseItemFormData(makeFormData({ estimatedUnitCost: "1.2345", costCurrency: "USD" }));
+
+    expect(parsed.estimatedUnitCost).toBe(1.2345);
+    expect(parsed.costCurrency).toBe("USD");
+  });
+
   it("rejects unsupported item cost currencies instead of treating them as USD", () => {
     expect(() => parseItemFormData(makeFormData({ estimatedUnitCost: "10.00", costCurrency: "EUR" }))).toThrow(
       "No USD conversion rate is configured for EUR."
