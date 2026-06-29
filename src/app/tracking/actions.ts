@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/modules/auth/permissions";
 import {
+  archiveTrackingNumber,
   captureManualTrackingNumbers,
   captureTrackingNumbersFromImports,
+  deleteTrackingNumber,
   pruneOldAlibabaTrackingNumbers,
   refreshActiveTrackingNumbers,
   refreshTrackingNumber,
@@ -90,6 +92,34 @@ export async function refreshSingleTrackingAction(formData: FormData) {
   await refreshTrackingNumber({ trackingNumber, actorId: TRACKING_AGENT_ID });
   revalidatePath("/tracking");
   return { success: true, message: `Refreshed ${trackingNumber}.` };
+}
+
+export async function archiveTrackingNumberAction(formData: FormData) {
+  const trackingNumber = readString(formData, "trackingNumber");
+  if (!trackingNumber) return { success: false, message: "Missing tracking number." };
+
+  const actor = await requirePermission("integration:mutate");
+  await archiveTrackingNumber({
+    trackingNumber,
+    actorId: actor.id,
+    reason: "Archived manually from the active Tracking Workbench card."
+  });
+  revalidateWorkspace(["/tracking"]);
+  return { success: true, message: `Archived ${trackingNumber}. It will no longer be polled as active shipment evidence.` };
+}
+
+export async function deleteTrackingNumberAction(formData: FormData) {
+  const trackingNumber = readString(formData, "trackingNumber");
+  if (!trackingNumber) return { success: false, message: "Missing tracking number." };
+
+  const actor = await requirePermission("integration:mutate");
+  await deleteTrackingNumber({
+    trackingNumber,
+    actorId: actor.id,
+    reason: "Deleted manually from the active Tracking Workbench card."
+  });
+  revalidateWorkspace(["/tracking"]);
+  return { success: true, message: `Deleted ${trackingNumber} and its carrier event rows from active tracking.` };
 }
 
 export async function updateManualItemLeadTimeAction(formData: FormData) {

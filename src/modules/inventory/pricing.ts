@@ -2,9 +2,9 @@ import type { MovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_CURRENCY, convertUnitCostToUsd, getLiveUsdConversionRates, roundUnitCost, type CurrencyConversionOptions } from "@/modules/currency";
 import { getItemLandedCostIndex, type ItemLandedCostSummary } from "@/modules/accounting/landed-cost";
-import type { PricedItemValuationInput } from "./valuation";
+import type { PricedItemCostSource, PricedItemValuationInput } from "./valuation";
 
-export type ResolvedItemUnitCostSource = "ACCOUNTING_LANDED_COST" | "ITEM_UNIT_COST" | "BOM_ROLLUP";
+export type ResolvedItemUnitCostSource = PricedItemCostSource;
 
 export type ResolvedItemUnitCost = {
   itemId: string;
@@ -179,6 +179,9 @@ export async function getActivePricedItemValuationInputs(): Promise<PricedItemVa
       useGroupOverride: item.useGroupOverride,
       unitCost: unitCost?.unitCost ?? null,
       currency: unitCost?.currency ?? DEFAULT_CURRENCY,
+      costSource: unitCost?.source ?? null,
+      costSourceLabel: unitCost?.sourceLabel ?? null,
+      costSourceRefs: unitCost?.sourceRefs ?? [],
       movements: item.stockMovements as Array<{ movementType: MovementType; quantity: number | { toNumber(): number } }>
     };
   });

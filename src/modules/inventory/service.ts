@@ -77,16 +77,25 @@ export async function createStockMovementInTransaction(client: InventoryClient, 
       throw new Error("New lot unit cost cannot be negative.");
     }
     const normalizedLotCost = normalizeCostToUsd(input.newLot.unitCost, input.newLot.currency);
-    const lot = await client.stockLot.create({
-      data: {
-        itemId: input.itemId,
-        lotCode: input.newLot.lotCode,
-        receivedAt: input.newLot.receivedAt,
-        unitCost: normalizedLotCost.estimatedUnitCost ?? input.newLot.unitCost,
-        currency: normalizedLotCost.costCurrency
-      }
+    const normalizedUnitCost = normalizedLotCost.estimatedUnitCost ?? input.newLot.unitCost;
+    const existingLot = await client.stockLot.findUnique({
+      where: { itemId_lotCode: { itemId: input.itemId, lotCode: input.newLot.lotCode } }
     });
-    stockLotId = lot.id;
+    if (existingLot) {
+      assertCompatibleReceiptLotCost(existingLot, normalizedUnitCost, normalizedLotCost.costCurrency, input.newLot.lotCode);
+      stockLotId = existingLot.id;
+    } else {
+      const lot = await client.stockLot.create({
+        data: {
+          itemId: input.itemId,
+          lotCode: input.newLot.lotCode,
+          receivedAt: input.newLot.receivedAt,
+          unitCost: normalizedUnitCost,
+          currency: normalizedLotCost.costCurrency
+        }
+      });
+      stockLotId = lot.id;
+    }
   }
 
   if (stockLotId) {
@@ -369,6 +378,18 @@ function toQuantityNumber(quantity: Prisma.Decimal | number) {
 
 function formatQuantity(quantity: number) {
   return Number.isInteger(quantity) ? String(quantity) : quantity.toString();
+}
+
+function assertCompatibleReceiptLotCost(
+  existingLot: { unitCost: Prisma.Decimal; currency: string },
+  unitCost: number,
+  currency: string,
+  lotCode: string
+) {
+  const existingUnitCost = Number(existingLot.unitCost);
+  const sameUnitCost = Math.abs(existingUnitCost - unitCost) < 0.0001;
+  if (sameUnitCost && existingLot.currency === currency) return;
+  throw new Error(`Lot ${lotCode} already exists for this item at ${existingLot.currency} ${existingUnitCost.toFixed(4)}. Use that existing lot for the same shipment, or enter a new lot code if this receipt has a different unit cost (${currency} ${unitCost.toFixed(4)}).`);
 }
 
 function assertAllowedStockMovementReference(reference: string | undefined, allowVoidReference: boolean | undefined) {

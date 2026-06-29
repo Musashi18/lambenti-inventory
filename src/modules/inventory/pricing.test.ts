@@ -35,6 +35,24 @@ describe("resolveItemUnitCostIndex", () => {
     expect(costs.get("finished")).toMatchObject({ unitCost: 9.99, source: "ITEM_UNIT_COST", sourceRefs: ["manual override"] });
   });
 
+  it("keeps accounting landed cost ahead of manual finished-good overrides and BOM rollups", () => {
+    const costs = resolveItemUnitCostIndex([
+      { id: "component", sku: "COMP", category: "COMPONENT", estimatedUnitCost: 1, costCurrency: "USD" },
+      { id: "finished", sku: "FG", category: "FINISHED_GOOD", estimatedUnitCost: 9.99, costCurrency: "USD", costSourceRef: "manual override" }
+    ], [
+      { parentItemId: "finished", version: "v1", lines: [{ componentItemId: "component", quantity: 2, componentItem: { sku: "COMP" } }] }
+    ], new Map([
+      ["finished", { itemId: "finished", sku: "FG", landedUnitCost: 12.34, totalLandedCost: 123.4, quantity: 10, currency: "USD", sourceRefs: ["invoice-fg"] }]
+    ]));
+
+    expect(costs.get("finished")).toMatchObject({
+      unitCost: 12.34,
+      source: "ACCOUNTING_LANDED_COST",
+      sourceLabel: "Accounting landed cost · 10 units",
+      sourceRefs: ["invoice-fg"]
+    });
+  });
+
   it("does not understate a finished-good cost when any component cost is missing", () => {
     const costs = resolveItemUnitCostIndex([
       { id: "known", sku: "KNOWN", category: "COMPONENT", estimatedUnitCost: 1, costCurrency: "USD" },

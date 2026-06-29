@@ -2,9 +2,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemCategory, MovementType, PurchaseOrderStatus, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
+  archiveTrackingNumber,
   captureManualTrackingNumbers,
   captureTrackingNumbersFromImports,
   captureTrackingNumbersFromPortalSnapshot,
+  deleteTrackingNumber,
   extractTrackingNumbersFromText,
   getLeadTimeLog,
   getTrackingDashboard,
@@ -968,6 +970,72 @@ describe("tracking service", () => {
       screenedShipmentCount: 2,
       latestEvent: expect.objectContaining({ description: "Newest active shipment departed facility" })
     });
+  });
+
+  it("automatically archives older linked active tracking numbers when the associated active stream is delivered", async () => {
+    const fixture = await createOrderImportFixture("AUTO-ARCHIVE-DELIVERED");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        supplierName: fixture.supplier.name,
+        capturedAt: "2026-06-14T02:00:00.000Z",
+        trackingNumbers: ["LL270153441CN", "LL270153442CN"],
+        text: "Older package LL270153441CN was replaced by active package LL270153442CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    await prisma.trackingNumber.update({ where: { trackingNumber: "LL270153441CN" }, data: { currentStatus: "IN_TRANSIT", lastEventAt: new Date("2026-06-14T01:00:00.000Z") } });
+    await prisma.trackingNumber.update({ where: { trackingNumber: "LL270153442CN" }, data: { currentStatus: "IN_TRANSIT", lastEventAt: new Date("2026-06-15T01:00:00.000Z") } });
+
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      tracking_number: "LL270153442CN",
+      status: "delivered",
+      statusDescription: "Delivered",
+      deliveredAt: "2026-06-16T03:00:00.000Z",
+      events: [{ status: "delivered", description: "Delivered", occurredAt: "2026-06-16T03:00:00.000Z" }]
+    }), { status: 200 }));
+
+    await refreshTrackingNumber({
+      trackingNumber: "LL270153442CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-06-16T03:30:00.000Z"),
+      config: { urlTemplate: "https://tracking.local/track/{trackingNumber}" },
+      fetcher
+    });
+
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "LL270153441CN" } })).resolves.toMatchObject({
+      currentStatus: "ARCHIVED",
+      refreshStatus: "ARCHIVED",
+      nextRefreshAt: null
+    });
+    await expect(prisma.auditLog.count({ where: { action: "AUTO_ARCHIVE_ASSOCIATED_TRACKING_NUMBER", actorId: `${TEST_PREFIX}-agent` } })).resolves.toBe(1);
+
+    const dashboard = await getTrackingDashboard({ now: new Date("2026-06-16T04:00:00.000Z"), config: { provider: "SHIP24", authToken: "ship24-test-key" } });
+    expect(dashboard.rows.some((row) => row.trackingNumber === "LL270153441CN")).toBe(false);
+    expect(dashboard.deliveredRows.find((row) => row.trackingNumber === "LL270153442CN")).toMatchObject({
+      relatedTrackingNumbers: ["LL270153441CN", "LL270153442CN"],
+      screenedShipmentCount: 2
+    });
+    expect(dashboard.archivedRows.map((row) => row.trackingNumber)).toContain("LL270153441CN");
+  });
+
+  it("lets the operator archive or delete active tracking numbers without receiving stock", async () => {
+    const fixture = await createOrderImportFixture("MANUAL-ARCHIVE-DELETE");
+    await captureManualTrackingNumbers({
+      rawText: `Tracking Number: LL270153443CN\nTracking Number: LL270153444CN\nAlibaba order ${fixture.externalOrderId}`,
+      actorId: `${TEST_PREFIX}-operator`,
+      externalOrderId: fixture.externalOrderId
+    });
+    const stockBefore = await prisma.stockMovement.count({ where: { itemId: fixture.item.id } });
+
+    await archiveTrackingNumber({ trackingNumber: "LL270153443CN", actorId: `${TEST_PREFIX}-operator` });
+    await deleteTrackingNumber({ trackingNumber: "LL270153444CN", actorId: `${TEST_PREFIX}-operator` });
+
+    await expect(prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: "LL270153443CN" } })).resolves.toMatchObject({ currentStatus: "ARCHIVED", nextRefreshAt: null });
+    await expect(prisma.trackingNumber.findUnique({ where: { trackingNumber: "LL270153444CN" } })).resolves.toBeNull();
+    await expect(prisma.stockMovement.count({ where: { itemId: fixture.item.id } })).resolves.toBe(stockBefore);
+    await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-operator`, action: { in: ["ARCHIVE_TRACKING_NUMBER", "DELETE_TRACKING_NUMBER"] } } })).resolves.toBe(2);
   });
 
   it("hides junk supplier labels from dashboard display rows", async () => {

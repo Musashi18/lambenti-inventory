@@ -93,6 +93,7 @@ describe("calculatePricedItemValuations", () => {
         quantity: 7,
         unitCost: 2.5,
         currency: "USD",
+        costSourceRefs: [],
         value: 17.5
       },
       {
@@ -102,10 +103,74 @@ describe("calculatePricedItemValuations", () => {
         quantity: 0,
         unitCost: 3,
         currency: "USD",
+        costSourceRefs: [],
         value: 0
       }
     ]);
     expect(valuation.totalValue).toBe(17.5);
+  });
+
+  it("keeps priced valuation anchored to resolved item cost instead of stale receipt-lot costs", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "priced-clip",
+        sku: "0805_CLIP",
+        description: "0805 cable clip",
+        unitCost: 0.0582,
+        currency: "USD",
+        movements: [
+          { movementType: MovementType.RECEIVE, quantity: 1000 },
+          { movementType: MovementType.RECEIVE, quantity: 500 }
+        ]
+      }
+    ]);
+
+    expect(valuation.rows[0]).toMatchObject({
+      quantity: 1500,
+      unitCost: 0.0582,
+      value: 87.3
+    });
+  });
+
+  it("carries price-source provenance into priced valuation rows", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "priced-clip",
+        sku: "0805_CLIP",
+        description: "0805 cable clip",
+        unitCost: 0.0582,
+        currency: "USD",
+        costSource: "ACCOUNTING_LANDED_COST",
+        costSourceLabel: "Accounting landed cost · 2500 units",
+        costSourceRefs: ["WINNIE-XU-304716450001023166"],
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 2500 }]
+      }
+    ]);
+
+    expect(valuation.rows[0]).toMatchObject({
+      quantity: 2500,
+      unitCost: 0.0582,
+      costSource: "ACCOUNTING_LANDED_COST",
+      costSourceLabel: "Accounting landed cost · 2500 units",
+      costSourceRefs: ["WINNIE-XU-304716450001023166"],
+      value: 145.5
+    });
+  });
+
+  it("rounds ledger quantity to the common two-decimal display resolution", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "fractional-led",
+        sku: "LED-FRACTIONAL",
+        description: "Fractional LED strip",
+        unitCost: 1,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 8685.630000000001 }]
+      }
+    ]);
+
+    expect(valuation.rows[0].quantity).toBe(8685.63);
+    expect(valuation.rows[0].value).toBe(8685.63);
   });
 
   it("uses the stored 4-decimal unit price for valuation while currency value remains cents-rounded", () => {
@@ -148,6 +213,7 @@ describe("calculatePricedItemValuations", () => {
         quantity: 3,
         unitCost: 7.5,
         currency: "USD",
+        costSourceRefs: [],
         value: 22.5
       }
     ]);

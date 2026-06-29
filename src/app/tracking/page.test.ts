@@ -62,6 +62,9 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("data-testid=\"tracking-row\"");
     expect(pageSource).toContain("Active tracking numbers");
     expect(pageSource).toContain("Delivered Tracking History");
+    expect(pageSource).toContain("Archived Tracking Numbers");
+    expect(pageSource).toContain("dashboard.archivedRows");
+    expect(pageSource.indexOf("<LeadTimeLearningLog log={leadTimeLog} />")).toBeLessThan(pageSource.indexOf("<ArchivedTrackingNumbers rows={dashboard.archivedRows} />"));
     expect(pageSource).toContain("Total Ship Time");
     expect(pageSource).toContain("Advanced: Lead-Time Learning Audit");
     expect(pageSource).toContain("Reorder Forecasting Input");
@@ -84,6 +87,11 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("No Carrier Updates Yet");
     expect(pageSource).toContain("bg-yellow-300");
     expect(pageSource).toContain("Manual Refresh Now Lives in the Provider Heartbeat Card");
+    expect(pageSource).toContain("ArchiveTrackingButton");
+    expect(pageSource).toContain("DeleteTrackingButton");
+    expect(pageSource).toContain("Archive hides a stale active number");
+    expect(actionsSource).toContain("archiveTrackingNumberAction");
+    expect(actionsSource).toContain("deleteTrackingNumberAction");
     expect(autoRefreshSource).toContain("tracking-page-heartbeat");
     expect(autoRefreshSource).toContain("router.refresh");
     expect(autoRefreshSource).toContain("setInterval");

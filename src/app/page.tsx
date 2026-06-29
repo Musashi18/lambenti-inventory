@@ -4,6 +4,7 @@ import { DashboardTable } from "@/components/dashboard-table";
 import { getDashboardSummary } from "@/modules/dashboard/service";
 import { requirePermission } from "@/modules/auth/permissions";
 import { getItemUseGroup, type ItemUseClassificationInput } from "@/modules/inventory/item-option-groups";
+import { formatQuantity } from "@/modules/inventory/quantity-format";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Low stock items" value={summary.lowStockItems.length} />
-        <StatCard label="Components on hand" value={summary.componentsOnHand} />
+        <StatCard label="Components on hand" value={formatQuantity(summary.componentsOnHand, { fixed: true })} />
         <StatCard
           label="Build capacity"
           value={summary.buildCapacity.finishedBuildCapacity}
@@ -133,11 +134,11 @@ export default async function DashboardPage() {
             formatItemType(item),
             item.sku,
             item.description,
-            item.onHand.toString(),
-            item.reserved.toString(),
-            item.available.toString(),
-            item.reorderPoint.toString(),
-            item.targetStock.toString()
+            formatQuantity(item.onHand, { fixed: true }),
+            formatQuantity(item.reserved, { fixed: true }),
+            formatQuantity(item.available, { fixed: true }),
+            formatQuantity(item.reorderPoint, { fixed: true }),
+            formatQuantity(item.targetStock, { fixed: true })
           ])}
       />
 
@@ -148,8 +149,21 @@ export default async function DashboardPage() {
           formatItemType(item),
           item.sku,
           item.description,
-          item.onHand.toString(),
-          item.reorderPoint.toString()
+          formatQuantity(item.onHand, { fixed: true }),
+          formatQuantity(item.reorderPoint, { fixed: true })
+        ])}
+      />
+
+      <DashboardTable
+        title="Not Currently Needed Low Stock Components"
+        columns={["Type", "SKU", "Description", "On Hand", "Reorder Point", "Reason"]}
+        rows={summary.lowStockNotCurrentlyNeededItems.map((item) => [
+          formatItemType(item),
+          item.sku,
+          item.description,
+          formatQuantity(item.onHand, { fixed: true }),
+          formatQuantity(item.reorderPoint, { fixed: true }),
+          item.notCurrentlyNeededReason
         ])}
       />
 
@@ -160,9 +174,9 @@ export default async function DashboardPage() {
           formatItemType(item),
           item.sku,
           item.description,
-          item.demand.toString(),
-          item.available.toString(),
-          item.shortage.toString()
+          formatQuantity(item.demand, { fixed: true }),
+          formatQuantity(item.available, { fixed: true }),
+          formatQuantity(item.shortage, { fixed: true })
         ])}
       />
     </div>

@@ -1,6 +1,7 @@
 import { DashboardTable } from "@/components/dashboard-table";
 import { calculatePricedItemValuations } from "@/modules/inventory/valuation";
 import { getActivePricedItemValuationInputs } from "@/modules/inventory/pricing";
+import { formatQuantity } from "@/modules/inventory/quantity-format";
 import { requirePermission } from "@/modules/auth/permissions";
 
 export const dynamic = "force-dynamic";
@@ -61,15 +62,24 @@ export default async function ValuationPage() {
 
       <DashboardTable
         title="Priced Item Valuation"
-        columns={["SKU", "Description", "Quantity", "Price/Unit", "Value"]}
+        columns={["SKU", "Description", "Quantity", "Price/Unit", "Price Source", "Value"]}
         rows={itemValuation.rows.map((row) => [
           row.sku,
           row.description,
-          row.quantity.toString(),
+          formatQuantity(row.quantity, { fixed: true }),
           `${row.currency} ${row.unitCost.toFixed(2)}`,
+          formatCostSource(row),
           `${row.currency} ${row.value.toFixed(2)}`
         ])}
       />
     </div>
   );
+}
+
+function formatCostSource(row: { costSourceLabel?: string | null; costSourceRefs: string[] }) {
+  if (!row.costSourceLabel) return "Unpriced";
+  if (row.costSourceLabel.startsWith("BOM rollup")) return row.costSourceLabel;
+  const refs = row.costSourceRefs.length > 0 ? ` · ${row.costSourceRefs.slice(0, 2).join(" | ")}` : "";
+  const extra = row.costSourceRefs.length > 2 ? ` +${row.costSourceRefs.length - 2} more` : "";
+  return `${row.costSourceLabel}${refs}${extra}`;
 }

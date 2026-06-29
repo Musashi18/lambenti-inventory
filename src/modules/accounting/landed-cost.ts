@@ -246,10 +246,14 @@ export function getAttachedLandedCostEvidenceAmount(document: {
 
 function isAttachedLandedCostEvidence(classification: string | undefined, text: string, fileName: string) {
   const combined = `${fileName}\n${text}`;
-  const hasCustomsSignal = /customs|dut(?:y|ies)|brokerage|clearance|cbsa|import\s+(?:fees|charges|duty)|fedex\s+clearance/i.test(combined);
+  const hasStrongCustomsSignal = /customs|brokerage|clearance|cbsa|import\s+(?:fees|charges|duty)|fedex\s+clearance/i.test(combined);
+  const hasGenericDutySignal = /dut(?:y|ies)/i.test(combined);
   const hasAdditionalShippingSignal = /additional\s+(?:shipping|freight)(?:\s+\w+){0,4}\s+(?:charge|charges|cost|costs|fee|fees|receipt|surcharge|surcharges)\b|(?:freight|carrier|logistics)(?:\s+\w+){0,4}\s+(?:charge|charges|cost|costs|fee|fees|receipt|surcharge|surcharges)\b|(?:shipping|freight)\s+(?:surcharge|surcharges|adjustment|adjustments|overage|overages|rebill|re-bill)\b/i.test(combined);
+  const looksLikeOriginalSupplierOrder = /\b(product details|product quantity|item subtotal|order summary|payment details|full payment|amount shown excludes payment processing fee|supplier details)\b/i.test(combined);
+  if (looksLikeOriginalSupplierOrder && !hasStrongCustomsSignal) return false;
   if (classification === "CUSTOMS_DOCUMENT") return true;
-  return classification === "PAYMENT_RECEIPT" && (hasCustomsSignal || hasAdditionalShippingSignal);
+  if (classification !== "PAYMENT_RECEIPT") return false;
+  return hasStrongCustomsSignal || hasGenericDutySignal || hasAdditionalShippingSignal;
 }
 
 function analysisAmount(analysis: ReturnType<typeof normalizeAnalysis>) {

@@ -159,6 +159,54 @@ describe("dashboard stock quantities", () => {
     expect(after.assembledPackages).toBe(before.assembledPackages + 5);
   });
 
+  it("removes low-stock BOM components from current low stock when their finished build is stocked above reorder point", async () => {
+    const location = await prisma.storageLocation.create({
+      data: { code: `${TEST_PREFIX}-BOM-NEED-LOC`, name: "Dashboard BOM need fixture" }
+    });
+    const coveredBuild = await createTestItem(location.id, "COVERED-BUILD", ItemCategory.FINISHED_GOOD, "Threaded top enclosure build", { reorderPoint: 2, targetStock: 4 });
+    const coveredComponent = await createTestItem(location.id, "TOP-ENCLOSURE", ItemCategory.COMPONENT, "Top enclosure component", { reorderPoint: 10, targetStock: 20 });
+    const neededBuild = await createTestItem(location.id, "NEEDED-BUILD", ItemCategory.FINISHED_GOOD, "Open controller build", { reorderPoint: 3, targetStock: 6 });
+    const neededComponent = await createTestItem(location.id, "CONTROL-PCB", ItemCategory.COMPONENT, "Controller PCB component", { reorderPoint: 10, targetStock: 20 });
+
+    await prisma.bOM.create({
+      data: {
+        parentItemId: coveredBuild.id,
+        version: `${TEST_PREFIX}-COVERED-BOM`,
+        active: true,
+        lines: { create: [{ componentItemId: coveredComponent.id, quantity: 1 }] }
+      }
+    });
+    await prisma.bOM.create({
+      data: {
+        parentItemId: neededBuild.id,
+        version: `${TEST_PREFIX}-NEEDED-BOM`,
+        active: true,
+        lines: { create: [{ componentItemId: neededComponent.id, quantity: 1 }] }
+      }
+    });
+    await prisma.stockMovement.create({
+      data: {
+        itemId: coveredBuild.id,
+        movementType: MovementType.RECEIVE,
+        quantity: 3,
+        reason: "covered finished build fixture",
+        actorType: "USER",
+        actorId: TEST_PREFIX
+      }
+    });
+
+    const summary = await getDashboardSummary();
+
+    expect(summary.lowStockItems.map((item) => item.sku)).not.toContain(`${TEST_PREFIX}-TOP-ENCLOSURE`);
+    expect(summary.lowStockNotCurrentlyNeededItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sku: `${TEST_PREFIX}-TOP-ENCLOSURE`,
+        notCurrentlyNeededReason: expect.stringContaining(`${TEST_PREFIX}-COVERED-BUILD`)
+      })
+    ]));
+    expect(summary.lowStockItems.map((item) => item.sku)).toContain(`${TEST_PREFIX}-CONTROL-PCB`);
+  });
+
   it("still exposes the Lambenti package BOM quantities when current stock gives zero build capacity", async () => {
     const location = await prisma.storageLocation.create({
       data: { code: `${TEST_PREFIX}-ZERO-BUILD-LOC`, name: "Dashboard zero capacity fixture" }

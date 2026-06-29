@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { AccountingDocumentStatus, InvoiceStatus, ItemCategory, Unit } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -300,6 +301,38 @@ describe("accounting document ingestion and invoice application", () => {
     await expect(prisma.accountingDocument.count({ where: { sha256: first.document.sha256 } })).resolves.toBe(1);
   });
 
+  it("re-analyzes duplicate uploads when the existing source row has no extracted text", async () => {
+    const { supplier, item } = await createPurchaseOrderFixture("DEDUPE-REANALYZE");
+    const fileText = invoiceText("DEDUPE-REANALYZE", supplier.name, item.sku);
+    const buffer = Buffer.from(fileText, "utf8");
+    const sha256 = createHash("sha256").update(buffer).digest("hex");
+    const existing = await prisma.accountingDocument.create({
+      data: {
+        source: "MANUAL_UPLOAD",
+        sourceKind: "TEXT",
+        originalFileName: `${TEST_PREFIX}-DEDUPE-REANALYZE.txt`,
+        storedPath: `var/accounting-documents/${TEST_PREFIX}-DEDUPE-REANALYZE.txt`,
+        sha256,
+        mimeType: "text/plain",
+        sizeBytes: buffer.length,
+        status: AccountingDocumentStatus.NEEDS_REVIEW,
+        errorMessage: "Previous OCR/text extraction failed."
+      }
+    });
+
+    const second = await ingestAccountingDocumentUpload({
+      file: uploadFile(`${TEST_PREFIX}-DEDUPE-REANALYZE-copy.txt`, "text/plain", fileText),
+      actorId: accountingActor.id
+    });
+
+    expect(second.duplicate).toBe(true);
+    expect(second.document.id).toBe(existing.id);
+    expect(second.document.extractedText).toContain(`${TEST_PREFIX}-DEDUPE-REANALYZE-INV`);
+    expect(second.document).toMatchObject({ status: AccountingDocumentStatus.ANALYZED, supplierId: supplier.id });
+    await expect(prisma.accountingDocument.count({ where: { sha256 } })).resolves.toBe(1);
+    await expect(prisma.auditLog.count({ where: { entityId: existing.id, action: "REANALYZE_DUPLICATE_ACCOUNTING_DOCUMENT_UPLOAD" } })).resolves.toBe(1);
+  });
+
   it("deletes unattached accounting source documents without invoice or stock side effects", async () => {
     const { supplier, item } = await createPurchaseOrderFixture("DELETE");
     const document = await ingestAccountingDocumentUpload({
@@ -495,6 +528,65 @@ describe("accounting document ingestion and invoice application", () => {
     });
     await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(stockMovementCountBefore);
     await expect(prisma.purchaseOrderLine.findUniqueOrThrow({ where: { id: line.id } })).resolves.toMatchObject({ receivedQuantity: 0 });
+  });
+
+  it("ignores voided invoice bundles when attaching evidence by purchase order and rejects direct void attachment", async () => {
+    const { supplier, item, order } = await createPurchaseOrderFixture("VOIDBUNDLE");
+    const voidedInvoice = await prisma.supplierInvoice.create({
+      data: {
+        invoiceNumber: `${TEST_PREFIX}-VOIDBUNDLE-OLD`,
+        invoiceNumberKey: `${TEST_PREFIX}-VOIDBUNDLE-OLD`,
+        supplierId: supplier.id,
+        purchaseOrderId: order.id,
+        status: InvoiceStatus.VOID,
+        currency: "USD",
+        subtotal: 12,
+        shippingCost: 3,
+        taxCost: 0,
+        total: 15,
+        invoiceDate: new Date("2026-06-08T00:00:00.000Z"),
+        voidReason: "Duplicate test invoice bundle"
+      }
+    });
+    const activeInvoice = await prisma.supplierInvoice.create({
+      data: {
+        invoiceNumber: `${TEST_PREFIX}-VOIDBUNDLE-ACTIVE`,
+        invoiceNumberKey: `${TEST_PREFIX}-VOIDBUNDLE-ACTIVE`,
+        supplierId: supplier.id,
+        purchaseOrderId: order.id,
+        status: InvoiceStatus.RECEIVED,
+        currency: "USD",
+        subtotal: 12,
+        shippingCost: 3,
+        taxCost: 0,
+        total: 15,
+        invoiceDate: new Date("2026-06-09T00:00:00.000Z")
+      }
+    });
+    const receiptDocument = await ingestAccountingDocumentUpload({
+      file: uploadFile(`${TEST_PREFIX}-VOIDBUNDLE-receipt.txt`, "text/plain", paymentReceiptText("VOIDBUNDLE", supplier.name)),
+      actorId: accountingActor.id
+    });
+
+    await expect(attachAccountingDocumentEvidence({
+      documentId: receiptDocument.document.id,
+      supplierInvoiceId: voidedInvoice.id,
+      actor: accountingActor
+    })).rejects.toThrow(/voided supplier invoices/i);
+
+    const attached = await attachAccountingDocumentEvidence({
+      documentId: receiptDocument.document.id,
+      purchaseOrderId: order.id,
+      actor: accountingActor
+    });
+
+    expect(attached.document).toMatchObject({
+      status: AccountingDocumentStatus.ATTACHED,
+      supplierInvoiceId: activeInvoice.id,
+      purchaseOrderId: order.id,
+      supplierId: supplier.id
+    });
+    await expect(prisma.stockMovement.count({ where: { itemId: item.id } })).resolves.toBe(0);
   });
 
   it("rejects applying non-invoice accounting documents so payment receipts cannot post AP", async () => {

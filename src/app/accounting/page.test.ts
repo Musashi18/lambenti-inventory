@@ -18,6 +18,9 @@ describe("Accounting workbench page", () => {
     expect(pageSource).toContain("source document");
     expect(pageSource).toContain("applyAccountingDocumentAction");
     expect(pageSource).toContain("attachAccountingDocumentEvidenceAction");
+    expect(pageSource).toContain("getAttachableInvoiceBundleOptions");
+    expect(pageSource).toContain("invoice.status !== \"VOID\"");
+    expect(pageSource).toContain("invoiceBundleOptionLabel");
     expect(pageSource).toContain("Attach as Evidence");
     expect(pageSource).toContain("Attach Only — Does Not Receive Stock or Mark Paid.");
     expect(pageSource).toContain("Customer Invoices / AR");

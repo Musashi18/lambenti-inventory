@@ -97,6 +97,76 @@ describe("createStockMovement integration", () => {
     expect(auditCount).toBe(1);
   });
 
+  it("reuses an existing same-item same-code receipt lot when the cost matches instead of throwing a unique constraint", async () => {
+    const { item } = await createInventoryFixture("REUSE-LOT");
+
+    const first = await createStockMovement({
+      itemId: item.id,
+      newLot: {
+        lotCode: `${TEST_PREFIX}-REUSE-SAME-LOT`,
+        receivedAt: new Date("2026-06-03T00:00:00.000Z"),
+        unitCost: 0.02,
+        currency: "USD"
+      },
+      movementType: MovementType.RECEIVE,
+      quantity: 1,
+      reason: "Receive first PO line for shared packing-slip lot",
+      reference: "PO-TEST-REUSE-1",
+      actorId: `${TEST_PREFIX}-actor-reuse-1`
+    });
+    const second = await createStockMovement({
+      itemId: item.id,
+      newLot: {
+        lotCode: `${TEST_PREFIX}-REUSE-SAME-LOT`,
+        receivedAt: new Date("2026-06-03T00:00:00.000Z"),
+        unitCost: 0.02,
+        currency: "USD"
+      },
+      movementType: MovementType.RECEIVE,
+      quantity: 2,
+      reason: "Receive second PO line for shared packing-slip lot",
+      reference: "PO-TEST-REUSE-2",
+      actorId: `${TEST_PREFIX}-actor-reuse-2`
+    });
+
+    expect(second.stockLotId).toBe(first.stockLotId);
+    await expect(prisma.stockLot.count({ where: { itemId: item.id, lotCode: `${TEST_PREFIX}-REUSE-SAME-LOT` } })).resolves.toBe(1);
+  });
+
+  it("rejects an existing same-code receipt lot when the operator enters a different unit cost", async () => {
+    const { item } = await createInventoryFixture("REUSE-LOT-MISMATCH");
+
+    await createStockMovement({
+      itemId: item.id,
+      newLot: {
+        lotCode: `${TEST_PREFIX}-REUSE-MISMATCH-LOT`,
+        receivedAt: new Date("2026-06-03T00:00:00.000Z"),
+        unitCost: 0.02,
+        currency: "USD"
+      },
+      movementType: MovementType.RECEIVE,
+      quantity: 1,
+      reason: "Receive first lot cost",
+      reference: "PO-TEST-REUSE-MISMATCH-1",
+      actorId: `${TEST_PREFIX}-actor-reuse-mismatch-1`
+    });
+
+    await expect(createStockMovement({
+      itemId: item.id,
+      newLot: {
+        lotCode: `${TEST_PREFIX}-REUSE-MISMATCH-LOT`,
+        receivedAt: new Date("2026-06-03T00:00:00.000Z"),
+        unitCost: 0.04,
+        currency: "USD"
+      },
+      movementType: MovementType.RECEIVE,
+      quantity: 1,
+      reason: "Attempt same lot with changed cost",
+      reference: "PO-TEST-REUSE-MISMATCH-2",
+      actorId: `${TEST_PREFIX}-actor-reuse-mismatch-2`
+    })).rejects.toThrow(/already exists.*different unit cost/i);
+  });
+
   it("rejects operator-created movements that try to spoof the reserved VOID reversal reference prefix", async () => {
     const { item, lot } = await createInventoryFixture("VOID-SPOOF");
 

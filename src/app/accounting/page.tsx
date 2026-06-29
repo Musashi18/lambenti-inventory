@@ -98,6 +98,17 @@ function documentReadiness(document: AccountingDocumentRow, analysis?: Accountin
   return { label: "Saved evidence", className: "border-slate-200 bg-slate-50 text-slate-700", helper: "Keep linked to source hash/path until review determines the next accounting action." };
 }
 
+type InvoiceDashboardRow = Awaited<ReturnType<typeof getInvoiceDashboard>>["invoices"][number];
+
+function getAttachableInvoiceBundleOptions(invoices: InvoiceDashboardRow[]) {
+  return invoices.filter((invoice) => invoice.status !== "VOID");
+}
+
+function invoiceBundleOptionLabel(invoice: InvoiceDashboardRow) {
+  const poLabel = invoice.purchaseOrderId ? ` · PO ${invoice.purchaseOrderId.slice(-8).toUpperCase()}` : "";
+  return `${invoice.supplier.name} · ${invoice.invoiceNumber} · ${invoice.status}${poLabel}`;
+}
+
 export default async function AccountingWorkbenchPage() {
   const actor = await requirePermission("accounting:view");
   const canApplyDocuments = hasPermission(actor, "invoice:create");
@@ -110,6 +121,7 @@ export default async function AccountingWorkbenchPage() {
   const approvedTotal = totalsByStatus.APPROVED?.toString() ?? "0";
   const paidTotal = paidEvidenceTotal.toString();
   const approvedInvoices = invoices.filter((invoice) => invoice.status === "APPROVED").length;
+  const attachableInvoiceBundles = getAttachableInvoiceBundleOptions(invoices);
   const invoiceWorkQueue = summarizeInvoiceWorkQueue(invoices);
   const documentTriage = getDocumentTriageSummary(documents);
   const attentionItems = [
@@ -245,7 +257,7 @@ export default async function AccountingWorkbenchPage() {
           {bookkeepingSteps.map((step, index) => (
             <li key={step.label}>
               <Link href={step.href} className={workflowStepClass(step.tone, index === nextBookkeepingIndex)}>
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-xs font-semibold ring-1 ring-current">{index + 1}</span>
+                <span className={workflowStepNumberClass(step.tone)}>{index + 1}</span>
                 <span className="min-w-0">
                   <span className="block text-xs font-semibold uppercase tracking-wide opacity-75">{step.label}</span>
                   <span className="mt-1 block text-sm font-semibold">{step.value}</span>
@@ -491,11 +503,11 @@ export default async function AccountingWorkbenchPage() {
                               <input type="hidden" name="supplierInvoiceId" value={matchedSupplierInvoiceId} />
                               <div className="text-xs text-slate-600">Suggested invoice {document.supplierInvoice?.invoiceNumber ?? matchedSupplierInvoiceId}</div>
                             </>
-                          ) : invoices.length > 0 ? (
+                          ) : attachableInvoiceBundles.length > 0 ? (
                             <select name="supplierInvoiceId" className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs" defaultValue="">
                               <option value="">Choose Invoice Bundle…</option>
-                              {invoices.map((invoice) => (
-                                <option key={invoice.id} value={invoice.id}>{invoice.supplier.name} · {invoice.invoiceNumber}</option>
+                              {attachableInvoiceBundles.map((invoice) => (
+                                <option key={invoice.id} value={invoice.id}>{invoiceBundleOptionLabel(invoice)}</option>
                               ))}
                             </select>
                           ) : null}
@@ -674,6 +686,14 @@ function workflowStepClass(tone: string, active: boolean) {
   const toneClass = miniMetricToneClass(tone);
   const emphasis = active ? "ring-2 ring-blue-200 shadow-sm" : tone === "slate" ? "opacity-75" : "";
   return `${base} ${toneClass} ${emphasis}`;
+}
+
+function workflowStepNumberClass(tone: string) {
+  const base = "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset ring-current";
+  if (tone === "emerald") return `${base} bg-emerald-100 text-emerald-800`;
+  if (tone === "amber") return `${base} bg-amber-100 text-amber-800`;
+  if (tone === "blue") return `${base} bg-blue-100 text-blue-800`;
+  return `${base} bg-slate-100 text-slate-700`;
 }
 
 function attentionToneClass(tone: string) {

@@ -1,4 +1,4 @@
-import { CostConfidence, LifecycleStatus } from "@prisma/client";
+import { CostConfidence, LifecycleStatus, MovementType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { resolveSupplierSelection } from "@/modules/suppliers/service";
@@ -64,6 +64,10 @@ export async function createItem(input: ItemMutationInput & { storageLocationId:
 
 export async function updateItem(input: ItemMutationInput & { id: string }) {
   return prisma.$transaction(async (tx) => {
+    const existingItem = await tx.item.findUniqueOrThrow({
+      where: { id: input.id },
+      select: { estimatedUnitCost: true, costCurrency: true }
+    });
     const preferredSupplierId = await resolveSupplierSelection({
       preferredSupplierId: input.preferredSupplierId,
       customSupplierName: input.customSupplierName,
@@ -101,8 +105,74 @@ export async function updateItem(input: ItemMutationInput & { id: string }) {
       payload: { ...input, preferredSupplierId }
     }, tx);
 
+    await syncMostRecentReceiptLotCostFromManualItemPrice(tx, {
+      itemId: item.id,
+      actorId: input.actorId,
+      newEstimatedUnitCost: input.estimatedUnitCost ?? null,
+      newCostCurrency: input.costCurrency ?? "USD",
+      previousEstimatedUnitCost: existingItem.estimatedUnitCost,
+      previousCostCurrency: existingItem.costCurrency
+    });
+
     return item;
   });
+}
+
+async function syncMostRecentReceiptLotCostFromManualItemPrice(
+  tx: Prisma.TransactionClient,
+  input: {
+    itemId: string;
+    actorId: string;
+    newEstimatedUnitCost: number | null;
+    newCostCurrency: string;
+    previousEstimatedUnitCost: Prisma.Decimal | null;
+    previousCostCurrency: string;
+  }
+) {
+  if (input.newEstimatedUnitCost === null) return;
+  const previousCost = input.previousEstimatedUnitCost === null ? null : Number(input.previousEstimatedUnitCost);
+  const costChanged = previousCost === null
+    || Math.abs(previousCost - input.newEstimatedUnitCost) >= 0.0001
+    || input.previousCostCurrency !== input.newCostCurrency;
+  if (!costChanged) return;
+
+  const latestReceipt = await tx.stockMovement.findFirst({
+    where: {
+      itemId: input.itemId,
+      movementType: MovementType.RECEIVE,
+      stockLotId: { not: null },
+      purchaseOrderLineId: { not: null }
+    },
+    include: { stockLot: true },
+    orderBy: { createdAt: "desc" }
+  });
+  if (!latestReceipt?.stockLot) return;
+
+  const previousLotCost = Number(latestReceipt.stockLot.unitCost);
+  if (Math.abs(previousLotCost - input.newEstimatedUnitCost) < 0.0001 && latestReceipt.stockLot.currency === input.newCostCurrency) return;
+
+  await tx.stockLot.update({
+    where: { id: latestReceipt.stockLot.id },
+    data: { unitCost: input.newEstimatedUnitCost, currency: input.newCostCurrency }
+  });
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "UPDATE_RECENT_RECEIPT_LOT_COST_FROM_ITEM_PRICE",
+    entityType: "StockLot",
+    entityId: latestReceipt.stockLot.id,
+    payload: {
+      itemId: input.itemId,
+      stockMovementId: latestReceipt.id,
+      purchaseOrderLineId: latestReceipt.purchaseOrderLineId,
+      lotCode: latestReceipt.stockLot.lotCode,
+      previousUnitCost: previousLotCost,
+      previousCurrency: latestReceipt.stockLot.currency,
+      newUnitCost: input.newEstimatedUnitCost,
+      newCurrency: input.newCostCurrency,
+      note: "Manual item price update syncs only the most recent PO receipt lot; older stock lots retain historical valuation."
+    }
+  }, tx);
 }
 
 export async function updateItemUseGroupOverride(input: { id: string; useGroupOverride?: string | null; actorId: string }) {

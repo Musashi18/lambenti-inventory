@@ -3,6 +3,7 @@
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { receiveIncomingPurchaseOrderLineFormAction } from "./actions";
+import { notifyIncomingLineReceived } from "./incoming-line-receipt-shell";
 import { initialIncomingReceiveActionState, type IncomingReceiveActionState } from "./state";
 
 type ReceiveIncomingLineFormProps = {
@@ -41,9 +42,11 @@ export function ReceiveIncomingLineForm({
 
   useEffect(() => {
     if (!state.success) return;
+    notifyIncomingLineReceived(purchaseOrderLineId);
     router.refresh();
-    window.location.reload();
-  }, [router, state.message, state.success]);
+    const timeout = window.setTimeout(() => window.location.reload(), 550);
+    return () => window.clearTimeout(timeout);
+  }, [purchaseOrderLineId, router, state.message, state.success]);
 
   return (
     <form action={formAction} className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3" aria-label="Confirm counted receipt">

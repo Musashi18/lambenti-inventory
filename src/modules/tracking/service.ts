@@ -568,6 +568,7 @@ export async function refreshTrackingNumber(input: {
   config.provider = normalizeProviderName(config.provider);
   const normalized = normalizeTrackingNumber(input.trackingNumber);
   const existing = await prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber: normalized } });
+  if (!isActiveTrackingStatus(existing.currentStatus)) return existing;
 
   if (!isTrackingServiceConfigured(config)) {
     const updated = await prisma.trackingNumber.update({
@@ -627,6 +628,9 @@ export async function refreshTrackingNumber(input: {
         deliveredAt: updated.deliveredAt
       }
     });
+    if (status === "DELIVERED") {
+      await archiveAssociatedActiveTrackingNumbers({ delivered: updated, actorId: input.actorId, actorType: "AGENT", now });
+    }
     if (updated.purchaseOrderId) {
       await syncLeadTimeAveragesForPurchaseOrder(updated.purchaseOrderId, input.actorId, "AGENT");
     }
@@ -653,6 +657,143 @@ export async function refreshTrackingNumber(input: {
     });
     return updated;
   }
+}
+
+export async function archiveTrackingNumber(input: {
+  trackingNumber: string;
+  actorId: string;
+  reason?: string;
+}) {
+  const trackingNumber = normalizeTrackingNumber(input.trackingNumber);
+  const existing = await prisma.trackingNumber.findUniqueOrThrow({ where: { trackingNumber } });
+  if (!isActiveTrackingStatus(existing.currentStatus)) {
+    throw new Error("Only active tracking numbers can be archived from the tracking workbench.");
+  }
+  const reason = blankToUndefined(input.reason) ?? "Archived manually from the tracking workbench.";
+  const updated = await prisma.trackingNumber.update({
+    where: { id: existing.id },
+    data: {
+      currentStatus: "ARCHIVED",
+      statusDescription: reason,
+      nextRefreshAt: null,
+      refreshStatus: "ARCHIVED",
+      refreshError: null
+    }
+  });
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "ARCHIVE_TRACKING_NUMBER",
+    entityType: "TrackingNumber",
+    entityId: existing.id,
+    payload: trackingNumberSnapshot(existing, { reason })
+  });
+  return updated;
+}
+
+export async function deleteTrackingNumber(input: {
+  trackingNumber: string;
+  actorId: string;
+  reason?: string;
+}) {
+  const trackingNumber = normalizeTrackingNumber(input.trackingNumber);
+  const existing = await prisma.trackingNumber.findUniqueOrThrow({
+    where: { trackingNumber },
+    include: { _count: { select: { events: true } } }
+  });
+  if (!isActiveTrackingStatus(existing.currentStatus)) {
+    throw new Error("Only active tracking numbers can be deleted from the tracking workbench.");
+  }
+  const reason = blankToUndefined(input.reason) ?? "Deleted manually from the tracking workbench.";
+  await writeAuditLog({
+    actorType: "USER",
+    actorId: input.actorId,
+    action: "DELETE_TRACKING_NUMBER",
+    entityType: "TrackingNumber",
+    entityId: existing.id,
+    payload: trackingNumberSnapshot(existing, { reason, eventCount: existing._count.events })
+  });
+  await prisma.trackingNumber.delete({ where: { id: existing.id } });
+  return existing;
+}
+
+async function archiveAssociatedActiveTrackingNumbers(input: {
+  delivered: {
+    id: string;
+    trackingNumber: string;
+    externalOrderId: string | null;
+    purchaseOrderId: string | null;
+  };
+  actorId: string;
+  actorType: "USER" | "AGENT";
+  now: Date;
+}) {
+  const linkedBy = [
+    input.delivered.externalOrderId ? { externalOrderId: input.delivered.externalOrderId } : null,
+    input.delivered.purchaseOrderId ? { purchaseOrderId: input.delivered.purchaseOrderId } : null
+  ].filter((value): value is { externalOrderId: string } | { purchaseOrderId: string } => Boolean(value));
+  if (linkedBy.length === 0) return [];
+
+  const siblings = await prisma.trackingNumber.findMany({
+    where: {
+      id: { not: input.delivered.id },
+      OR: linkedBy,
+      NOT: { currentStatus: { in: ["DELIVERED", "ARCHIVED"] } }
+    }
+  });
+  const archived = [];
+  for (const sibling of siblings.filter((row) => isActiveTrackingStatus(row.currentStatus))) {
+    const reason = `Archived automatically because associated active tracking number ${input.delivered.trackingNumber} was marked delivered.`;
+    const updated = await prisma.trackingNumber.update({
+      where: { id: sibling.id },
+      data: {
+        currentStatus: "ARCHIVED",
+        statusDescription: reason,
+        nextRefreshAt: null,
+        refreshStatus: "ARCHIVED",
+        refreshError: null
+      }
+    });
+    archived.push(updated);
+    await writeAuditLog({
+      actorType: input.actorType,
+      actorId: input.actorId,
+      action: "AUTO_ARCHIVE_ASSOCIATED_TRACKING_NUMBER",
+      entityType: "TrackingNumber",
+      entityId: sibling.id,
+      payload: trackingNumberSnapshot(sibling, {
+        reason,
+        deliveredTrackingNumber: input.delivered.trackingNumber,
+        deliveredTrackingNumberId: input.delivered.id,
+        archivedAt: input.now.toISOString()
+      })
+    });
+  }
+  return archived;
+}
+
+function trackingNumberSnapshot(row: {
+  id: string;
+  trackingNumber: string;
+  currentStatus: string;
+  refreshStatus: string;
+  externalOrderId: string | null;
+  purchaseOrderId: string | null;
+  emailOrderImportId: string | null;
+  source: string;
+  sourceUrl: string | null;
+}, extra: Record<string, unknown> = {}) {
+  return {
+    trackingNumber: row.trackingNumber,
+    previousStatus: row.currentStatus,
+    previousRefreshStatus: row.refreshStatus,
+    externalOrderId: row.externalOrderId,
+    purchaseOrderId: row.purchaseOrderId,
+    emailOrderImportId: row.emailOrderImportId,
+    source: row.source,
+    sourceUrl: row.sourceUrl,
+    ...extra
+  };
 }
 
 export async function refreshDueTrackingNumbers(input: {
@@ -790,8 +931,10 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
     };
   });
 
-  const activeRows = screenDuplicateOrderShipments(mappedRows.filter((row) => isActiveTrackingStatus(row.currentStatus)));
-  const deliveredRows = mappedRows.filter((row) => row.currentStatus === "DELIVERED");
+  const rowsWithRelated = annotateRelatedTrackingNumbers(mappedRows);
+  const activeRows = screenDuplicateOrderShipments(rowsWithRelated.filter((row) => isActiveTrackingStatus(row.currentStatus)));
+  const deliveredRows = rowsWithRelated.filter((row) => row.currentStatus === "DELIVERED");
+  const archivedRows = rowsWithRelated.filter((row) => row.currentStatus === "ARCHIVED");
 
   return {
     service: {
@@ -805,12 +948,40 @@ export async function getTrackingDashboard(input: { now?: Date; config?: Trackin
       total: rows.length,
       due: rows.filter((row) => isActiveTrackingStatus(row.currentStatus) && (!row.nextRefreshAt || row.nextRefreshAt <= now)).length,
       delivered: rows.filter((row) => row.currentStatus === "DELIVERED").length,
+      archived: rows.filter((row) => row.currentStatus === "ARCHIVED").length,
       needsConfiguration: rows.filter((row) => row.refreshStatus === "CONFIG_REQUIRED").length,
       failed: rows.filter((row) => row.refreshStatus === "FAILED").length
     },
     rows: activeRows,
-    deliveredRows
+    deliveredRows,
+    archivedRows
   };
+}
+
+function annotateRelatedTrackingNumbers(rows: TrackingDashboardRow[]) {
+  const grouped = new Map<string, TrackingDashboardRow[]>();
+  for (const row of rows) {
+    const key = duplicateShipmentOrderKey(row);
+    if (!key) continue;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+
+  const relatedById = new Map<string, { relatedTrackingNumbers: string[]; screenedShipmentCount: number }>();
+  for (const group of grouped.values()) {
+    if (group.length <= 1) continue;
+    const relatedTrackingNumbers = [...group]
+      .sort((left, right) => {
+        const firstSeenDelta = trackingRowFirstSeenTime(left) - trackingRowFirstSeenTime(right);
+        return firstSeenDelta === 0 ? left.trackingNumber.localeCompare(right.trackingNumber) : firstSeenDelta;
+      })
+      .map((row) => row.trackingNumber);
+    for (const row of group) relatedById.set(row.id, { relatedTrackingNumbers, screenedShipmentCount: group.length });
+  }
+
+  return rows.map((row) => {
+    const related = relatedById.get(row.id);
+    return related ? { ...row, ...related } : row;
+  });
 }
 
 function screenDuplicateOrderShipments(rows: TrackingDashboardRow[]) {
@@ -831,17 +1002,11 @@ function screenDuplicateOrderShipments(rows: TrackingDashboardRow[]) {
       screened.push(group[0]);
       continue;
     }
-    const relatedTrackingNumbers = [...group]
-      .sort((left, right) => {
-        const firstSeenDelta = trackingRowFirstSeenTime(left) - trackingRowFirstSeenTime(right);
-        return firstSeenDelta === 0 ? left.trackingNumber.localeCompare(right.trackingNumber) : firstSeenDelta;
-      })
-      .map((row) => row.trackingNumber);
     const selected = newestActiveShipmentRow(group);
     screened.push({
       ...selected,
-      relatedTrackingNumbers,
-      screenedShipmentCount: group.length
+      relatedTrackingNumbers: selected.relatedTrackingNumbers.length > 0 ? selected.relatedTrackingNumbers : group.map((row) => row.trackingNumber),
+      screenedShipmentCount: Math.max(selected.screenedShipmentCount, group.length)
     });
   }
 

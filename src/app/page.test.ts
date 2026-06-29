@@ -64,5 +64,9 @@ describe("DashboardPage source contract", () => {
     expect(source).not.toContain("Buildable now");
     expect(source).not.toContain("Unblock package build capacity");
     expect(source).toContain("formatItemType(item)");
+    expect(source).toContain("formatQuantity(summary.componentsOnHand");
+    expect(source).toContain("formatQuantity(item.onHand, { fixed: true })");
+    expect(source).toContain("Not Currently Needed Low Stock Components");
+    expect(source).toContain("summary.lowStockNotCurrentlyNeededItems");
   });
 });

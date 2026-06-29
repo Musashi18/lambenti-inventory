@@ -1,5 +1,7 @@
 import { getIncomingOrders } from "@/modules/purchasing/service";
 import { requirePermission } from "@/modules/auth/permissions";
+import { formatQuantity } from "@/modules/inventory/quantity-format";
+import { IncomingLineReceiptShell } from "./incoming-line-receipt-shell";
 import { ReceiveIncomingLineForm } from "./receive-line-form";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +46,7 @@ export default async function IncomingPage() {
               <div className="border-b border-slate-100 px-4 py-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
                   <span className="font-semibold uppercase tracking-wide">Receiving Progress</span>
-                  <span>{progress.receivedQuantity} / {progress.orderedQuantity} Received · {progress.remainingQuantity} Remaining</span>
+                  <span>{formatQuantity(progress.receivedQuantity, { fixed: true })} / {formatQuantity(progress.orderedQuantity, { fixed: true })} Received · {formatQuantity(progress.remainingQuantity, { fixed: true })} Remaining</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-label="Purchase order receiving progress">
                   <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500" style={{ width: `${progress.percent}%` }} />
@@ -57,7 +59,7 @@ export default async function IncomingPage() {
                   <p className="mt-1">These SKUs appear multiple times on this PO. Receive each source line only after human count, but use this summary to batch-check the packing slip before entering counts.</p>
                   <ul className="mt-2 list-disc space-y-1 pl-5">
                     {duplicateLineGroups.map((group) => (
-                      <li key={group.sku}>{group.sku}: {group.lineCount} lines · ordered {group.orderedQuantity} · remaining {group.remainingQuantity}</li>
+                      <li key={group.sku}>{group.sku}: {group.lineCount} lines · ordered {formatQuantity(group.orderedQuantity, { fixed: true })} · remaining {formatQuantity(group.remainingQuantity, { fixed: true })}</li>
                     ))}
                   </ul>
                 </div>
@@ -68,15 +70,16 @@ export default async function IncomingPage() {
                   const remainingQuantity = Math.max(line.quantity - line.receivedQuantity, 0);
                   const defaultReference = `PO-${order.id.slice(-8).toUpperCase()}-${line.item.sku}`;
                   return (
-                    <div key={line.id} className="p-4">
+                    <IncomingLineReceiptShell key={line.id} purchaseOrderLineId={line.id}>
+                    <div className="p-4">
                       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                         <div>
                           <div className="text-sm font-medium text-slate-900">{line.item.sku}</div>
                           <div className="text-sm text-slate-600">{line.item.description}</div>
                           <div className="mt-2 grid gap-2 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
-                            <Metric label="Ordered" value={line.quantity.toString()} />
-                            <Metric label="Received" value={line.receivedQuantity.toString()} />
-                            <Metric label="Remaining Quantity" value={remainingQuantity.toString()} />
+                            <Metric label="Ordered" value={formatQuantity(line.quantity, { fixed: true })} />
+                            <Metric label="Received" value={formatQuantity(line.receivedQuantity, { fixed: true })} />
+                            <Metric label="Remaining Quantity" value={formatQuantity(remainingQuantity, { fixed: true })} />
                             <Metric label="Unit Price" value={`${line.item.costCurrency || "USD"} ${line.unitPrice.toString()}`} />
                           </div>
                         </div>
@@ -98,6 +101,7 @@ export default async function IncomingPage() {
                         />
                       ) : null}
                     </div>
+                    </IncomingLineReceiptShell>
                   );
                 })}
               </div>

@@ -27,6 +27,11 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(formSource).toContain("receivedAt");
     expect(formSource).toContain("unitCost");
     expect(formSource).toContain("Receive Counted Stock");
+    expect(formSource).toContain("notifyIncomingLineReceived");
+    expect(formSource).toContain("setTimeout(() => window.location.reload(), 550)");
+    expect(pageSource).toContain("IncomingLineReceiptShell");
+    expect(pageSource).toContain("formatQuantity");
+    expect(readFileSync(join(__dirname, "incoming-line-receipt-shell.tsx"), "utf8")).toContain("duration-500");
     expect(formSource).toContain("Use this only after the package is physically counted");
     expect(pageSource).toContain("Receiving Progress");
     expect(pageSource).toContain("Packing Slip Duplicate Check");

@@ -2,6 +2,7 @@ import type { MovementType } from "@prisma/client";
 import { convertUnitCostToUsd, type CurrencyRates } from "@/modules/currency";
 import { sortItemsByUseGroup } from "./item-option-groups";
 import { calculateStockPosition } from "./ledger";
+import { roundDisplayQuantity } from "./quantity-format";
 
 export type LotValuationInput = {
   itemId: string;
@@ -25,6 +26,8 @@ export type LotValuationRow = {
   value: number;
 };
 
+export type PricedItemCostSource = "ACCOUNTING_LANDED_COST" | "ITEM_UNIT_COST" | "BOM_ROLLUP";
+
 export type PricedItemValuationInput = {
   itemId: string;
   sku: string;
@@ -33,6 +36,9 @@ export type PricedItemValuationInput = {
   useGroupOverride?: string | null;
   unitCost: number | null;
   currency: string;
+  costSource?: PricedItemCostSource | null;
+  costSourceLabel?: string | null;
+  costSourceRefs?: string[];
   movements: Array<{
     movementType: MovementType;
     quantity: number | { toNumber(): number };
@@ -48,6 +54,9 @@ export type PricedItemValuationRow = {
   quantity: number;
   unitCost: number;
   currency: string;
+  costSource?: PricedItemCostSource | null;
+  costSourceLabel?: string | null;
+  costSourceRefs: string[];
   value: number;
 };
 
@@ -87,16 +96,20 @@ export function calculatePricedItemValuations(
     .map((item) => {
       const position = calculateStockPosition(item.movements);
       const unitCost = convertUnitCostToUsd(item.unitCost ?? 0, item.currency, { rates: options.rates });
+      const quantity = roundDisplayQuantity(position.onHand);
       return {
         itemId: item.itemId,
         sku: item.sku,
         description: item.description,
         ...(item.category !== undefined ? { category: item.category } : {}),
         ...(item.useGroupOverride !== undefined ? { useGroupOverride: item.useGroupOverride } : {}),
-        quantity: position.onHand,
+        quantity,
         unitCost,
         currency: "USD",
-        value: roundCurrency(position.onHand * unitCost)
+        ...(item.costSource !== undefined ? { costSource: item.costSource } : {}),
+        ...(item.costSourceLabel !== undefined ? { costSourceLabel: item.costSourceLabel } : {}),
+        costSourceRefs: item.costSourceRefs ?? [],
+        value: roundCurrency(quantity * unitCost)
       };
     });
 

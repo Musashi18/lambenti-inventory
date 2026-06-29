@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
@@ -127,7 +128,7 @@ async function renderPdfPagesToImages(input: ExtractAccountingDocumentTextInput)
   try {
     await writeFile(pdfPath, input.buffer);
     await execFileAsync(
-      process.env.LAMBENTI_PDFTOPPM_BIN || "pdftoppm",
+      resolvePdfUtilityCommand("pdftoppm", process.env.LAMBENTI_PDFTOPPM_BIN),
       ["-png", "-r", String(dpi), "-f", "1", "-l", String(maxPages), pdfPath, outputPrefix],
       { timeout: Number(process.env.LAMBENTI_PDF_OCR_TIMEOUT_MS || 60_000), maxBuffer: 2_000_000 }
     );
@@ -222,7 +223,7 @@ async function extractPdfTextWithPdftotext(buffer: Buffer) {
   try {
     await writeFile(pdfPath, buffer);
     const { stdout } = await execFileAsync(
-      process.env.LAMBENTI_PDFTOTEXT_BIN || "pdftotext",
+      resolvePdfUtilityCommand("pdftotext", process.env.LAMBENTI_PDFTOTEXT_BIN),
       ["-layout", "-enc", "UTF-8", pdfPath, "-"],
       { timeout: Number(process.env.LAMBENTI_PDF_TEXT_TIMEOUT_MS || 30_000), maxBuffer: 5_000_000 }
     );
@@ -288,4 +289,21 @@ function isMissingExecutableError(error: unknown) {
     && error !== null
     && ("code" in error)
     && (error as { code?: unknown }).code === "ENOENT";
+}
+
+function resolvePdfUtilityCommand(commandName: "pdftoppm" | "pdftotext", configured?: string) {
+  const explicit = configured?.trim();
+  if (explicit) return explicit;
+  if (process.platform !== "win32") return commandName;
+
+  const executable = `${commandName}.exe`;
+  const candidates = [
+    `D:/Git/mingw64/bin/${executable}`,
+    `C:/Program Files/Git/mingw64/bin/${executable}`,
+    `C:/Program Files (x86)/Git/mingw64/bin/${executable}`,
+    process.env.ProgramFiles ? `${process.env.ProgramFiles}/Git/mingw64/bin/${executable}` : null,
+    process.env["ProgramFiles(x86)"] ? `${process.env["ProgramFiles(x86)"]}/Git/mingw64/bin/${executable}` : null
+  ].filter((value): value is string => Boolean(value));
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? commandName;
 }

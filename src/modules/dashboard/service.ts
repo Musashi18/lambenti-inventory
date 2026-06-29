@@ -2,10 +2,11 @@ import { getStockSummaries } from "@/modules/inventory/service";
 import { sortItemsByUseGroup } from "@/modules/inventory/item-option-groups";
 import { calculatePricedItemValuations, type PricedItemValuationRow } from "@/modules/inventory/valuation";
 import { getActivePricedItemValuationInputs } from "@/modules/inventory/pricing";
+import { roundDisplayQuantity } from "@/modules/inventory/quantity-format";
 import { getIncomingOrders, getPurchaseRecommendations } from "@/modules/purchasing/service";
 import { getLeadTimeLog, type LeadTimeLog } from "@/modules/tracking/service";
 import { prisma } from "@/lib/prisma";
-import type { ShortageSummary } from "@/types/inventory";
+import type { ShortageSummary, StockSummary } from "@/types/inventory";
 import type { Prisma } from "@prisma/client";
 
 const LAMBENTI_ASSEMBLED_PACKAGE_SKU = "LAMBENTI_PACKAGE";
@@ -14,11 +15,11 @@ const LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS = [/lambenti\s+assembled\s
 export async function getDashboardSummary() {
   const stock = await getStockSummaries();
   const stockItems = sortItemsByUseGroup(stock);
-  const lowStockItems = sortItemsByUseGroup(stock.filter((item) => item.available < item.reorderPoint));
+  const lowStockCandidates = stock.filter((item) => item.available < item.reorderPoint);
   const [activeItems, activeFinishedBoms, reservations] = await Promise.all([
     prisma.item.findMany({
       where: { lifecycleStatus: { not: "OBSOLETE" } },
-      select: { id: true, sku: true, description: true, category: true, useGroupOverride: true }
+      select: { id: true, sku: true, description: true, category: true, useGroupOverride: true, reorderPoint: true }
     }),
     prisma.bOM.findMany({
       where: {
@@ -62,6 +63,9 @@ export async function getDashboardSummary() {
 
   const itemCategoryById = new Map(activeItems.map((item) => [item.id, item.category]));
   const stockByItemId = new Map(stock.map((item) => [item.itemId, item]));
+  const lowStockPartition = partitionLowStockByFinishedGoodNeed(lowStockCandidates, activeFinishedBoms, stockByItemId);
+  const lowStockItems = sortItemsByUseGroup(lowStockPartition.currentlyNeeded);
+  const lowStockNotCurrentlyNeededItems = sortItemsByUseGroup(lowStockPartition.notCurrentlyNeeded);
   const componentsOnHand = stock
     .filter((item) => itemCategoryById.get(item.itemId) !== "FINISHED_GOOD")
     .reduce((total, item) => total + item.onHand, 0);
@@ -173,14 +177,15 @@ export async function getDashboardSummary() {
 
   return {
     stockItems,
-    totalOnHand: stock.reduce((total, item) => total + item.onHand, 0),
-    componentsOnHand,
+    totalOnHand: roundDisplayQuantity(stock.reduce((total, item) => total + item.onHand, 0)),
+    componentsOnHand: roundDisplayQuantity(componentsOnHand),
     buildCapacity,
     assembledPackages,
     launchReadiness,
     dashboardGraphs,
-    totalAvailable: stock.reduce((total, item) => total + item.available, 0),
+    totalAvailable: roundDisplayQuantity(stock.reduce((total, item) => total + item.available, 0)),
     lowStockItems,
+    lowStockNotCurrentlyNeededItems,
     shortages: upcomingShortages,
     inventoryValuation,
     recommendations,
@@ -450,7 +455,12 @@ type DashboardItemOption = {
   sku: string;
   description: string;
   category: string;
+  reorderPoint: number;
   useGroupOverride?: string | null;
+};
+
+type NotCurrentlyNeededLowStockItem = StockSummary & {
+  notCurrentlyNeededReason: string;
 };
 
 type ActiveFinishedBom = {
@@ -472,6 +482,53 @@ function isLambentiAssembledPackageItem(item: Pick<DashboardItemOption, "sku" | 
   return item.category === "FINISHED_GOOD"
     && (item.sku === LAMBENTI_ASSEMBLED_PACKAGE_SKU
       || LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(item.description)));
+}
+
+function partitionLowStockByFinishedGoodNeed(
+  lowStockItems: StockSummary[],
+  activeFinishedBoms: ActiveFinishedBom[],
+  stockByItemId: Map<string, DashboardStockEntry>
+) {
+  const finishedGoodsByComponent = new Map<string, Array<{ sku: string; available: number; reorderPoint: number; sufficient: boolean }>>();
+
+  for (const bom of activeFinishedBoms) {
+    const parentAvailable = stockByItemId.get(bom.parentItem.id)?.available ?? 0;
+    const sufficient = bom.parentItem.reorderPoint > 0
+      ? parentAvailable >= bom.parentItem.reorderPoint
+      : parentAvailable > 0;
+
+    for (const line of bom.lines) {
+      const parents = finishedGoodsByComponent.get(line.componentItemId) ?? [];
+      parents.push({
+        sku: bom.parentItem.sku,
+        available: parentAvailable,
+        reorderPoint: bom.parentItem.reorderPoint,
+        sufficient
+      });
+      finishedGoodsByComponent.set(line.componentItemId, parents);
+    }
+  }
+
+  const currentlyNeeded: StockSummary[] = [];
+  const notCurrentlyNeeded: NotCurrentlyNeededLowStockItem[] = [];
+
+  for (const item of lowStockItems) {
+    const finishedGoodParents = finishedGoodsByComponent.get(item.itemId) ?? [];
+    if (finishedGoodParents.length === 0 || finishedGoodParents.some((parent) => !parent.sufficient)) {
+      currentlyNeeded.push(item);
+      continue;
+    }
+
+    const parentSummary = finishedGoodParents
+      .map((parent) => `${parent.sku} ${parent.available}/${parent.reorderPoint}`)
+      .join(", ");
+    notCurrentlyNeeded.push({
+      ...item,
+      notCurrentlyNeededReason: `Finished build coverage is sufficient: ${parentSummary}`
+    });
+  }
+
+  return { currentlyNeeded, notCurrentlyNeeded };
 }
 
 function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockByItemId: Map<string, DashboardStockEntry>) {

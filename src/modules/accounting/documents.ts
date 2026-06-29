@@ -1,6 +1,6 @@
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { AccountingDocumentStatus, Prisma, PurchaseOrderStatus } from "@prisma/client";
+import { AccountingDocumentStatus, InvoiceStatus, Prisma, PurchaseOrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { assertPermission, type AuthenticatedActor } from "@/modules/auth/permissions";
@@ -88,6 +88,51 @@ export async function ingestAccountingDocumentUpload(input: { file: AccountingUp
     include: { supplier: true, purchaseOrder: true, supplierInvoice: true, emailOrderImport: true }
   });
   if (existing) {
+    if (!existing.extractedText && canAccountingDocumentBeReanalyzed(existing)) {
+      const extracted = await extractAccountingDocumentText({
+        buffer,
+        mimeType: stored.mimeType,
+        originalFileName: stored.originalFileName
+      });
+      const outcome = await analyzeExtractionOutcome({
+        extractedText: extracted.text,
+        extractionWarnings: extracted.warnings,
+        originalFileName: stored.originalFileName,
+        sha256: stored.sha256
+      });
+      const updated = await prisma.accountingDocument.update({
+        where: { id: existing.id },
+        data: {
+          extractedText: extracted.text,
+          analysisJson: toJson(outcome.analysis),
+          status: outcome.status,
+          errorMessage: outcome.errorMessage,
+          supplierId: outcome.supplierId,
+          purchaseOrderId: outcome.purchaseOrderId,
+          supplierInvoiceId: outcome.supplierInvoiceId
+        },
+        include: { supplier: true, purchaseOrder: true, supplierInvoice: true, emailOrderImport: true }
+      });
+      await writeAuditLog({
+        actorType: "USER",
+        actorId: input.actorId,
+        action: "REANALYZE_DUPLICATE_ACCOUNTING_DOCUMENT_UPLOAD",
+        entityType: "AccountingDocument",
+        entityId: existing.id,
+        payload: {
+          originalFileName: stored.originalFileName,
+          sha256: stored.sha256,
+          status: outcome.status,
+          classification: outcome.analysis.classification,
+          hadExtractedText: Boolean(extracted.text)
+        }
+      });
+      return {
+        document: updated,
+        analysis: outcome.analysis,
+        duplicate: true
+      };
+    }
     return {
       document: existing,
       analysis: normalizeAnalysis(existing.analysisJson),
@@ -295,14 +340,19 @@ function assertAccountingDocumentCanBeReanalyzed(document: {
   status: AccountingDocumentStatus;
   supplierInvoiceId: string | null;
 }) {
-  if (
-    document.status === AccountingDocumentStatus.APPLIED
-    || document.status === AccountingDocumentStatus.ATTACHED
-    || document.status === AccountingDocumentStatus.ARCHIVED
-    || document.supplierInvoiceId
-  ) {
+  if (!canAccountingDocumentBeReanalyzed(document)) {
     throw new Error("Linked accounting evidence cannot be re-analyzed. Upload a corrected source document or attach a separate supporting document instead.");
   }
+}
+
+function canAccountingDocumentBeReanalyzed(document: {
+  status: AccountingDocumentStatus;
+  supplierInvoiceId: string | null;
+}) {
+  return document.status !== AccountingDocumentStatus.APPLIED
+    && document.status !== AccountingDocumentStatus.ATTACHED
+    && document.status !== AccountingDocumentStatus.ARCHIVED
+    && !document.supplierInvoiceId;
 }
 
 export async function analyzeAccountingDocumentText(input: {
@@ -547,14 +597,17 @@ export async function attachAccountingDocumentEvidence(input: {
   const invoice = supplierInvoiceId
     ? await prisma.supplierInvoice.findUniqueOrThrow({
       where: { id: supplierInvoiceId },
-      select: { id: true, supplierId: true, purchaseOrderId: true }
+      select: { id: true, supplierId: true, purchaseOrderId: true, status: true }
     })
     : null;
+  if (invoice?.status === InvoiceStatus.VOID) {
+    throw new Error("Voided supplier invoices cannot receive new accounting evidence. Choose the active invoice bundle for this order instead.");
+  }
   const purchaseOrderId = input.purchaseOrderId ?? document.purchaseOrderId ?? invoice?.purchaseOrderId ?? analysis?.matchedPurchaseOrderId;
   const purchaseOrder = purchaseOrderId
     ? await prisma.purchaseOrder.findUniqueOrThrow({
       where: { id: purchaseOrderId },
-      select: { id: true, supplierId: true, invoices: { select: { id: true }, orderBy: { invoiceDate: "desc" }, take: 1 } }
+      select: { id: true, supplierId: true, invoices: { where: { status: { not: InvoiceStatus.VOID } }, select: { id: true }, orderBy: { invoiceDate: "desc" }, take: 1 } }
     })
     : null;
   const resolvedSupplierInvoiceId = invoice?.id ?? purchaseOrder?.invoices[0]?.id ?? undefined;
@@ -795,7 +848,7 @@ async function findMatchingSupplierInvoice(input: {
   purchaseOrderId?: string;
 }) {
   if (input.sha256) {
-    const byHash = await prisma.supplierInvoice.findFirst({ where: { sourceDocumentHash: input.sha256 }, select: { id: true } });
+    const byHash = await prisma.supplierInvoice.findFirst({ where: { sourceDocumentHash: input.sha256, status: { not: InvoiceStatus.VOID } }, select: { id: true } });
     if (byHash) return byHash;
   }
 
@@ -803,13 +856,13 @@ async function findMatchingSupplierInvoice(input: {
     const invoiceNumberKey = normalizeInvoiceNumberKey(input.invoiceNumber);
     const bySupplierInvoiceNumber = await prisma.supplierInvoice.findUnique({
       where: { supplierId_invoiceNumberKey: { supplierId: input.supplierId, invoiceNumberKey } },
-      select: { id: true }
+      select: { id: true, status: true }
     });
-    if (bySupplierInvoiceNumber) return bySupplierInvoiceNumber;
+    if (bySupplierInvoiceNumber && bySupplierInvoiceNumber.status !== InvoiceStatus.VOID) return bySupplierInvoiceNumber;
   }
 
   if (input.purchaseOrderId && !input.invoiceNumber) {
-    const byPurchaseOrder = await prisma.supplierInvoice.findFirst({ where: { purchaseOrderId: input.purchaseOrderId }, orderBy: { invoiceDate: "desc" }, select: { id: true } });
+    const byPurchaseOrder = await prisma.supplierInvoice.findFirst({ where: { purchaseOrderId: input.purchaseOrderId, status: { not: InvoiceStatus.VOID } }, orderBy: { invoiceDate: "desc" }, select: { id: true } });
     if (byPurchaseOrder) return byPurchaseOrder;
   }
 

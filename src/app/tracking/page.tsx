@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { RefreshingActionForm } from "@/app/refreshing-action-form";
 import { TrackingDataDisclosure } from "./tracking-data-disclosure";
 import {
+  archiveTrackingNumberAction,
+  deleteTrackingNumberAction,
   refreshAllTrackingAction,
   refreshSingleTrackingAction,
   saveManualTrackingNumbersAction,
@@ -23,7 +25,7 @@ export const dynamic = "force-dynamic";
 
 type TrackingDashboard = Awaited<ReturnType<typeof getTrackingDashboard>>;
 
-type Tone = "neutral" | "success" | "warning" | "danger";
+type Tone = "neutral" | "success" | "warning" | "danger" | "blue";
 
 export default async function TrackingPage() {
   const [dashboard, linkOptions, leadTimeLog] = await Promise.all([
@@ -42,6 +44,7 @@ export default async function TrackingPage() {
       <ManualTrackingDropBox linkOptions={linkOptions} hasOpenShipments={dashboard.rows.length > 0} />
       <DeliveredTrackingHistory rows={dashboard.deliveredRows} />
       <LeadTimeLearningLog log={leadTimeLog} />
+      <ArchivedTrackingNumbers rows={dashboard.archivedRows} />
     </main>
   );
 }
@@ -82,7 +85,7 @@ function TrackingHero({ dashboard }: { dashboard: TrackingDashboard }) {
 function TrackingSummary({ dashboard }: { dashboard: TrackingDashboard }) {
   return (
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="Tracking summary">
-      <Metric label="Open Shipments" value={dashboard.rows.length} hint="Active tracking numbers" tone={dashboard.rows.length > 0 ? "warning" : "neutral"} />
+      <Metric label="Open Shipments" value={dashboard.rows.length} hint="Active tracking numbers" tone="blue" />
       <Metric label="Due refresh" value={dashboard.summary.due} hint="Ready to check now" tone={dashboard.summary.due > 0 ? "warning" : "neutral"} />
       <Metric label="Failed refresh" value={dashboard.summary.failed} hint="Needs operator review" tone={dashboard.summary.failed > 0 ? "danger" : "neutral"} />
       <Metric label="Delivered" value={dashboard.summary.delivered} hint="Retained as history" tone="success" />
@@ -546,6 +549,48 @@ function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
   );
 }
 
+function ArchivedTrackingNumbers({ rows }: { rows: TrackingDashboardRow[] }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 p-5">
+        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Inactive tracking evidence</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">Archived Tracking Numbers</h2>
+            <p className="mt-1 text-sm text-slate-600">{rows.length} Archived Record{rows.length === 1 ? "" : "s"} Kept for provenance. Archived numbers are hidden from active refresh and do not confirm delivery or receiving.</p>
+          </div>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">Archived {rows.length}</span>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <div className="p-5 text-sm text-slate-500">No archived tracking numbers yet.</div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {rows.map((row) => (
+            <div key={row.id} className="p-5">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="font-mono text-sm font-semibold text-slate-900">{row.trackingNumber}</div>
+                  <div className="mt-1 text-sm text-slate-700">{row.linkedOrderLabel}</div>
+                  {row.supplierName ? <div className="text-xs text-slate-500">Supplier: {row.supplierName}</div> : null}
+                  {row.statusDescription ? <div className="mt-1 text-xs text-slate-500">Archive Note: {row.statusDescription}</div> : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  <StatusBadge status={row.currentStatus} />
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">Updated {formatDate(row.updatedAt)}</span>
+                </div>
+              </div>
+              <div className="mt-3">
+                <PackageTrackingDataDetails row={row} compact />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
   return (
     <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -759,8 +804,19 @@ function ShipmentDetailsDisclosure({ row }: { row: TrackingDashboardRow }) {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-slate-500">Events saved: {row.eventCount}</div>
-          <RefreshSingleButton row={row} />
+          <div className="flex flex-wrap items-center gap-2">
+            <RefreshSingleButton row={row} />
+            {row.currentStatus !== "ARCHIVED" && row.currentStatus !== "DELIVERED" ? (
+              <>
+                <ArchiveTrackingButton row={row} />
+                <DeleteTrackingButton row={row} />
+              </>
+            ) : null}
+          </div>
         </div>
+        {row.currentStatus !== "ARCHIVED" && row.currentStatus !== "DELIVERED" ? (
+          <p className="text-[11px] text-slate-500">Archive hides a stale active number; delete removes an incorrect active evidence row. Neither action receives stock or confirms delivery.</p>
+        ) : null}
       </div>
     </details>
   );
@@ -882,6 +938,28 @@ function RefreshSingleButton({ row, compact = false }: { row: TrackingDashboardR
   );
 }
 
+function ArchiveTrackingButton({ row, compact = false }: { row: TrackingDashboardRow; compact?: boolean }) {
+  return (
+    <RefreshingActionForm action={archiveTrackingNumberAction}>
+      <input type="hidden" name="trackingNumber" value={row.trackingNumber} />
+      <button className={`rounded-md border border-amber-300 font-medium text-amber-800 hover:bg-amber-50 ${compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs"}`} type="submit">
+        Archive
+      </button>
+    </RefreshingActionForm>
+  );
+}
+
+function DeleteTrackingButton({ row, compact = false }: { row: TrackingDashboardRow; compact?: boolean }) {
+  return (
+    <RefreshingActionForm action={deleteTrackingNumberAction}>
+      <input type="hidden" name="trackingNumber" value={row.trackingNumber} />
+      <button className={`rounded-md border border-red-200 font-medium text-red-700 hover:bg-red-50 ${compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs"}`} type="submit">
+        Delete
+      </button>
+    </RefreshingActionForm>
+  );
+}
+
 function Metric({ label, value, hint, tone = "neutral" }: { label: string; value: number; hint?: string; tone?: Tone }) {
   const toneClasses = tone === "danger"
     ? "border-red-200 bg-red-50"
@@ -889,12 +967,17 @@ function Metric({ label, value, hint, tone = "neutral" }: { label: string; value
       ? "border-amber-200 bg-amber-50"
       : tone === "success"
         ? "border-emerald-200 bg-emerald-50"
-        : "border-slate-200 bg-white";
+        : tone === "blue"
+          ? "border-blue-200 bg-blue-50"
+          : "border-slate-200 bg-white";
+  const labelClasses = tone === "blue" ? "text-blue-700" : "text-slate-500";
+  const valueClasses = tone === "blue" ? "text-blue-900" : "text-slate-900";
+  const hintClasses = tone === "blue" ? "text-blue-700" : "text-slate-500";
   return (
     <div className={`rounded-xl border p-4 shadow-sm ${toneClasses}`}>
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
-      {hint ? <div className="mt-1 text-xs text-slate-500">{hint}</div> : null}
+      <div className={`text-xs uppercase tracking-wide ${labelClasses}`}>{label}</div>
+      <div className={`mt-1 text-2xl font-semibold ${valueClasses}`}>{value}</div>
+      {hint ? <div className={`mt-1 text-xs ${hintClasses}`}>{hint}</div> : null}
     </div>
   );
 }

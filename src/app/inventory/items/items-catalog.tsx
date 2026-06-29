@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { convertToUsd, type CurrencyRates } from "@/modules/currency";
 import { getItemUseGroup, groupItemOptionsByUse, ITEM_USE_GROUP_RULES } from "@/modules/inventory/item-option-groups";
+import { formatQuantity } from "@/modules/inventory/quantity-format";
 import {
   archiveItemFormAction,
   unarchiveItemFormAction,
@@ -185,7 +186,7 @@ export function ItemsCatalog({
                     <td className="px-4 py-3 font-medium">{item.sku}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${stockHealth.className}`}>{stockHealth.label}</span>
-                      <div className="mt-1 text-xs text-slate-500">On Hand {item.onHand} · Available {item.available}</div>
+                      <div className="mt-1 text-xs text-slate-500">On Hand {formatQuantity(item.onHand, { fixed: true })} · Available {formatQuantity(item.available, { fixed: true })}</div>
                       <div className="text-xs text-slate-500">Supplier {item.preferredSupplierName || "—"}</div>
                       <div className="text-[11px] text-slate-400">{stockHealth.nextAction}</div>
                     </td>
