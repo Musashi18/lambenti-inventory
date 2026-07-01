@@ -1,6 +1,6 @@
 import type { MovementType } from "@prisma/client";
 import { convertUnitCostToUsd, type CurrencyRates } from "@/modules/currency";
-import { sortItemsByUseGroup } from "./item-option-groups";
+import { groupItemOptionsByUse, sortItemsByUseGroup } from "./item-option-groups";
 import { calculateStockPosition } from "./ledger";
 import { roundDisplayQuantity } from "./quantity-format";
 
@@ -60,6 +60,13 @@ export type PricedItemValuationRow = {
   value: number;
 };
 
+export type PricedItemValuationGroup = {
+  key: string;
+  label: string;
+  rows: PricedItemValuationRow[];
+  totalValue: number;
+};
+
 export function calculateLotValuations(lots: LotValuationInput[]): {
   rows: LotValuationRow[];
   totalValue: number;
@@ -117,6 +124,27 @@ export function calculatePricedItemValuations(
     rows: sortItemsByUseGroup(rows),
     totalValue: roundCurrency(rows.reduce((total, row) => total + row.value, 0))
   };
+}
+
+export function groupPricedItemValuationsByItemType(rows: PricedItemValuationRow[]): PricedItemValuationGroup[] {
+  return groupItemOptionsByUse(
+    rows.map((row) => ({
+      id: row.itemId,
+      sku: row.sku,
+      description: row.description,
+      category: row.category,
+      useGroupOverride: row.useGroupOverride,
+      row
+    }))
+  ).map((group) => {
+    const groupRows = group.items.map((item) => item.row);
+    return {
+      key: group.key,
+      label: group.label,
+      rows: groupRows,
+      totalValue: roundCurrency(groupRows.reduce((total, row) => total + row.value, 0))
+    };
+  });
 }
 
 function roundCurrency(value: number) {

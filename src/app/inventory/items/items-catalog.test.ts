@@ -54,6 +54,17 @@ describe("ItemsCatalog client interaction source contract", () => {
     expect(source).toContain("Needs Cost");
   });
 
+  it("keeps the stock-health legend visible even when live data has no rows in a status", () => {
+    const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
+
+    expect(source).toContain("stockHealthLegend");
+    expect(source).toContain('aria-label="Stock health status legend"');
+    expect(source).toContain("No Supplier");
+    expect(source).toContain("Needs Cost");
+    expect(source).toContain("Below Reorder");
+    expect(source).toContain("OK");
+  });
+
   it("groups the active catalog by item-use section and exposes manual section moves", () => {
     const source = readFileSync(join(__dirname, "items-catalog.tsx"), "utf8");
 

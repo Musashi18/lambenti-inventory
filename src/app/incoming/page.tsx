@@ -53,17 +53,21 @@ export default async function IncomingPage() {
                 </div>
               </div>
 
-              {duplicateLineGroups.length > 0 ? (
-                <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-                  <div className="font-medium">Packing Slip Duplicate Check</div>
-                  <p className="mt-1">These SKUs appear multiple times on this PO. Receive each source line only after human count, but use this summary to batch-check the packing slip before entering counts.</p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5">
-                    {duplicateLineGroups.map((group) => (
-                      <li key={group.sku}>{group.sku}: {group.lineCount} lines · ordered {formatQuantity(group.orderedQuantity, { fixed: true })} · remaining {formatQuantity(group.remainingQuantity, { fixed: true })}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
+              <div className={`border-b px-4 py-3 text-xs ${duplicateLineGroups.length > 0 ? "border-amber-100 bg-amber-50 text-amber-900" : "border-emerald-100 bg-emerald-50 text-emerald-900"}`}>
+                <div className="font-medium">Packing Slip Duplicate Check</div>
+                {duplicateLineGroups.length > 0 ? (
+                  <>
+                    <p className="mt-1">These SKUs appear multiple times on this PO. Receive each source line only after human count, but use this summary to batch-check the packing slip before entering counts.</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {duplicateLineGroups.map((group) => (
+                        <li key={group.sku}>{group.sku}: {group.lineCount} lines · ordered {formatQuantity(group.orderedQuantity, { fixed: true })} · remaining {formatQuantity(group.remainingQuantity, { fixed: true })}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="mt-1">No duplicate SKU lines on this PO. Continue receiving each source line only after the package is physically counted.</p>
+                )}
+              </div>
 
               <div className="divide-y divide-slate-100">
                 {order.lines.map((line) => {

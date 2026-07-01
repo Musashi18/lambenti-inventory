@@ -1,5 +1,5 @@
 import { DashboardTable } from "@/components/dashboard-table";
-import { calculatePricedItemValuations } from "@/modules/inventory/valuation";
+import { calculatePricedItemValuations, groupPricedItemValuationsByItemType } from "@/modules/inventory/valuation";
 import { getActivePricedItemValuationInputs } from "@/modules/inventory/pricing";
 import { formatQuantity } from "@/modules/inventory/quantity-format";
 import { requirePermission } from "@/modules/auth/permissions";
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function ValuationPage() {
   await requirePermission("accounting:view");
   const itemValuation = calculatePricedItemValuations(await getActivePricedItemValuationInputs());
+  const valuationGroups = groupPricedItemValuationsByItemType(itemValuation.rows);
   const valueConcentrationRows = [...itemValuation.rows]
     .sort((left, right) => right.value - left.value)
     .slice(0, 5);
@@ -20,7 +21,7 @@ export default async function ValuationPage() {
       <div>
         <h1 className="text-2xl font-semibold">Inventory Valuation</h1>
         <p className="text-sm text-slate-600">
-          Automatically includes every active item with accounting landed-cost evidence or an estimated unit price. Quantity is ledger-derived from immutable item movements; value is quantity × price per unit.
+          Automatically includes every active item with accounting landed-cost evidence or an estimated unit price. Quantity is ledger-derived from immutable item movements; value is quantity × price per unit. Priced rows are grouped by item type using the shared catalog rules, so future items fall into the right section automatically.
         </p>
       </div>
 
@@ -60,20 +61,50 @@ export default async function ValuationPage() {
         </div>
       </section>
 
-      <DashboardTable
-        title="Priced Item Valuation"
-        columns={["SKU", "Description", "Quantity", "Price/Unit", "Price Source", "Value"]}
-        rows={itemValuation.rows.map((row) => [
-          row.sku,
-          row.description,
-          formatQuantity(row.quantity, { fixed: true }),
-          `${row.currency} ${row.unitCost.toFixed(2)}`,
-          formatCostSource(row),
-          `${row.currency} ${row.value.toFixed(2)}`
-        ])}
-      />
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-medium">Priced Item Valuation by Item Type</h2>
+          <p className="text-xs text-slate-500">Each section follows the same item-type grouping used across item pickers and the active catalog.</p>
+        </div>
+        {valuationGroups.length === 0 ? (
+          <DashboardTable
+            title="Priced Item Valuation"
+            columns={valuationColumns}
+            rows={[]}
+          />
+        ) : valuationGroups.map((group) => (
+          <DashboardTable
+            key={group.key}
+            title={`${group.label} · ${group.rows.length} ${group.rows.length === 1 ? "item" : "items"} · USD $${group.totalValue.toFixed(2)}`}
+            columns={valuationColumns}
+            rows={formatValuationRows(group.rows)}
+          />
+        ))}
+      </section>
     </div>
   );
+}
+
+const valuationColumns = ["SKU", "Description", "Quantity", "Price/Unit", "Price Source", "Value"];
+
+function formatValuationRows(rows: Array<{
+  sku: string;
+  description: string;
+  quantity: number;
+  currency: string;
+  unitCost: number;
+  value: number;
+  costSourceLabel?: string | null;
+  costSourceRefs: string[];
+}>) {
+  return rows.map((row) => [
+    row.sku,
+    row.description,
+    formatQuantity(row.quantity, { fixed: true }),
+    `${row.currency} ${row.unitCost.toFixed(2)}`,
+    formatCostSource(row),
+    `${row.currency} ${row.value.toFixed(2)}`
+  ]);
 }
 
 function formatCostSource(row: { costSourceLabel?: string | null; costSourceRefs: string[] }) {

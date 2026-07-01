@@ -14,4 +14,12 @@ describe("ValuationPage source contract", () => {
     expect(source).toContain("costSourceRefs");
     expect(source).toContain("getActivePricedItemValuationInputs owns the active-item query");
   });
+
+  it("groups priced valuation rows by item type so new items land in their section", () => {
+    const source = readFileSync(join(__dirname, "page.tsx"), "utf8");
+
+    expect(source).toContain("groupPricedItemValuationsByItemType(itemValuation.rows)");
+    expect(source).toContain("Priced Item Valuation by Item Type");
+    expect(source).toContain("future items fall into the right section automatically");
+  });
 });

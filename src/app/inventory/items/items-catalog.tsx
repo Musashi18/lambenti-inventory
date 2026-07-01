@@ -48,6 +48,13 @@ type EditableItem = {
 
 const emptyActionState: ItemActionState = { ok: false, message: "" };
 
+const stockHealthLegend = [
+  { label: "No Supplier", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  { label: "Needs Cost", className: "border-blue-200 bg-blue-50 text-blue-800" },
+  { label: "Below Reorder", className: "border-red-200 bg-red-50 text-red-800" },
+  { label: "OK", className: "border-emerald-200 bg-emerald-50 text-emerald-800" }
+];
+
 function statusClass(ok: boolean) {
   return ok ? "border-mint/40 bg-mint/10 text-emerald-800" : "border-coral/40 bg-coral/10 text-red-800";
 }
@@ -125,6 +132,16 @@ export function ItemsCatalog({
     <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="font-medium">{title}</h2>
+        {!archivedView ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500" aria-label="Stock health status legend">
+            <span className="font-medium text-slate-600">Stock Health:</span>
+            {stockHealthLegend.map((status) => (
+              <span key={status.label} className={`inline-flex rounded-full border px-2 py-0.5 font-medium ${status.className}`}>
+                {status.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {state.message ? (
           <p className={`mt-2 rounded-md border px-3 py-2 text-sm ${statusClass(state.ok)}`} role="status">
             {state.message}

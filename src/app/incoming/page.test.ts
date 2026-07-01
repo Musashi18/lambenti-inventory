@@ -16,6 +16,7 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(pageSource).toContain("Email imports and invoices do not receive stock");
     expect(pageSource).toContain("Packing Slip Duplicate Check");
     expect(pageSource).toContain("batch-check the packing slip");
+    expect(pageSource).toContain("No duplicate SKU lines on this PO");
     expect(pageSource).toContain("groupDuplicateIncomingLines");
     expect(pageSource).toContain("Remaining Quantity");
     expect(pageSource).not.toContain("Incoming inventory tracker");

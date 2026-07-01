@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MovementType } from "@prisma/client";
-import { calculateLotValuations, calculatePricedItemValuations } from "./valuation";
+import { calculateLotValuations, calculatePricedItemValuations, groupPricedItemValuationsByItemType } from "./valuation";
 
 describe("calculateLotValuations", () => {
   it("values each stock lot from its own movement history instead of item-level on-hand", () => {
@@ -255,6 +255,47 @@ describe("calculatePricedItemValuations", () => {
       "LAMBENTI-BASIC",
       "ENC-SHELL",
       "LED-COB-12V"
+    ]);
+  });
+
+  it("groups priced valuation rows by shared item type rules for current and future items", () => {
+    const valuation = calculatePricedItemValuations([
+      {
+        itemId: "priced-led",
+        sku: "LED-COB-12V",
+        description: "Warm LED strip",
+        category: "COMPONENT",
+        unitCost: 1,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 10 }]
+      },
+      {
+        itemId: "priced-finished",
+        sku: "LAMBENTI-BASIC",
+        description: "Finished Lambenti build",
+        category: "FINISHED_GOOD",
+        unitCost: 20,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 2 }]
+      },
+      {
+        itemId: "priced-box",
+        sku: "BOX-FUTURE-PACKAGING",
+        description: "Future retail carton",
+        category: "RAW_MATERIAL",
+        useGroupOverride: "packaging-labels",
+        unitCost: 0.5,
+        currency: "USD",
+        movements: [{ movementType: MovementType.RECEIVE, quantity: 8 }]
+      }
+    ]);
+
+    const groups = groupPricedItemValuationsByItemType(valuation.rows);
+
+    expect(groups.map((group) => ({ label: group.label, skus: group.rows.map((row) => row.sku), totalValue: group.totalValue }))).toEqual([
+      { label: "Finished Builds", skus: ["LAMBENTI-BASIC"], totalValue: 40 },
+      { label: "Electronics & Electrical", skus: ["LED-COB-12V"], totalValue: 10 },
+      { label: "Packaging & Labels", skus: ["BOX-FUTURE-PACKAGING"], totalValue: 4 }
     ]);
   });
 });
