@@ -32,7 +32,7 @@ export function DashboardTable({
               </tr>
             ) : (
               rows.map((row, rowIndex) => (
-                <tr key={`${row.join("-")}-${rowIndex}`} className="border-t border-slate-100">
+                <tr key={`${row.join("-")}-${rowIndex}`} className={`border-t border-slate-100 ${rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                   {row.map((cell, cellIndex) => (
                     <td key={`${cell}-${cellIndex}`} className="px-4 py-3">
                       {cell}

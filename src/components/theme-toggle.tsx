@@ -46,7 +46,7 @@ export function ThemeToggle() {
       aria-label="Toggle dark mode"
       title="Toggle dark mode"
       onClick={() => setIsDark((current) => !current)}
-      className="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-lg shadow-slate-900/10 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-mint focus:ring-offset-2"
+      className="fixed bottom-4 left-4 z-50 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-lg shadow-slate-900/10 transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-mint focus:ring-offset-2 lg:left-auto lg:right-4"
     >
       <span
         aria-hidden="true"

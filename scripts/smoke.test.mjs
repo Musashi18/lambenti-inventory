@@ -69,6 +69,7 @@ describe("local smoke coverage manifest", () => {
     const smokeSource = readFileSync(join(repoRoot, "scripts", "smoke.mjs"), "utf8");
 
     for (const route of [
+      "/api/atlas/mission-control",
       "/api/agent/stock",
       "/api/agent/boms",
       "/api/agent/shortages",

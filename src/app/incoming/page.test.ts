@@ -14,10 +14,10 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(pageSource).toContain("getIncomingOrders");
     expect(pageSource).toContain("ReceiveIncomingLineForm");
     expect(pageSource).toContain("Email imports and invoices do not receive stock");
-    expect(pageSource).toContain("Packing Slip Duplicate Check");
-    expect(pageSource).toContain("batch-check the packing slip");
-    expect(pageSource).toContain("No duplicate SKU lines on this PO");
-    expect(pageSource).toContain("groupDuplicateIncomingLines");
+    expect(pageSource).not.toContain("Packing Slip Duplicate Check");
+    expect(pageSource).not.toContain("batch-check the packing slip");
+    expect(pageSource).not.toContain("No duplicate SKU lines on this PO");
+    expect(pageSource).not.toContain("groupDuplicateIncomingLines");
     expect(pageSource).toContain("Remaining Quantity");
     expect(pageSource).not.toContain("Incoming inventory tracker");
     expect(pageSource).not.toContain("DashboardTable");
@@ -35,6 +35,6 @@ describe("IncomingPage receiving workbench source contract", () => {
     expect(readFileSync(join(__dirname, "incoming-line-receipt-shell.tsx"), "utf8")).toContain("duration-500");
     expect(formSource).toContain("Use this only after the package is physically counted");
     expect(pageSource).toContain("Receiving Progress");
-    expect(pageSource).toContain("Packing Slip Duplicate Check");
+    expect(pageSource).toContain("lineIndex % 2 === 0");
   });
 });

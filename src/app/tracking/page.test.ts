@@ -48,9 +48,10 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("Out for Delivery");
     expect(pageSource).toContain("Provider needs review before this rail can advance.");
     expect(pageSource).toContain("Add Tracking Evidence");
-    expect(pageSource).toContain("No Open Tracking Issues");
+    expect(pageSource).toContain("if (!needsAttention) return null");
     expect(pageSource).toContain("Advanced: Lead-Time Learning Audit");
-    expect(pageSource).toContain("Tracking Metadata Only");
+    expect(pageSource).not.toContain("Premium graphics, but tied to operator signal");
+    expect(pageSource).not.toContain("Non-delivered tracking numbers shown as scan-friendly cards");
     expect(pageSource).not.toContain("Automatic Alibaba capture");
     expect(pageSource).not.toContain("Capture Alibaba tracking");
     expect(pageSource).not.toContain("captureAlibabaTrackingAction");
@@ -64,7 +65,9 @@ describe("Tracking page source contract", () => {
     expect(pageSource).toContain("Delivered Tracking History");
     expect(pageSource).toContain("Archived Tracking Numbers");
     expect(pageSource).toContain("dashboard.archivedRows");
-    expect(pageSource.indexOf("<LeadTimeLearningLog log={leadTimeLog} />")).toBeLessThan(pageSource.indexOf("<ArchivedTrackingNumbers rows={dashboard.archivedRows} />"));
+    expect(pageSource.indexOf("<ManualTrackingDropBox linkOptions={linkOptions} hasOpenShipments={dashboard.rows.length > 0} />")).toBeLessThan(pageSource.indexOf("<LeadTimeLearningLog log={leadTimeLog} />"));
+    expect(pageSource.indexOf("<LeadTimeLearningLog log={leadTimeLog} />")).toBeLessThan(pageSource.indexOf("<DeliveredTrackingHistory rows={dashboard.deliveredRows} />"));
+    expect(pageSource.indexOf("<DeliveredTrackingHistory rows={dashboard.deliveredRows} />")).toBeLessThan(pageSource.indexOf("<ArchivedTrackingNumbers rows={dashboard.archivedRows} />"));
     expect(pageSource).toContain("Total Ship Time");
     expect(pageSource).toContain("Advanced: Lead-Time Learning Audit");
     expect(pageSource).toContain("Reorder Forecasting Input");

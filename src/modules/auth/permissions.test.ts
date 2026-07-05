@@ -19,6 +19,12 @@ describe("auth permission model", () => {
     expect(hasPermission(agent, "agentApi:read")).toBe(true);
   });
 
+  it("keeps Atlas visible to human operators but out of the agent role", () => {
+    expect(hasPermission({ id: "viewer", role: "VIEWER", type: "HUMAN" }, "atlas:view")).toBe(true);
+    expect(hasPermission({ id: "ops", role: "OPERATIONS", type: "HUMAN" }, "atlas:view")).toBe(true);
+    expect(hasPermission({ id: "agent", role: "AGENT", type: "AGENT" }, "atlas:view")).toBe(false);
+  });
+
   it("fails closed in production when auth material is missing", () => {
     const actor = resolveActorFromHeaders(new Headers(), {
       nodeEnv: "production",

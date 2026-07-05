@@ -27,7 +27,6 @@ export default async function IncomingPage() {
       ) : (
         <div className="space-y-4">
           {orders.map((order) => {
-            const duplicateLineGroups = groupDuplicateIncomingLines(order.lines);
             const progress = summarizeReceivingProgress(order.lines);
             return (
             <article key={order.id} className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -53,29 +52,13 @@ export default async function IncomingPage() {
                 </div>
               </div>
 
-              <div className={`border-b px-4 py-3 text-xs ${duplicateLineGroups.length > 0 ? "border-amber-100 bg-amber-50 text-amber-900" : "border-emerald-100 bg-emerald-50 text-emerald-900"}`}>
-                <div className="font-medium">Packing Slip Duplicate Check</div>
-                {duplicateLineGroups.length > 0 ? (
-                  <>
-                    <p className="mt-1">These SKUs appear multiple times on this PO. Receive each source line only after human count, but use this summary to batch-check the packing slip before entering counts.</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5">
-                      {duplicateLineGroups.map((group) => (
-                        <li key={group.sku}>{group.sku}: {group.lineCount} lines · ordered {formatQuantity(group.orderedQuantity, { fixed: true })} · remaining {formatQuantity(group.remainingQuantity, { fixed: true })}</li>
-                      ))}
-                    </ul>
-                  </>
-                ) : (
-                  <p className="mt-1">No duplicate SKU lines on this PO. Continue receiving each source line only after the package is physically counted.</p>
-                )}
-              </div>
-
               <div className="divide-y divide-slate-100">
-                {order.lines.map((line) => {
+                {order.lines.map((line, lineIndex) => {
                   const remainingQuantity = Math.max(line.quantity - line.receivedQuantity, 0);
                   const defaultReference = `PO-${order.id.slice(-8).toUpperCase()}-${line.item.sku}`;
                   return (
                     <IncomingLineReceiptShell key={line.id} purchaseOrderLineId={line.id}>
-                    <div className="p-4">
+                    <div className={`p-4 ${lineIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                         <div>
                           <div className="text-sm font-medium text-slate-900">{line.item.sku}</div>
@@ -126,18 +109,6 @@ function summarizeReceivingProgress(lines: IncomingLine[]) {
   const remainingQuantity = Math.max(orderedQuantity - receivedQuantity, 0);
   const percent = orderedQuantity > 0 ? Math.min(100, Math.round((receivedQuantity / orderedQuantity) * 100)) : 0;
   return { orderedQuantity, receivedQuantity, remainingQuantity, percent };
-}
-
-function groupDuplicateIncomingLines(lines: IncomingLine[]) {
-  const groups = new Map<string, { sku: string; lineCount: number; orderedQuantity: number; remainingQuantity: number }>();
-  for (const line of lines) {
-    const current = groups.get(line.item.sku) ?? { sku: line.item.sku, lineCount: 0, orderedQuantity: 0, remainingQuantity: 0 };
-    current.lineCount += 1;
-    current.orderedQuantity += line.quantity;
-    current.remainingQuantity += Math.max(line.quantity - line.receivedQuantity, 0);
-    groups.set(line.item.sku, current);
-  }
-  return Array.from(groups.values()).filter((group) => group.lineCount > 1);
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

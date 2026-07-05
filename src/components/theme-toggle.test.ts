@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..", "..");
 
 describe("dark mode theme toggle source contract", () => {
-  it("mounts a persistent bottom-left dark mode toggle from the root layout", () => {
+  it("mounts a persistent dark mode toggle from the root layout without covering the desktop sidebar", () => {
     const layoutSource = readFileSync(join(projectRoot, "src", "app", "layout.tsx"), "utf8");
     const toggleSource = readFileSync(join(__dirname, "theme-toggle.tsx"), "utf8");
     const globalCss = readFileSync(join(projectRoot, "src", "app", "globals.css"), "utf8");
@@ -24,6 +24,8 @@ describe("dark mode theme toggle source contract", () => {
     expect(toggleSource).toContain("aria-checked");
     expect(toggleSource).toContain("bottom-4");
     expect(toggleSource).toContain("left-4");
+    expect(toggleSource).toContain("lg:left-auto");
+    expect(toggleSource).toContain("lg:right-4");
     expect(toggleSource).toContain("relative h-5 w-9");
     expect(toggleSource).toContain("absolute left-0.5 top-0.5");
     expect(toggleSource).toContain("translate-x-4");

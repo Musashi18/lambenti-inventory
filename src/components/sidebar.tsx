@@ -1,4 +1,3 @@
-import Image from "next/image";
 import {
   ArrowDownUp,
   Boxes,
@@ -7,15 +6,18 @@ import {
   LayoutDashboard,
   Mail,
   PackageSearch,
+  Radar,
   ReceiptText,
   Route,
   ShoppingCart,
   Truck,
   Workflow
 } from "lucide-react";
+import { SidebarLogoControl } from "@/components/sidebar-logo-control";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/atlas", label: "Atlas", icon: Radar },
   { href: "/inventory/items", label: "Items", icon: Boxes },
   { href: "/inventory/movements", label: "Movements", icon: ArrowDownUp },
   { href: "/suppliers", label: "Suppliers", icon: Factory },
@@ -34,16 +36,7 @@ export function Sidebar() {
   return (
     <aside className="isolate relative z-50 border-b border-slate-200 bg-white p-4 lg:min-h-screen lg:border-b-0 lg:border-r">
       <div className="mb-6">
-        <div className="lambenti-sidebar-logo mb-3" aria-hidden="true">
-          <Image
-            src="/lambenti-logo-sidebar.webp"
-            alt=""
-            fill
-            sizes="(min-width: 1024px) 208px, calc(100vw - 2rem)"
-            priority
-            className="lambenti-sidebar-logo-image"
-          />
-        </div>
+        <SidebarLogoControl defaultImageUrl="/lambenti-logo-sidebar.webp" />
         <div className="px-3 text-xl font-semibold text-ink">Inventory and Sourcing</div>
       </div>
       <nav className="grid gap-1">

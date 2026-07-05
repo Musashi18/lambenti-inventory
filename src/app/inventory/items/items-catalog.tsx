@@ -178,7 +178,7 @@ export function ItemsCatalog({
                       {group.label} <span className="font-normal text-slate-400">({group.items.length})</span>
                     </td>
                   </tr>
-                  {group.items.map((item) => {
+                  {group.items.map((item, itemIndex) => {
                 const dialogId = `edit-item-${item.id}`;
                 const isObsolete = item.lifecycleStatus === "OBSOLETE";
                 const archiveBusy = busyKey === `archive:${item.id}`;
@@ -199,7 +199,7 @@ export function ItemsCatalog({
                   : suppliers;
 
                 return (
-                  <tr key={item.id} className="border-t border-slate-100">
+                  <tr key={item.id} className={`border-t border-slate-100 ${itemIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                     <td className="px-4 py-3 font-medium">{item.sku}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${stockHealth.className}`}>{stockHealth.label}</span>

@@ -34,6 +34,7 @@ export type Permission =
   | "integration:mutate"
   | "automation:view"
   | "automation:run"
+  | "atlas:view"
   | "agentApi:read";
 
 type ResolveEnv = {
@@ -74,6 +75,7 @@ const PERMISSIONS: Record<UserRoleName, Set<Permission>> = {
     "integration:mutate",
     "automation:view",
     "automation:run",
+    "atlas:view",
     "agentApi:read"
   ]),
   OPERATIONS: new Set<Permission>([
@@ -84,7 +86,8 @@ const PERMISSIONS: Record<UserRoleName, Set<Permission>> = {
     "cycleCount:manage",
     "purchaseRecommendation:view",
     "automation:view",
-    "automation:run"
+    "automation:run",
+    "atlas:view"
   ]),
   PURCHASING: new Set<Permission>([
     "item:view",
@@ -95,7 +98,8 @@ const PERMISSIONS: Record<UserRoleName, Set<Permission>> = {
     "purchaseRequest:approve",
     "purchaseOrder:create",
     "automation:view",
-    "automation:run"
+    "automation:run",
+    "atlas:view"
   ]),
   ACCOUNTING: new Set<Permission>([
     "item:view",
@@ -103,14 +107,16 @@ const PERMISSIONS: Record<UserRoleName, Set<Permission>> = {
     "invoice:create",
     "invoice:approve",
     "invoice:markPaid",
-    "accounting:view"
+    "accounting:view",
+    "atlas:view"
   ]),
   VIEWER: new Set<Permission>([
     "item:view",
     "supplier:view",
     "purchaseRecommendation:view",
     "accounting:view",
-    "automation:view"
+    "automation:view",
+    "atlas:view"
   ]),
   AGENT: new Set<Permission>([
     "agentApi:read",

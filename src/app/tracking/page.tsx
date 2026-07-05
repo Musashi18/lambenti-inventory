@@ -42,8 +42,8 @@ export default async function TrackingPage() {
       <OpenShipments rows={dashboard.rows} />
       <TrackingAttention dashboard={dashboard} />
       <ManualTrackingDropBox linkOptions={linkOptions} hasOpenShipments={dashboard.rows.length > 0} />
-      <DeliveredTrackingHistory rows={dashboard.deliveredRows} />
       <LeadTimeLearningLog log={leadTimeLog} />
+      <DeliveredTrackingHistory rows={dashboard.deliveredRows} />
       <ArchivedTrackingNumbers rows={dashboard.archivedRows} />
     </main>
   );
@@ -56,9 +56,6 @@ function TrackingHero({ dashboard }: { dashboard: TrackingDashboard }) {
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Shipment logistics</p>
           <h1 className="mt-1 text-3xl font-semibold text-slate-900">Tracking Workbench</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            See what needs attention first, keep Open Shipments easy to scan, and add tracking evidence only when you have a new shipment notice. Tracking Metadata Only: this page never receives stock, confirms delivery, pays invoices, or sends supplier messages.
-          </p>
         </div>
         <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm lg:min-w-80">
           <div className="font-medium text-slate-900">Tracking service connection</div>
@@ -135,9 +132,6 @@ function TrackingVisualCommandPanel({ dashboard }: { dashboard: TrackingDashboar
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-200">Visual Command Layer</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">Live Shipment Radar</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              Premium graphics, but tied to operator signal: stage distribution, provider health, provenance risk, and carrier mix. No stock receipt or delivery confirmation happens here.
-            </p>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center sm:min-w-72">
             <RadarNumber label="Open" value={dashboard.rows.length} tone="text-blue-200" />
@@ -277,7 +271,9 @@ function RadarNumber({ label, value, tone }: { label: string; value: number; ton
 function TrackingAttention({ dashboard }: { dashboard: TrackingDashboard }) {
   const failedRows = dashboard.rows.filter((row) => row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION");
   const unlinkedRows = dashboard.rows.filter((row) => !row.externalOrderId && !row.purchaseOrderId);
-  const showNoIssues = dashboard.service.configured && dashboard.summary.due === 0 && failedRows.length === 0 && unlinkedRows.length === 0;
+  const needsAttention = !dashboard.service.configured || dashboard.summary.due > 0 || failedRows.length > 0 || unlinkedRows.length > 0;
+
+  if (!needsAttention) return null;
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -286,13 +282,7 @@ function TrackingAttention({ dashboard }: { dashboard: TrackingDashboard }) {
         <p className="mt-1 text-sm text-slate-600">A short action queue before the detailed shipment cards. Manual Refresh Now Lives in the Provider Heartbeat Card.</p>
       </div>
 
-      {showNoIssues ? (
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          <div className="font-medium">No Open Tracking Issues</div>
-          <p className="mt-1">Provider is configured, no rows are due, no Refresh Failures are active, and open evidence is linked.</p>
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
           {!dashboard.service.configured ? (
             <AttentionCard tone="warning" title="Connect tracking provider" label="Setup needed">
               Configure Ship24 or the custom HTTP template so refreshes use live carrier status instead of evidence-only records.
@@ -323,8 +313,7 @@ function TrackingAttention({ dashboard }: { dashboard: TrackingDashboard }) {
               Add future tracking numbers with a PO selected or an Alibaba order ID so lead-time learning and receiving context stay auditable.
             </AttentionCard>
           ) : null}
-        </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -335,7 +324,6 @@ function OpenShipments({ rows }: { rows: TrackingDashboardRow[] }) {
       <div className="border-b border-slate-200 p-5">
         <p className="text-sm font-semibold uppercase tracking-wide text-orange-600">Active tracking numbers</p>
         <h2 className="mt-1 text-lg font-semibold text-slate-900">Open Shipments</h2>
-        <p className="mt-1 text-sm text-slate-600">Non-delivered tracking numbers shown as scan-friendly cards. Refresh, evidence, linked order, latest event, and errors stay visible without a wide table.</p>
       </div>
       {rows.length === 0 ? (
         <div className="p-5 text-sm text-slate-500">No Open Shipments. Delivered tracking information is retained in history below.</div>
@@ -431,11 +419,11 @@ function ManualTrackingDropBox({ linkOptions, hasOpenShipments }: { linkOptions:
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Add Tracking Evidence</h2>
-            <p className="mt-1 text-sm text-slate-600">Paste a Tracking Number, Shipment Email, or Alibaba Order URL. Pick a PO When Known; Otherwise the App Auto-Matches by Alibaba Order Number.</p>
           </div>
           <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-medium text-orange-700">Manual Drop Box</span>
         </div>
       </summary>
+      <p className="mt-4 text-sm text-slate-600">Paste a Tracking Number, Shipment Email, or Alibaba Order URL. Pick a PO When Known; Otherwise the App Auto-Matches by Alibaba Order Number.</p>
       <RefreshingActionForm action={saveManualTrackingNumbersAction} className="mt-4 space-y-4">
         <label className="block text-sm font-medium text-slate-700">
           Tracking Numbers / Shipment Email Text
@@ -484,11 +472,11 @@ function DeliveredTrackingHistory({ rows }: { rows: TrackingDashboardRow[] }) {
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Delivered Tracking History</h2>
-            <p className="mt-1 text-sm text-slate-600">{rows.length} Delivered Record{rows.length === 1 ? "" : "s"} Retained for Evidence. Total Ship Time Is Measured from First Carrier Event to Delivery When Available.</p>
           </div>
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Delivered {rows.length}</span>
         </div>
       </summary>
+      <p className="border-b border-slate-100 px-5 py-3 text-sm text-slate-600">{rows.length} Delivered Record{rows.length === 1 ? "" : "s"} Retained for Evidence. Total Ship Time Is Measured from First Carrier Event to Delivery When Available.</p>
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -507,8 +495,8 @@ function DeliveredTrackingHistory({ rows }: { rows: TrackingDashboardRow[] }) {
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-slate-500">No delivered tracking history yet.</td>
               </tr>
-            ) : rows.map((row) => (
-              <DeliveredTrackingRow key={row.id} row={row} />
+            ) : rows.map((row, rowIndex) => (
+              <DeliveredTrackingRow key={row.id} row={row} rowIndex={rowIndex} />
             ))}
           </tbody>
         </table>
@@ -517,10 +505,11 @@ function DeliveredTrackingHistory({ rows }: { rows: TrackingDashboardRow[] }) {
   );
 }
 
-function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
+function DeliveredTrackingRow({ row, rowIndex }: { row: TrackingDashboardRow; rowIndex: number }) {
+  const rowShade = rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50";
   return (
     <>
-      <tr data-testid="delivered-tracking-row" className="align-top">
+      <tr data-testid="delivered-tracking-row" className={`align-top ${rowShade}`}>
         <td className="px-4 py-3 font-mono text-slate-900">{row.trackingNumber}</td>
         <td className="px-4 py-3">
           <div className="font-medium text-slate-900">{row.linkedOrderLabel}</div>
@@ -540,7 +529,7 @@ function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
         <td className="px-4 py-3 text-slate-700"><LatestEvent row={row} /></td>
         <td className="px-4 py-3 text-xs text-slate-600"><SourceCell row={row} /></td>
       </tr>
-      <tr className="border-t border-slate-100 bg-white">
+      <tr className={`border-t border-slate-100 ${rowShade}`}>
         <td colSpan={7} className="px-4 py-3">
           <PackageTrackingDataDetails row={row} compact />
         </td>
@@ -551,23 +540,23 @@ function DeliveredTrackingRow({ row }: { row: TrackingDashboardRow }) {
 
 function ArchivedTrackingNumbers({ rows }: { rows: TrackingDashboardRow[] }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 p-5">
+    <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <summary className="cursor-pointer list-none border-b border-slate-200 p-5">
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Inactive tracking evidence</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Archived Tracking Numbers</h2>
-            <p className="mt-1 text-sm text-slate-600">{rows.length} Archived Record{rows.length === 1 ? "" : "s"} Kept for provenance. Archived numbers are hidden from active refresh and do not confirm delivery or receiving.</p>
           </div>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">Archived {rows.length}</span>
         </div>
-      </div>
+      </summary>
+      <p className="border-b border-slate-100 px-5 py-3 text-sm text-slate-600">{rows.length} Archived Record{rows.length === 1 ? "" : "s"} Kept for provenance. Archived numbers are hidden from active refresh and do not confirm delivery or receiving.</p>
       {rows.length === 0 ? (
         <div className="p-5 text-sm text-slate-500">No archived tracking numbers yet.</div>
       ) : (
         <div className="divide-y divide-slate-100">
-          {rows.map((row) => (
-            <div key={row.id} className="p-5">
+          {rows.map((row, rowIndex) => (
+            <div key={row.id} className={`p-5 ${rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
               <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                 <div>
                   <div className="font-mono text-sm font-semibold text-slate-900">{row.trackingNumber}</div>
@@ -587,7 +576,7 @@ function ArchivedTrackingNumbers({ rows }: { rows: TrackingDashboardRow[] }) {
           ))}
         </div>
       )}
-    </section>
+    </details>
   );
 }
 
@@ -599,11 +588,11 @@ function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
         <div className="mt-1 flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Advanced: Lead-Time Learning Audit</h2>
-            <p className="mt-1 text-sm text-slate-600">Every active item has a planning lead-time row. Manual entries are primary for planning; observed history remains evidence from completed purchase-to-receipt/delivery samples.</p>
           </div>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">{log.itemCount} Item{log.itemCount === 1 ? "" : "s"} · {log.sampleCount} Sample{log.sampleCount === 1 ? "" : "s"}</span>
         </div>
       </summary>
+      <p className="border-b border-slate-100 px-5 py-3 text-sm text-slate-600">Every active item has a planning lead-time row. Manual entries are primary for planning; observed history remains evidence from completed purchase-to-receipt/delivery samples.</p>
       <div className="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-4">
         <Metric label="Sampled items" value={log.itemCount} />
         <Metric label="Order-line samples" value={log.sampleCount} />
@@ -617,15 +606,15 @@ function LeadTimeLearningLog({ log }: { log: LeadTimeLog }) {
       <div className="divide-y divide-slate-100">
         {log.items.length === 0 ? (
           <div className="p-5 text-sm text-slate-500">No active items have lead-time records yet.</div>
-        ) : log.items.map((item) => <LeadTimeLogItemDetails key={item.itemId} item={item} />)}
+        ) : log.items.map((item, itemIndex) => <LeadTimeLogItemDetails key={item.itemId} item={item} itemIndex={itemIndex} />)}
       </div>
     </details>
   );
 }
 
-function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
+function LeadTimeLogItemDetails({ item, itemIndex }: { item: LeadTimeLogItem; itemIndex: number }) {
   return (
-    <details className="group p-5">
+    <details className={`group p-5 ${itemIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
       <summary className="flex cursor-pointer list-none flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="font-medium text-slate-900">{item.itemSku}</div>
@@ -677,7 +666,7 @@ function LeadTimeLogItemDetails({ item }: { item: LeadTimeLogItem }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {item.entries.map((entry) => <LeadTimeLogEntryRow key={`${entry.purchaseOrderId}-${entry.itemId}-${entry.endAt.toISOString()}`} entry={entry} />)}
+              {item.entries.map((entry, entryIndex) => <LeadTimeLogEntryRow key={`${entry.purchaseOrderId}-${entry.itemId}-${entry.endAt.toISOString()}`} entry={entry} rowIndex={entryIndex} />)}
             </tbody>
           </table>
         </div>
@@ -698,9 +687,9 @@ function leadTimeSourceBadgeLabel(item: LeadTimeLogItem) {
   return "Catalog/default";
 }
 
-function LeadTimeLogEntryRow({ entry }: { entry: LeadTimeLogEntry }) {
+function LeadTimeLogEntryRow({ entry, rowIndex }: { entry: LeadTimeLogEntry; rowIndex: number }) {
   return (
-    <tr className="align-top">
+    <tr className={`align-top ${rowIndex % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
       <td className="px-3 py-2">
         <div className="font-mono text-xs text-slate-900">{entry.externalOrderId ?? entry.purchaseOrderId}</div>
         <div className="text-xs text-slate-500">PO {entry.purchaseOrderId}</div>
