@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home Lighting and Living Space Survey</title>
+  <style>
+    :root { color-scheme: light; --ink:#15292E; --muted:#5c6f72; --line:#dce5e2; --bg:#f7faf8; --card:#ffffff; --accent:#1C8585; }
+    body { margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:var(--bg); color:var(--ink); }
+    main { max-width: 920px; margin: 0 auto; padding: 32px 18px 80px; }
+    header { background: linear-gradient(135deg, #15292E, #074047); color:white; padding: 34px 28px; border-radius: 26px; box-shadow: 0 20px 50px rgba(21,41,46,.18); }
+    h1 { margin:0 0 10px; font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing:-.04em; }
+    h2 { margin-top: 42px; border-top:1px solid var(--line); padding-top: 30px; }
+    .question { border:1px solid var(--line); background:var(--card); border-radius:18px; margin:18px 0; padding:20px; }
+    legend { font-weight: 750; font-size: 1.05rem; padding:0 4px; }
+    .help { color:var(--muted); line-height:1.5; }
+    label { display:block; margin:10px 0; line-height:1.35; }
+    input, textarea, button { font: inherit; }
+    input[type="radio"], input[type="checkbox"] { transform: translateY(1px); margin-right:8px; }
+    .code { font-weight:700; color:var(--accent); }
+    .scale { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .scale label { border:1px solid var(--line); border-radius:12px; padding:8px 10px; background:#fbfdfc; min-width:38px; text-align:center; }
+    table { border-collapse: collapse; width:100%; overflow:auto; display:block; }
+    th, td { border:1px solid var(--line); padding:8px; text-align:center; }
+    th:first-child { text-align:left; min-width:190px; }
+    textarea { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px; box-sizing:border-box; }
+    .actions { position:sticky; bottom:0; background:rgba(247,250,248,.94); border-top:1px solid var(--line); padding:16px 0; display:flex; gap:12px; flex-wrap:wrap; }
+    button { border:0; border-radius:999px; padding:12px 18px; background:var(--ink); color:white; cursor:pointer; }
+    button.secondary { background:var(--accent); }
+    .note { color:var(--muted); font-size:.95rem; }
+  </style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Home Lighting and Living Space Survey</h1>
+  <p>This survey asks about home lighting, decor, and living-space preferences. It should take about 5–8 minutes. There are no right or wrong answers. Prices are shown in CAD.</p>
+</header>
+<form id="survey">
+<h2>Household and living situation</h2>
+<fieldset class="question" data-qid="Q1" data-field="rent_own_status">
+<legend>Q1. Do you currently rent or own your home?</legend>
+<label><input type="radio" name="rent_own_status" value="A|Rent" required> <span class="code">A.</span> Rent</label>
+<label><input type="radio" name="rent_own_status" value="B|Own" required> <span class="code">B.</span> Own</label>
+<label><input type="radio" name="rent_own_status" value="C|Live with family / do not personally rent or own" required> <span class="code">C.</span> Live with family / do not personally rent or own</label>
+<label><input type="radio" name="rent_own_status" value="D|Student housing / dorm" required> <span class="code">D.</span> Student housing / dorm</label>
+<label><input type="radio" name="rent_own_status" value="E|Other: ______" required> <span class="code">E.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q2" data-field="home_type">
+<legend>Q2. What type of home do you live in?</legend>
+<label><input type="radio" name="home_type" value="A|Detached house" required> <span class="code">A.</span> Detached house</label>
+<label><input type="radio" name="home_type" value="B|Semi-detached house" required> <span class="code">B.</span> Semi-detached house</label>
+<label><input type="radio" name="home_type" value="C|Townhouse" required> <span class="code">C.</span> Townhouse</label>
+<label><input type="radio" name="home_type" value="D|Condo" required> <span class="code">D.</span> Condo</label>
+<label><input type="radio" name="home_type" value="E|Apartment" required> <span class="code">E.</span> Apartment</label>
+<label><input type="radio" name="home_type" value="F|Basement apartment" required> <span class="code">F.</span> Basement apartment</label>
+<label><input type="radio" name="home_type" value="G|Shared housing / roommate situation" required> <span class="code">G.</span> Shared housing / roommate situation</label>
+<label><input type="radio" name="home_type" value="H|Other: ______" required> <span class="code">H.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q3" data-field="household_size">
+<legend>Q3. How many people live in your household, including yourself?</legend>
+<label><input type="radio" name="household_size" value="A|1" required> <span class="code">A.</span> 1</label>
+<label><input type="radio" name="household_size" value="B|2" required> <span class="code">B.</span> 2</label>
+<label><input type="radio" name="household_size" value="C|3" required> <span class="code">C.</span> 3</label>
+<label><input type="radio" name="household_size" value="D|4" required> <span class="code">D.</span> 4</label>
+<label><input type="radio" name="household_size" value="E|5+" required> <span class="code">E.</span> 5+</label>
+</fieldset>
+<fieldset class="question" data-qid="Q4" data-field="decor_control_areas">
+<legend>Q4. Which areas of your living space do you personally have influence over decorating? Select all that apply.</legend>
+<label><input type="checkbox" name="decor_control_areas" value="A|Bedroom"> <span class="code">A.</span> Bedroom</label>
+<label><input type="checkbox" name="decor_control_areas" value="B|Desk / workspace"> <span class="code">B.</span> Desk / workspace</label>
+<label><input type="checkbox" name="decor_control_areas" value="C|Gaming setup"> <span class="code">C.</span> Gaming setup</label>
+<label><input type="checkbox" name="decor_control_areas" value="D|TV stand / media area"> <span class="code">D.</span> TV stand / media area</label>
+<label><input type="checkbox" name="decor_control_areas" value="E|Shelf / display area"> <span class="code">E.</span> Shelf / display area</label>
+<label><input type="checkbox" name="decor_control_areas" value="F|Living room"> <span class="code">F.</span> Living room</label>
+<label><input type="checkbox" name="decor_control_areas" value="G|Kitchen"> <span class="code">G.</span> Kitchen</label>
+<label><input type="checkbox" name="decor_control_areas" value="H|Dining area"> <span class="code">H.</span> Dining area</label>
+<label><input type="checkbox" name="decor_control_areas" value="I|Entryway / hallway"> <span class="code">I.</span> Entryway / hallway</label>
+<label><input type="checkbox" name="decor_control_areas" value="J|Balcony / patio"> <span class="code">J.</span> Balcony / patio</label>
+<label><input type="checkbox" name="decor_control_areas" value="K|Entire home"> <span class="code">K.</span> Entire home</label>
+<label><input type="checkbox" name="decor_control_areas" value="L|I do not have much control over decorating"> <span class="code">L.</span> I do not have much control over decorating</label>
+<label><input type="checkbox" name="decor_control_areas" value="M|Other: ______"> <span class="code">M.</span> Other: ______</label>
+</fieldset>
+<h2>Decorating authority and purchase decision-making</h2>
+<fieldset class="question" data-qid="Q5" data-field="primary_decorator">
+<legend>Q5. Who usually puts the most effort into decorating your living space?</legend>
+<label><input type="radio" name="primary_decorator" value="A|Mostly me" required> <span class="code">A.</span> Mostly me</label>
+<label><input type="radio" name="primary_decorator" value="B|Mostly my partner / spouse" required> <span class="code">B.</span> Mostly my partner / spouse</label>
+<label><input type="radio" name="primary_decorator" value="C|Mostly a parent or family member" required> <span class="code">C.</span> Mostly a parent or family member</label>
+<label><input type="radio" name="primary_decorator" value="D|Mostly a roommate" required> <span class="code">D.</span> Mostly a roommate</label>
+<label><input type="radio" name="primary_decorator" value="E|Shared evenly between multiple people" required> <span class="code">E.</span> Shared evenly between multiple people</label>
+<label><input type="radio" name="primary_decorator" value="F|Nobody puts much effort into decorating" required> <span class="code">F.</span> Nobody puts much effort into decorating</label>
+<label><input type="radio" name="primary_decorator" value="G|Other: ______" required> <span class="code">G.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q6" data-field="small_decor_final_say">
+<legend>Q6. For small decorative purchases under $150 CAD, who usually has the final say?</legend>
+<p class="help">Examples: lamps, LED strips, desk accessories, small decor, shelves, organizers, plants, art, mood lighting.</p>
+<label><input type="radio" name="small_decor_final_say" value="A|Mostly me" required> <span class="code">A.</span> Mostly me</label>
+<label><input type="radio" name="small_decor_final_say" value="B|Mostly my partner / spouse" required> <span class="code">B.</span> Mostly my partner / spouse</label>
+<label><input type="radio" name="small_decor_final_say" value="C|Mostly a parent or family member" required> <span class="code">C.</span> Mostly a parent or family member</label>
+<label><input type="radio" name="small_decor_final_say" value="D|Mostly a roommate" required> <span class="code">D.</span> Mostly a roommate</label>
+<label><input type="radio" name="small_decor_final_say" value="E|Shared decision" required> <span class="code">E.</span> Shared decision</label>
+<label><input type="radio" name="small_decor_final_say" value="F|Depends on the room" required> <span class="code">F.</span> Depends on the room</label>
+<label><input type="radio" name="small_decor_final_say" value="G|I usually avoid buying decorative products" required> <span class="code">G.</span> I usually avoid buying decorative products</label>
+<label><input type="radio" name="small_decor_final_say" value="H|Other: ______" required> <span class="code">H.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q7" data-field="plugin_product_freedom">
+<legend>Q7. How much freedom do you personally have to add small plug-in products to your living space?</legend>
+<p class="help">Examples: desk lamps, LED strips, plug-in lighting, cable-managed accessories, small decor.</p>
+<label><input type="radio" name="plugin_product_freedom" value="A|Complete freedom" required> <span class="code">A.</span> Complete freedom</label>
+<label><input type="radio" name="plugin_product_freedom" value="B|Mostly free, but I may check with someone first" required> <span class="code">B.</span> Mostly free, but I may check with someone first</label>
+<label><input type="radio" name="plugin_product_freedom" value="C|Some freedom, but there are limits" required> <span class="code">C.</span> Some freedom, but there are limits</label>
+<label><input type="radio" name="plugin_product_freedom" value="D|Very limited freedom" required> <span class="code">D.</span> Very limited freedom</label>
+<label><input type="radio" name="plugin_product_freedom" value="E|Almost no freedom" required> <span class="code">E.</span> Almost no freedom</label>
+</fieldset>
+<fieldset class="question" data-qid="Q8" data-field="installation_comfort">
+<legend>Q8. How comfortable are you with basic setup or installation for home products?</legend>
+<p class="help">Examples: adhesive strips, hiding wires, plugging in power adapters, cable management, mounting small items.</p>
+<label><input type="radio" name="installation_comfort" value="A|Very comfortable" required> <span class="code">A.</span> Very comfortable</label>
+<label><input type="radio" name="installation_comfort" value="B|Somewhat comfortable" required> <span class="code">B.</span> Somewhat comfortable</label>
+<label><input type="radio" name="installation_comfort" value="C|Neutral" required> <span class="code">C.</span> Neutral</label>
+<label><input type="radio" name="installation_comfort" value="D|Somewhat uncomfortable" required> <span class="code">D.</span> Somewhat uncomfortable</label>
+<label><input type="radio" name="installation_comfort" value="E|Very uncomfortable" required> <span class="code">E.</span> Very uncomfortable</label>
+</fieldset>
+<h2>Aesthetic importance</h2>
+<fieldset class="question" data-qid="Q9" data-field="aesthetic_importance_1_10">
+<legend>Q9. On a scale of 1–10, how important is the beauty, mood, and aesthetic of your living space to you?</legend>
+<p class="help">1 = Not important at all; 10 = Extremely important.</p>
+<div class="scale" role="radiogroup"><label><input type="radio" name="aesthetic_importance_1_10" value="1" required>1</label><label><input type="radio" name="aesthetic_importance_1_10" value="2" required>2</label><label><input type="radio" name="aesthetic_importance_1_10" value="3" required>3</label><label><input type="radio" name="aesthetic_importance_1_10" value="4" required>4</label><label><input type="radio" name="aesthetic_importance_1_10" value="5" required>5</label><label><input type="radio" name="aesthetic_importance_1_10" value="6" required>6</label><label><input type="radio" name="aesthetic_importance_1_10" value="7" required>7</label><label><input type="radio" name="aesthetic_importance_1_10" value="8" required>8</label><label><input type="radio" name="aesthetic_importance_1_10" value="9" required>9</label><label><input type="radio" name="aesthetic_importance_1_10" value="10" required>10</label></div>
+</fieldset>
+<fieldset class="question" data-qid="Q10" data-field="area_aesthetic_importance">
+<legend>Q10. How important is the aesthetic of each of these areas to you?</legend>
+<p class="help">Use a 1–10 rating for each: Bedroom, Desk / workspace, Gaming setup, TV stand / media area, Shelf / display area, Living room. If the form feels too long, replace with: Select the areas where aesthetics matter most to you.</p>
+<table><thead><tr><th>Area</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr></thead><tbody>
+<tr><th>Bedroom</th><td><input type="radio" name="area_aesthetic_importance__bedroom" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__bedroom" value="10" required></td></tr>
+<tr><th>Desk / workspace</th><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__desk_workspace" value="10" required></td></tr>
+<tr><th>Gaming setup</th><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__gaming_setup" value="10" required></td></tr>
+<tr><th>TV stand / media area</th><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__tv_stand_media_area" value="10" required></td></tr>
+<tr><th>Shelf / display area</th><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__shelf_display_area" value="10" required></td></tr>
+<tr><th>Living room</th><td><input type="radio" name="area_aesthetic_importance__living_room" value="1" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="2" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="3" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="4" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="5" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="6" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="7" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="8" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="9" required></td><td><input type="radio" name="area_aesthetic_importance__living_room" value="10" required></td></tr>
+</tbody></table>
+</fieldset>
+<fieldset class="question" data-qid="Q11" data-field="other_atmospheric_areas">
+<legend>Q11. Are there any other areas of your home that you put effort into making beautiful or atmospheric?</legend>
+<label><input type="radio" name="other_atmospheric_areas" value="A|No" required> <span class="code">A.</span> No</label>
+<label><input type="radio" name="other_atmospheric_areas" value="B|Yes" required> <span class="code">B.</span> Yes</label>
+<div class="conditional" id="q11-details" hidden>
+  <label for="q11-details-text"><span class="code">Q11a.</span> Which other area(s) do you put effort into making beautiful or atmospheric?</label>
+  <textarea id="q11-details-text" name="other_atmospheric_areas_text" rows="3"></textarea>
+</div>
+</fieldset>
+<fieldset class="question" data-qid="Q12" data-field="living_space_mindset">
+<legend>Q12. Which statement best describes how you think about your living space?</legend>
+<label><input type="radio" name="living_space_mindset" value="A|I mostly care that it is functional" required> <span class="code">A.</span> I mostly care that it is functional</label>
+<label><input type="radio" name="living_space_mindset" value="B|I care somewhat about how it looks, but it is not a major priority" required> <span class="code">B.</span> I care somewhat about how it looks, but it is not a major priority</label>
+<label><input type="radio" name="living_space_mindset" value="C|I care about both function and appearance" required> <span class="code">C.</span> I care about both function and appearance</label>
+<label><input type="radio" name="living_space_mindset" value="D|I put active effort into making my space feel beautiful, cozy, or atmospheric" required> <span class="code">D.</span> I put active effort into making my space feel beautiful, cozy, or atmospheric</label>
+<label><input type="radio" name="living_space_mindset" value="E|My living space is a major form of personal expression for me" required> <span class="code">E.</span> My living space is a major form of personal expression for me</label>
+</fieldset>
+<h2>Lighting purchase history</h2>
+<fieldset class="question" data-qid="Q13" data-field="bought_lighting_24m">
+<legend>Q13. In the past 24 months, have you bought any lighting product for your home, apartment, bedroom, desk, TV area, gaming setup, patio, or workspace?</legend>
+<p class="help">Examples include light bulbs, lamps, smart lights, LED strips, TV backlights, under-cabinet lights, ceiling fixtures, wall lights, outdoor lights, or lighting accessories.</p>
+<label><input type="radio" name="bought_lighting_24m" value="A|Yes" required> <span class="code">A.</span> Yes</label>
+<label><input type="radio" name="bought_lighting_24m" value="B|No" required> <span class="code">B.</span> No</label>
+<label><input type="radio" name="bought_lighting_24m" value="C|Not sure / I may have bought something minor, like bulbs only" required> <span class="code">C.</span> Not sure / I may have bought something minor, like bulbs only</label>
+</fieldset>
+<fieldset class="question" data-qid="Q14" data-field="lighting_products_bought_24m">
+<legend>Q14. Which of these lighting products have you bought for your home in the past 24 months? Select all that apply.</legend>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="A|Light bulbs or replacement bulbs"> <span class="code">A.</span> Light bulbs or replacement bulbs</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="B|Smart bulbs or smart lighting kits"> <span class="code">B.</span> Smart bulbs or smart lighting kits</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="C|Table lamps or bedside lamps"> <span class="code">C.</span> Table lamps or bedside lamps</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="D|Desk lamps or monitor lamps"> <span class="code">D.</span> Desk lamps or monitor lamps</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="E|Floor lamps"> <span class="code">E.</span> Floor lamps</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="F|Ceiling fixtures, pendant lights, chandeliers, or track lights"> <span class="code">F.</span> Ceiling fixtures, pendant lights, chandeliers, or track lights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="G|Recessed lights / pot lights / downlights"> <span class="code">G.</span> Recessed lights / pot lights / downlights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="H|Wall lights or sconces"> <span class="code">H.</span> Wall lights or sconces</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="I|Bathroom or vanity lights"> <span class="code">I.</span> Bathroom or vanity lights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="J|Kitchen, cabinet, closet, or under-cabinet lights"> <span class="code">J.</span> Kitchen, cabinet, closet, or under-cabinet lights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="K|LED strips or adhesive light strips"> <span class="code">K.</span> LED strips or adhesive light strips</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="L|TV, monitor, gaming, or desk setup backlighting"> <span class="code">L.</span> TV, monitor, gaming, or desk setup backlighting</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="M|Decorative, mood, or ambient lighting"> <span class="code">M.</span> Decorative, mood, or ambient lighting</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="N|Modular wall lights or light panels"> <span class="code">N.</span> Modular wall lights or light panels</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="O|String lights, fairy lights, or patio lights"> <span class="code">O.</span> String lights, fairy lights, or patio lights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="P|Outdoor, landscape, porch, or security lights"> <span class="code">P.</span> Outdoor, landscape, porch, or security lights</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="Q|Dimmers, remotes, sensors, hubs, switches, or lighting accessories"> <span class="code">Q.</span> Dimmers, remotes, sensors, hubs, switches, or lighting accessories</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="R|DIY lighting parts, controllers, power supplies, diffusers, or LED channels"> <span class="code">R.</span> DIY lighting parts, controllers, power supplies, diffusers, or LED channels</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="S|Other: ______"> <span class="code">S.</span> Other: ______</label>
+<label><input type="checkbox" name="lighting_products_bought_24m" value="T|I have not bought any lighting products in the past 24 months"> <span class="code">T.</span> I have not bought any lighting products in the past 24 months</label>
+</fieldset>
+<fieldset class="question" data-qid="Q15" data-field="lighting_purchase_reason">
+<legend>Q15. What was the main reason you bought lighting? Select the closest answer.</legend>
+<label><input type="radio" name="lighting_purchase_reason" value="A|To replace a broken or old bulb / fixture" required> <span class="code">A.</span> To replace a broken or old bulb / fixture</label>
+<label><input type="radio" name="lighting_purchase_reason" value="B|To make a room brighter or more functional" required> <span class="code">B.</span> To make a room brighter or more functional</label>
+<label><input type="radio" name="lighting_purchase_reason" value="C|To improve the mood or atmosphere of a space" required> <span class="code">C.</span> To improve the mood or atmosphere of a space</label>
+<label><input type="radio" name="lighting_purchase_reason" value="D|To make a desk, TV area, gaming setup, or bedroom look better" required> <span class="code">D.</span> To make a desk, TV area, gaming setup, or bedroom look better</label>
+<label><input type="radio" name="lighting_purchase_reason" value="E|To add smart-home control or automation" required> <span class="code">E.</span> To add smart-home control or automation</label>
+<label><input type="radio" name="lighting_purchase_reason" value="F|For renovation or home improvement" required> <span class="code">F.</span> For renovation or home improvement</label>
+<label><input type="radio" name="lighting_purchase_reason" value="G|For outdoor, patio, or security use" required> <span class="code">G.</span> For outdoor, patio, or security use</label>
+<label><input type="radio" name="lighting_purchase_reason" value="H|For seasonal decoration" required> <span class="code">H.</span> For seasonal decoration</label>
+<label><input type="radio" name="lighting_purchase_reason" value="I|Other: ______" required> <span class="code">I.</span> Other: ______</label>
+<label><input type="radio" name="lighting_purchase_reason" value="J|I have not bought lighting in the past 24 months" required> <span class="code">J.</span> I have not bought lighting in the past 24 months</label>
+</fieldset>
+<fieldset class="question" data-qid="Q16" data-field="most_memorable_lighting_product">
+<legend>Q16. Which of the lighting products you bought felt most memorable or satisfying?</legend>
+<textarea name="most_memorable_lighting_product" rows="4" required></textarea>
+</fieldset>
+<fieldset class="question" data-qid="Q17" data-field="memorable_product_reason">
+<legend>Q17. Why was that product memorable or satisfying? Select all that apply.</legend>
+<label><input type="checkbox" name="memorable_product_reason" value="A|It made the space look better"> <span class="code">A.</span> It made the space look better</label>
+<label><input type="checkbox" name="memorable_product_reason" value="B|It changed the mood of the room"> <span class="code">B.</span> It changed the mood of the room</label>
+<label><input type="checkbox" name="memorable_product_reason" value="C|It was useful or practical"> <span class="code">C.</span> It was useful or practical</label>
+<label><input type="checkbox" name="memorable_product_reason" value="D|It felt premium or well-designed"> <span class="code">D.</span> It felt premium or well-designed</label>
+<label><input type="checkbox" name="memorable_product_reason" value="E|It was fun or satisfying to use"> <span class="code">E.</span> It was fun or satisfying to use</label>
+<label><input type="checkbox" name="memorable_product_reason" value="F|It was smart / automated / app-controlled"> <span class="code">F.</span> It was smart / automated / app-controlled</label>
+<label><input type="checkbox" name="memorable_product_reason" value="G|It solved a specific problem"> <span class="code">G.</span> It solved a specific problem</label>
+<label><input type="checkbox" name="memorable_product_reason" value="H|Other: ______"> <span class="code">H.</span> Other: ______</label>
+<label><input type="checkbox" name="memorable_product_reason" value="I|Not applicable / I did not buy lighting"> <span class="code">I.</span> Not applicable / I did not buy lighting</label>
+</fieldset>
+<h2>Where people buy lighting</h2>
+<fieldset class="question" data-qid="Q18" data-field="lighting_retailers_24m">
+<legend>Q18. If you bought lighting products in the past 24 months, where did you buy them? Select all that apply.</legend>
+<label><input type="checkbox" name="lighting_retailers_24m" value="A|Amazon"> <span class="code">A.</span> Amazon</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="B|IKEA"> <span class="code">B.</span> IKEA</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="C|Walmart"> <span class="code">C.</span> Walmart</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="D|Costco"> <span class="code">D.</span> Costco</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="E|Home Depot"> <span class="code">E.</span> Home Depot</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="F|Lowe’s / RONA"> <span class="code">F.</span> Lowe’s / RONA</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="G|Canadian Tire"> <span class="code">G.</span> Canadian Tire</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="H|Best Buy"> <span class="code">H.</span> Best Buy</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="I|Wayfair"> <span class="code">I.</span> Wayfair</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="J|A lighting or furniture store"> <span class="code">J.</span> A lighting or furniture store</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="K|A brand’s own website"> <span class="code">K.</span> A brand’s own website</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="L|TikTok Shop / Instagram / social media shop"> <span class="code">L.</span> TikTok Shop / Instagram / social media shop</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="M|Other online store: ______"> <span class="code">M.</span> Other online store: ______</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="N|Other physical store: ______"> <span class="code">N.</span> Other physical store: ______</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="O|I do not remember"> <span class="code">O.</span> I do not remember</label>
+<label><input type="checkbox" name="lighting_retailers_24m" value="P|Not applicable / I did not buy lighting"> <span class="code">P.</span> Not applicable / I did not buy lighting</label>
+</fieldset>
+<fieldset class="question" data-qid="Q19" data-field="top_of_mind_lighting_retailer">
+<legend>Q19. Which store or website do you remember most clearly for lighting or home-decor purchases?</legend>
+<textarea name="top_of_mind_lighting_retailer" rows="4" required></textarea>
+</fieldset>
+<h2>Spending behavior</h2>
+<fieldset class="question" data-qid="Q20" data-field="max_space_improvement_spend_24m">
+<legend>Q20. In the past 24 months, what is the most you have spent on a single product to improve the look, comfort, or atmosphere of your living space?</legend>
+<p class="help">Examples: lighting, desk accessories, decor, shelves, plants, organizers, small furniture, wall art.</p>
+<label><input type="radio" name="max_space_improvement_spend_24m" value="A|$0–49 CAD" required> <span class="code">A.</span> $0–49 CAD</label>
+<label><input type="radio" name="max_space_improvement_spend_24m" value="B|$50–99 CAD" required> <span class="code">B.</span> $50–99 CAD</label>
+<label><input type="radio" name="max_space_improvement_spend_24m" value="C|$100–199 CAD" required> <span class="code">C.</span> $100–199 CAD</label>
+<label><input type="radio" name="max_space_improvement_spend_24m" value="D|$200–399 CAD" required> <span class="code">D.</span> $200–399 CAD</label>
+<label><input type="radio" name="max_space_improvement_spend_24m" value="E|$400+ CAD" required> <span class="code">E.</span> $400+ CAD</label>
+</fieldset>
+<fieldset class="question" data-qid="Q21" data-field="max_lighting_spend_24m">
+<legend>Q21. In the past 24 months, what is the most you have spent on a single lighting product?</legend>
+<label><input type="radio" name="max_lighting_spend_24m" value="A|$0 CAD" required> <span class="code">A.</span> $0 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="B|$1–24 CAD" required> <span class="code">B.</span> $1–24 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="C|$25–49 CAD" required> <span class="code">C.</span> $25–49 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="D|$50–99 CAD" required> <span class="code">D.</span> $50–99 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="E|$100–199 CAD" required> <span class="code">E.</span> $100–199 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="F|$200–399 CAD" required> <span class="code">F.</span> $200–399 CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="G|$400+ CAD" required> <span class="code">G.</span> $400+ CAD</label>
+<label><input type="radio" name="max_lighting_spend_24m" value="H|I do not remember" required> <span class="code">H.</span> I do not remember</label>
+</fieldset>
+<fieldset class="question" data-qid="Q22" data-field="aesthetic_purchase_frequency">
+<legend>Q22. How often do you buy products mainly because they make your space look or feel better?</legend>
+<label><input type="radio" name="aesthetic_purchase_frequency" value="A|Never" required> <span class="code">A.</span> Never</label>
+<label><input type="radio" name="aesthetic_purchase_frequency" value="B|Rarely" required> <span class="code">B.</span> Rarely</label>
+<label><input type="radio" name="aesthetic_purchase_frequency" value="C|Sometimes" required> <span class="code">C.</span> Sometimes</label>
+<label><input type="radio" name="aesthetic_purchase_frequency" value="D|Often" required> <span class="code">D.</span> Often</label>
+<label><input type="radio" name="aesthetic_purchase_frequency" value="E|Very often" required> <span class="code">E.</span> Very often</label>
+</fieldset>
+<h2>Lambenti concept test</h2>
+<fieldset class="question" data-qid="Q23" data-field="lambenti_interest_1_7">
+<legend>Q23. Based on this description, how interested are you in this type of product?</legend>
+<p class="help">Imagine a plug-in and stick-on ambient lighting product for a desk, shelf, or TV stand. It sits underneath the visible surface, out-of-sight, and controls a warm or cool white backlight. Instead of using a visible switch, remote, or app, you adjust the brightness by moving a small magnetic object on the surface above it. Visualize a wooden hexagon the size of a large coin with a velvet bottom.</p>
+<div class="scale" role="radiogroup"><label><input type="radio" name="lambenti_interest_1_7" value="1" required>1</label><label><input type="radio" name="lambenti_interest_1_7" value="2" required>2</label><label><input type="radio" name="lambenti_interest_1_7" value="3" required>3</label><label><input type="radio" name="lambenti_interest_1_7" value="4" required>4</label><label><input type="radio" name="lambenti_interest_1_7" value="5" required>5</label><label><input type="radio" name="lambenti_interest_1_7" value="6" required>6</label><label><input type="radio" name="lambenti_interest_1_7" value="7" required>7</label></div>
+</fieldset>
+<fieldset class="question" data-qid="Q24" data-field="likely_lambenti_use_places">
+<legend>Q24. Where would you be most likely to use a product like this? Select all that apply.</legend>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="A|Desk / workspace"> <span class="code">A.</span> Desk / workspace</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="B|TV stand / media area"> <span class="code">B.</span> TV stand / media area</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="C|Gaming setup"> <span class="code">C.</span> Gaming setup</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="D|Bedroom"> <span class="code">D.</span> Bedroom</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="E|Shelf / display area"> <span class="code">E.</span> Shelf / display area</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="F|Living room"> <span class="code">F.</span> Living room</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="G|Office"> <span class="code">G.</span> Office</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="H|I would not use this"> <span class="code">H.</span> I would not use this</label>
+<label><input type="checkbox" name="likely_lambenti_use_places" value="I|Other: ______"> <span class="code">I.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q25" data-field="lambenti_interest_drivers">
+<legend>Q25. What interests you most about this type of product? Select up to 3.</legend>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="A|It could make my space look better" data-max="3"> <span class="code">A.</span> It could make my space look better</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="B|It could improve the mood or atmosphere of a room" data-max="3"> <span class="code">B.</span> It could improve the mood or atmosphere of a room</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="C|The magnetic interaction sounds satisfying" data-max="3"> <span class="code">C.</span> The magnetic interaction sounds satisfying</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="D|It avoids visible buttons, remotes, or apps" data-max="3"> <span class="code">D.</span> It avoids visible buttons, remotes, or apps</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="E|It seems unique or novel" data-max="3"> <span class="code">E.</span> It seems unique or novel</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="F|It could improve a desk, gaming, or TV setup" data-max="3"> <span class="code">F.</span> It could improve a desk, gaming, or TV setup</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="G|It could be a good gift" data-max="3"> <span class="code">G.</span> It could be a good gift</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="H|I like smart or unusual home products" data-max="3"> <span class="code">H.</span> I like smart or unusual home products</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="I|Nothing interests me about it" data-max="3"> <span class="code">I.</span> Nothing interests me about it</label>
+<label><input type="checkbox" name="lambenti_interest_drivers" value="J|Other: ______" data-max="3"> <span class="code">J.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q26" data-field="lambenti_concerns">
+<legend>Q26. What concerns would you have about this type of product? Select all that apply.</legend>
+<label><input type="checkbox" name="lambenti_concerns" value="A|Price"> <span class="code">A.</span> Price</label>
+<label><input type="checkbox" name="lambenti_concerns" value="B|Setup / installation"> <span class="code">B.</span> Setup / installation</label>
+<label><input type="checkbox" name="lambenti_concerns" value="C|Cable management"> <span class="code">C.</span> Cable management</label>
+<label><input type="checkbox" name="lambenti_concerns" value="D|Whether I would actually use it"> <span class="code">D.</span> Whether I would actually use it</label>
+<label><input type="checkbox" name="lambenti_concerns" value="E|Whether it would look premium"> <span class="code">E.</span> Whether it would look premium</label>
+<label><input type="checkbox" name="lambenti_concerns" value="F|Whether the magnetic control would feel gimmicky"> <span class="code">F.</span> Whether the magnetic control would feel gimmicky</label>
+<label><input type="checkbox" name="lambenti_concerns" value="G|Durability / reliability"> <span class="code">G.</span> Durability / reliability</label>
+<label><input type="checkbox" name="lambenti_concerns" value="H|Whether it would fit my space"> <span class="code">H.</span> Whether it would fit my space</label>
+<label><input type="checkbox" name="lambenti_concerns" value="I|I do not like ambient lighting"> <span class="code">I.</span> I do not like ambient lighting</label>
+<label><input type="checkbox" name="lambenti_concerns" value="J|I do not have concerns"> <span class="code">J.</span> I do not have concerns</label>
+<label><input type="checkbox" name="lambenti_concerns" value="K|Other: ______"> <span class="code">K.</span> Other: ______</label>
+</fieldset>
+<fieldset class="question" data-qid="Q27" data-field="lambenti_price_consideration">
+<legend>Q27. At what price would you seriously consider buying this product if it looked premium and worked well?</legend>
+<label><input type="radio" name="lambenti_price_consideration" value="A|Under $50 CAD" required> <span class="code">A.</span> Under $50 CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="B|$50–79 CAD" required> <span class="code">B.</span> $50–79 CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="C|$80–109 CAD" required> <span class="code">C.</span> $80–109 CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="D|$110–149 CAD" required> <span class="code">D.</span> $110–149 CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="E|$150–199 CAD" required> <span class="code">E.</span> $150–199 CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="F|$200+ CAD" required> <span class="code">F.</span> $200+ CAD</label>
+<label><input type="radio" name="lambenti_price_consideration" value="G|I would not consider buying it" required> <span class="code">G.</span> I would not consider buying it</label>
+</fieldset>
+<fieldset class="question" data-qid="Q28" data-field="lambenti_purchase_reaction">
+<legend>Q28. Which best describes your reaction?</legend>
+<label><input type="radio" name="lambenti_purchase_reaction" value="A|I would seriously consider buying this" required> <span class="code">A.</span> I would seriously consider buying this</label>
+<label><input type="radio" name="lambenti_purchase_reaction" value="B|I would be interested, but only at the right price" required> <span class="code">B.</span> I would be interested, but only at the right price</label>
+<label><input type="radio" name="lambenti_purchase_reaction" value="C|I like the idea, but I am not sure I would buy it" required> <span class="code">C.</span> I like the idea, but I am not sure I would buy it</label>
+<label><input type="radio" name="lambenti_purchase_reaction" value="D|It is interesting, but probably not for me" required> <span class="code">D.</span> It is interesting, but probably not for me</label>
+<label><input type="radio" name="lambenti_purchase_reaction" value="E|I am not interested" required> <span class="code">E.</span> I am not interested</label>
+</fieldset>
+<fieldset class="question" data-qid="Q29" data-field="wants_demo_video">
+<legend>Q29. Would you want to see a short demo video of how it works?</legend>
+<label><input type="radio" name="wants_demo_video" value="A|Yes" required> <span class="code">A.</span> Yes</label>
+<label><input type="radio" name="wants_demo_video" value="B|Maybe" required> <span class="code">B.</span> Maybe</label>
+<label><input type="radio" name="wants_demo_video" value="C|No" required> <span class="code">C.</span> No</label>
+</fieldset>
+<fieldset class="question" data-qid="Q30" data-field="concept_improvement_open">
+<legend>Q30. Optional: What would make this product more appealing to you?</legend>
+<textarea name="concept_improvement_open" rows="4"></textarea>
+</fieldset>
+<div class="actions">
+  <button type="submit">Finish Survey</button>
+  <button class="secondary" type="button" id="downloadBlank">Download Blank CSV Header</button>
+  <span class="note">Static version: use for preview/testing, or connect the submit handler to your form backend before public launch.</span>
+</div>
+</form>
+</main>
+<script>
+const fields = ["rent_own_status", "home_type", "household_size", "decor_control_areas", "primary_decorator", "small_decor_final_say", "plugin_product_freedom", "installation_comfort", "aesthetic_importance_1_10", "area_aesthetic_importance", "other_atmospheric_areas", "other_atmospheric_areas_text", "living_space_mindset", "bought_lighting_24m", "lighting_products_bought_24m", "lighting_purchase_reason", "most_memorable_lighting_product", "memorable_product_reason", "lighting_retailers_24m", "top_of_mind_lighting_retailer", "max_space_improvement_spend_24m", "max_lighting_spend_24m", "aesthetic_purchase_frequency", "lambenti_interest_1_7", "likely_lambenti_use_places", "lambenti_interest_drivers", "lambenti_concerns", "lambenti_price_consideration", "lambenti_purchase_reaction", "wants_demo_video", "concept_improvement_open"];
+const q11Details = document.getElementById('q11-details');
+const q11DetailsText = document.getElementById('q11-details-text');
+document.querySelectorAll('input[name="other_atmospheric_areas"]').forEach((input) => {
+  input.addEventListener('change', () => {
+    const isYes = input.checked && input.value === 'B|Yes';
+    q11Details.hidden = !isYes;
+    q11DetailsText.required = isYes;
+    if (!isYes) q11DetailsText.value = '';
+  });
+});
+document.querySelectorAll('input[type="checkbox"][data-max="3"]').forEach((box) => {
+  box.addEventListener('change', () => {
+    const checked = document.querySelectorAll(`input[name="${box.name}"]:checked`);
+    if (checked.length > 3) { box.checked = false; alert('Select up to 3 options.'); }
+  });
+});
+document.getElementById('downloadBlank').addEventListener('click', () => {
+  download('lambenti-pmr-blank-header.csv', fields.join(',') + '\n');
+});
+document.getElementById('survey').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const out = { submitted_at: new Date().toISOString() };
+  for (const [key, value] of data.entries()) {
+    if (out[key]) out[key] += '; ' + value;
+    else out[key] = value;
+  }
+  download('lambenti-pmr-response-' + Date.now() + '.json', JSON.stringify(out, null, 2));
+  alert('Response downloaded as JSON. For live deployment, connect this form to Google Forms, Tally, Typeform, Formspree, Airtable, or your own backend.');
+});
+function download(name, text) {
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>

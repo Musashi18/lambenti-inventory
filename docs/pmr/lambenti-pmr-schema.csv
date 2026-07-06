@@ -1,0 +1,56 @@
+field_name,data_type,source_question,allowed_values_or_formula,analysis_notes
+response_id,text,Unique respondent ID from form export,,Primary key
+submitted_at,datetime,Form timestamp,,Use for wave/source tracking
+survey_country,text,Optional pre-survey field if distributing outside Canada,Canada/United States/Other,Only needed for currency branching
+rent_own_status,single_select,Q1,Rent; Own; Live with family / do not personally rent or own; Student housing / dorm; Other: ______,Determine whether the respondent has physical and purchasing control over their space.
+home_type,single_select,Q2,Detached house; Semi-detached house; Townhouse; Condo; Apartment; Basement apartment; Shared housing / roommate situation; Other: ______,"Segment house vs apartment/condo dwellers; installation tolerance, available space, decorating control, and lighting needs may differ."
+household_size,single_select,Q3,1; 2; 3; 4; 5+,Estimate household complexity and whether purchase decisions are individual or shared.
+decor_control_areas,multi_select,Q4,Bedroom; Desk / workspace; Gaming setup; TV stand / media area; Shelf / display area; Living room; Kitchen; Dining area; Entryway / hallway; Balcony / patio; Entire home; I do not have much control over decorating; Other: ______,Identify whether the respondent controls the exact spaces Lambenti is likely to occupy.
+primary_decorator,single_select,Q5,Mostly me; Mostly my partner / spouse; Mostly a parent or family member; Mostly a roommate; Shared evenly between multiple people; Nobody puts much effort into decorating; Other: ______,Identify who is emotionally and practically responsible for beautifying the space.
+small_decor_final_say,single_select,Q6,Mostly me; Mostly my partner / spouse; Mostly a parent or family member; Mostly a roommate; Shared decision; Depends on the room; I usually avoid buying decorative products; Other: ______,Determine who has purchasing authority for Lambenti-like products.
+plugin_product_freedom,single_select,Q7,"Complete freedom; Mostly free, but I may check with someone first; Some freedom, but there are limits; Very limited freedom; Almost no freedom",Assess installation freedom.
+installation_comfort,single_select,Q8,Very comfortable; Somewhat comfortable; Neutral; Somewhat uncomfortable; Very uncomfortable,Determine whether setup/cable management will be a blocker.
+aesthetic_importance_1_10,rating_1_10,Q9,numeric/open text,Create an aesthetic-priority segment.
+area_aesthetic_importance,matrix_rating_1_10,Q10,Rows: Bedroom; Desk / workspace; Gaming setup; TV stand / media area; Shelf / display area; Living room. Columns: 1–10,Identify which use-cases have the strongest emotional/aesthetic relevance.
+other_atmospheric_areas,single_select_with_text,Q11,No; Yes,"Capture whether there are additional home areas where the respondent makes aesthetic/atmospheric effort; if Yes, collect Q11a text."
+other_atmospheric_areas_text,open_text,Q11a,free text; shown only if Q11 = Yes,Unexpected use-case text for additional beautiful/atmospheric areas.
+living_space_mindset,single_select,Q12,"I mostly care that it is functional; I care somewhat about how it looks, but it is not a major priority; I care about both function and appearance; I put active effort into making my space feel beautiful, cozy, or atmospheric; My living space is a major form of personal expression for me","Identify whether the respondent sees space design as self-expression, atmosphere, function, or maintenance."
+bought_lighting_24m,single_select,Q13,"Yes; No; Not sure / I may have bought something minor, like bulbs only","Basic lighting-buyer screener. If using a simple form, do not branch respondents out; Q14 has a no-purchase option."
+lighting_products_bought_24m,multi_select,Q14,"Light bulbs or replacement bulbs; Smart bulbs or smart lighting kits; Table lamps or bedside lamps; Desk lamps or monitor lamps; Floor lamps; Ceiling fixtures, pendant lights, chandeliers, or track lights; Recessed lights / pot lights / downlights; Wall lights or sconces; Bathroom or vanity lights; Kitchen, cabinet, closet, or under-cabinet lights; LED strips or adhesive light strips; TV, monitor, gaming, or desk setup backlighting; Decorative, mood, or ambient lighting; Modular wall lights or light panels; String lights, fairy lights, or patio lights; Outdoor, landscape, porch, or security lights; Dimmers, remotes, sensors, hubs, switches, or lighting accessories; DIY lighting parts, controllers, power supplies, diffusers, or LED channels; Other: ______; I have not bought any lighting products in the past 24 months",Main behavioral segmentation question. Do not collapse no-recent-purchase into weak automatically.
+lighting_purchase_reason,single_select,Q15,"To replace a broken or old bulb / fixture; To make a room brighter or more functional; To improve the mood or atmosphere of a space; To make a desk, TV area, gaming setup, or bedroom look better; To add smart-home control or automation; For renovation or home improvement; For outdoor, patio, or security use; For seasonal decoration; Other: ______; I have not bought lighting in the past 24 months",Separate utility buyers from atmospheric buyers.
+most_memorable_lighting_product,open_text,Q16,numeric/open text,"Identify emotional product memories: glow quality, ease, aesthetics, novelty, transformation, premium feel, or convenience."
+memorable_product_reason,multi_select,Q17,It made the space look better; It changed the mood of the room; It was useful or practical; It felt premium or well-designed; It was fun or satisfying to use; It was smart / automated / app-controlled; It solved a specific problem; Other: ______; Not applicable / I did not buy lighting,Understand purchase satisfaction drivers.
+lighting_retailers_24m,multi_select,Q18,Amazon; IKEA; Walmart; Costco; Home Depot; Lowe’s / RONA; Canadian Tire; Best Buy; Wayfair; A lighting or furniture store; A brand’s own website; TikTok Shop / Instagram / social media shop; Other online store: ______; Other physical store: ______; I do not remember; Not applicable / I did not buy lighting,Determine possible acquisition channels and buyer expectations.
+top_of_mind_lighting_retailer,open_text,Q19,numeric/open text,Capture top-of-mind retailer recall.
+max_space_improvement_spend_24m,single_select,Q20,$0–49 CAD; $50–99 CAD; $100–199 CAD; $200–399 CAD; $400+ CAD,"Measure willingness to spend on space improvement, not only lighting."
+max_lighting_spend_24m,single_select,Q21,$0 CAD; $1–24 CAD; $25–49 CAD; $50–99 CAD; $100–199 CAD; $200–399 CAD; $400+ CAD; I do not remember,Measure lighting-specific spending ceiling.
+aesthetic_purchase_frequency,single_select,Q22,Never; Rarely; Sometimes; Often; Very often,Identify people who repeatedly buy atmosphere/aesthetic products.
+lambenti_interest_1_7,rating_1_7,Q23,numeric/open text,Main interest score. Primary metric: strong interest rate = % rating 6 or 7.
+likely_lambenti_use_places,multi_select,Q24,Desk / workspace; TV stand / media area; Gaming setup; Bedroom; Shelf / display area; Living room; Office; I would not use this; Other: ______,Identify most promising product use case and marketing angle.
+lambenti_interest_drivers,multi_select_max3,Q25,"It could make my space look better; It could improve the mood or atmosphere of a room; The magnetic interaction sounds satisfying; It avoids visible buttons, remotes, or apps; It seems unique or novel; It could improve a desk, gaming, or TV setup; It could be a good gift; I like smart or unusual home products; Nothing interests me about it; Other: ______",Identify value proposition strength.
+lambenti_concerns,multi_select,Q26,Price; Setup / installation; Cable management; Whether I would actually use it; Whether it would look premium; Whether the magnetic control would feel gimmicky; Durability / reliability; Whether it would fit my space; I do not like ambient lighting; I do not have concerns; Other: ______,Identify objections and separate conversion barriers from target-fit killers.
+lambenti_price_consideration,single_select,Q27,Under $50 CAD; $50–79 CAD; $80–109 CAD; $110–149 CAD; $150–199 CAD; $200+ CAD; I would not consider buying it,Measure price readiness. Analyze price only after filtering for actual interest.
+lambenti_purchase_reaction,single_select,Q28,"I would seriously consider buying this; I would be interested, but only at the right price; I like the idea, but I am not sure I would buy it; It is interesting, but probably not for me; I am not interested",Purchase intent signal.
+wants_demo_video,single_select,Q29,Yes; Maybe; No,Measure whether visual demonstration could increase conversion.
+concept_improvement_open,open_text,Q30,numeric/open text,Collect qualitative improvement ideas.
+aesthetic_score,integer,Q9,"0,5,12,20",1–3=0; 4–5=5; 6–7=12; 8–10=20
+authority_score,integer,Q5+Q6+Q7,0–15,Mostly me decorates +5; shared decor +4; mostly me final say +5; complete freedom +5; mostly free +3; cap 15
+space_control_score,integer,Q4,0–10,Desk +3; gaming +3; TV/media +3; shelf/display +3; bedroom +2; living room +1; entire home +3; cap 10
+prior_lighting_score,integer,Q14,0–20,Sum Q14 point values from codebook; cap 20
+motivation_score,integer,Q15+Q17,0–10,Sum motivation points from codebook; cap 10
+installation_score,integer,Q8,0–5,Very comfortable 5; somewhat 4; neutral 2; somewhat uncomfortable 1; very uncomfortable 0
+spending_score,integer,Q20+Q21,0–10,Use higher of mapped Q20 and Q21 spend scores
+direct_interest_score,integer,Q23,0–10,1–2=0; 3–4=2; 5=5; 6=8; 7=10
+total_lambenti_fit_score,integer,Derived,0–100,Sum all score sections; do not exceed 100
+has_relevant_space_control,boolean,Q4,TRUE/FALSE,"TRUE if Q4 includes bedroom, desk/workspace, gaming, TV/media, shelf/display, living room, or entire home"
+bought_any_lighting_24m,boolean,Q13/Q14,TRUE/FALSE,TRUE for Q13 yes/not sure or any Q14 product except no-purchase
+atmosphere_buyer,boolean,Q14,TRUE/FALSE,"TRUE if Q14 includes LED strips, TV/gaming backlighting, decorative/mood/ambient, modular panels, string/fairy/patio, desk lamps, smart lighting, DIY parts, or dimmers/remotes/sensors/hubs"
+smart_interactive_buyer,boolean,Q14,TRUE/FALSE,"TRUE if Q14 includes smart kits, TV/gaming backlighting, modular panels, dimmers/remotes/sensors/hubs, or DIY lighting parts"
+utility_only_buyer,boolean,Q14,TRUE/FALSE,TRUE if only utility/maintenance Q14 categories are selected and no atmospheric/smart/setup categories
+non_lighting_buyer,boolean,Q14,TRUE/FALSE,TRUE if Q14 no-recent-purchase selected and no product categories selected
+strong_lambenti_interest,boolean,Q23,TRUE/FALSE,TRUE if Q23 is 6 or 7
+purchase_consideration,boolean,Q28,TRUE/FALSE,TRUE if Q28 A or B
+price_sensitive_consideration,boolean,Q28,TRUE/FALSE,TRUE if Q28 B
+price_qualified_80plus,boolean,Q27,TRUE/FALSE,TRUE if Q27 C/D/E/F
+price_qualified_purchase_consideration,boolean,Q23+Q27+Q28,TRUE/FALSE,TRUE if strong/moderate interest plus purchase consideration plus Q27 $80+
+segment_label,text,Derived,Strong/Medium/Weak/Poor/Unproven interesting,Apply segment rules from markdown

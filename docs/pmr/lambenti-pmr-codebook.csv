@@ -1,0 +1,185 @@
+question_id,field_name,question_type,answer_code,answer_label,category_or_flag,score_value,scoring_notes
+Q1,rent_own_status,single_select,A,Rent,,,
+Q1,rent_own_status,single_select,B,Own,,,
+Q1,rent_own_status,single_select,C,Live with family / do not personally rent or own,,,
+Q1,rent_own_status,single_select,D,Student housing / dorm,,,
+Q1,rent_own_status,single_select,E,Other: ______,,,
+Q2,home_type,single_select,A,Detached house,,,
+Q2,home_type,single_select,B,Semi-detached house,,,
+Q2,home_type,single_select,C,Townhouse,,,
+Q2,home_type,single_select,D,Condo,,,
+Q2,home_type,single_select,E,Apartment,,,
+Q2,home_type,single_select,F,Basement apartment,,,
+Q2,home_type,single_select,G,Shared housing / roommate situation,,,
+Q2,home_type,single_select,H,Other: ______,,,
+Q3,household_size,single_select,A,1,,,
+Q3,household_size,single_select,B,2,,,
+Q3,household_size,single_select,C,3,,,
+Q3,household_size,single_select,D,4,,,
+Q3,household_size,single_select,E,5+,,,
+Q4,decor_control_areas,multi_select,A,Bedroom,relevant_space,2,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,B,Desk / workspace,relevant_space,3,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,C,Gaming setup,relevant_space,3,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,D,TV stand / media area,relevant_space,3,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,E,Shelf / display area,relevant_space,3,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,F,Living room,relevant_space,1,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,G,Kitchen,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,H,Dining area,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,I,Entryway / hallway,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,J,Balcony / patio,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,K,Entire home,relevant_space,3,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,L,I do not have much control over decorating,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q4,decor_control_areas,multi_select,M,Other: ______,other_space_or_low_control,0,Relevant space control points; cap Q4 section at 10.
+Q5,primary_decorator,single_select,A,Mostly me,decor_authority,5,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,B,Mostly my partner / spouse,other_decorator,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,C,Mostly a parent or family member,other_decorator,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,D,Mostly a roommate,other_decorator,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,E,Shared evenly between multiple people,decor_authority,4,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,F,Nobody puts much effort into decorating,other_decorator,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q5,primary_decorator,single_select,G,Other: ______,other_decorator,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q6,small_decor_final_say,single_select,A,Mostly me,buyer_control_strong,5,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,B,Mostly my partner / spouse,buyer_control_weak_or_other,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,C,Mostly a parent or family member,buyer_control_weak_or_other,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,D,Mostly a roommate,buyer_control_weak_or_other,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,E,Shared decision,buyer_control_strong,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,F,Depends on the room,buyer_control_strong,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,G,I usually avoid buying decorative products,buyer_control_weak_or_other,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q6,small_decor_final_say,single_select,H,Other: ______,buyer_control_weak_or_other,0,Mostly me final say gets +5; shared/depends flags buyer control but section cap prevents double-counting unless model is tuned later.
+Q7,plugin_product_freedom,single_select,A,Complete freedom,installation_freedom,5,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q7,plugin_product_freedom,single_select,B,"Mostly free, but I may check with someone first",installation_freedom,3,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q7,plugin_product_freedom,single_select,C,"Some freedom, but there are limits",limited_freedom,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q7,plugin_product_freedom,single_select,D,Very limited freedom,limited_freedom,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q7,plugin_product_freedom,single_select,E,Almost no freedom,limited_freedom,0,Decorating/purchase authority points; cap Q5/Q6/Q7 at 15.
+Q8,installation_comfort,single_select,A,Very comfortable,installation_comfort,5,"Installation comfort section, max 5."
+Q8,installation_comfort,single_select,B,Somewhat comfortable,installation_comfort,4,"Installation comfort section, max 5."
+Q8,installation_comfort,single_select,C,Neutral,installation_comfort,2,"Installation comfort section, max 5."
+Q8,installation_comfort,single_select,D,Somewhat uncomfortable,installation_comfort,1,"Installation comfort section, max 5."
+Q8,installation_comfort,single_select,E,Very uncomfortable,installation_comfort,0,"Installation comfort section, max 5."
+Q11,other_atmospheric_areas,single_select_with_text,A,No,,,
+Q11,other_atmospheric_areas,single_select_with_text,B,Yes,,,
+Q12,living_space_mindset,single_select,A,I mostly care that it is functional,,,High relevance: active effort beautiful/cozy/atmospheric; major personal expression.
+Q12,living_space_mindset,single_select,B,"I care somewhat about how it looks, but it is not a major priority",,,High relevance: active effort beautiful/cozy/atmospheric; major personal expression.
+Q12,living_space_mindset,single_select,C,I care about both function and appearance,,,High relevance: active effort beautiful/cozy/atmospheric; major personal expression.
+Q12,living_space_mindset,single_select,D,"I put active effort into making my space feel beautiful, cozy, or atmospheric",,,High relevance: active effort beautiful/cozy/atmospheric; major personal expression.
+Q12,living_space_mindset,single_select,E,My living space is a major form of personal expression for me,,,High relevance: active effort beautiful/cozy/atmospheric; major personal expression.
+Q13,bought_lighting_24m,single_select,A,Yes,,,
+Q13,bought_lighting_24m,single_select,B,No,,,
+Q13,bought_lighting_24m,single_select,C,"Not sure / I may have bought something minor, like bulbs only",,,
+Q14,lighting_products_bought_24m,multi_select,A,Light bulbs or replacement bulbs,utility_maintenance,1,Q14 category=utility_maintenance; match=weak; prior_lighting_behavior points=1; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,B,Smart bulbs or smart lighting kits,smart_interactive_enthusiast,5,Q14 category=smart_interactive_enthusiast; match=strong; prior_lighting_behavior points=5; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,C,Table lamps or bedside lamps,functional_task,3,Q14 category=functional_task; match=medium; prior_lighting_behavior points=3; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,D,Desk lamps or monitor lamps,functional_task,5,Q14 category=functional_task; match=strong; prior_lighting_behavior points=5; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,E,Floor lamps,functional_task,3,Q14 category=functional_task; match=medium; prior_lighting_behavior points=3; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,F,"Ceiling fixtures, pendant lights, chandeliers, or track lights",utility_maintenance,1,Q14 category=utility_maintenance; match=weak; prior_lighting_behavior points=1; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,G,Recessed lights / pot lights / downlights,utility_maintenance,1,Q14 category=utility_maintenance; match=weak; prior_lighting_behavior points=1; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,H,Wall lights or sconces,functional_task,3,Q14 category=functional_task; match=medium; prior_lighting_behavior points=3; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,I,Bathroom or vanity lights,utility_maintenance,1,Q14 category=utility_maintenance; match=weak; prior_lighting_behavior points=1; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,J,"Kitchen, cabinet, closet, or under-cabinet lights",functional_task,3,Q14 category=functional_task; match=medium; prior_lighting_behavior points=3; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,K,LED strips or adhesive light strips,atmospheric_decorative,6,Q14 category=atmospheric_decorative; match=strong; prior_lighting_behavior points=6; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,L,"TV, monitor, gaming, or desk setup backlighting",atmospheric_decorative; smart_interactive_enthusiast,7,Q14 category=atmospheric_decorative; smart_interactive_enthusiast; match=strong; prior_lighting_behavior points=7; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,M,"Decorative, mood, or ambient lighting",atmospheric_decorative,7,Q14 category=atmospheric_decorative; match=strong; prior_lighting_behavior points=7; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,N,Modular wall lights or light panels,atmospheric_decorative; smart_interactive_enthusiast,6,Q14 category=atmospheric_decorative; smart_interactive_enthusiast; match=strong; prior_lighting_behavior points=6; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,O,"String lights, fairy lights, or patio lights",atmospheric_decorative,3,Q14 category=atmospheric_decorative; match=medium; prior_lighting_behavior points=3; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,P,"Outdoor, landscape, porch, or security lights",utility_maintenance,1,Q14 category=utility_maintenance; match=weak; prior_lighting_behavior points=1; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,Q,"Dimmers, remotes, sensors, hubs, switches, or lighting accessories",smart_interactive_enthusiast,4,Q14 category=smart_interactive_enthusiast; match=medium; prior_lighting_behavior points=4; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,R,"DIY lighting parts, controllers, power supplies, diffusers, or LED channels",smart_interactive_enthusiast,5,Q14 category=smart_interactive_enthusiast; match=strong; prior_lighting_behavior points=5; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,S,Other: ______,other,0,Q14 category=other; match=manual_review; prior_lighting_behavior points=0; cap Q14 at 20.
+Q14,lighting_products_bought_24m,multi_select,T,I have not bought any lighting products in the past 24 months,no_recent_lighting_purchase,0,Q14 category=no_recent_lighting_purchase; match=separate; prior_lighting_behavior points=0; cap Q14 at 20.
+Q15,lighting_purchase_reason,single_select,A,To replace a broken or old bulb / fixture,utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,B,To make a room brighter or more functional,utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,C,To improve the mood or atmosphere of a space,atmospheric_motivation,5,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,D,"To make a desk, TV area, gaming setup, or bedroom look better",atmospheric_motivation,5,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,E,To add smart-home control or automation,atmospheric_motivation,3,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,F,For renovation or home improvement,utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,G,"For outdoor, patio, or security use",utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,H,For seasonal decoration,atmospheric_motivation,1,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,I,Other: ______,utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q15,lighting_purchase_reason,single_select,J,I have not bought lighting in the past 24 months,utility_or_other_motivation,0,Motivation fit points; combine with Q17 and cap at 10.
+Q17,memorable_product_reason,multi_select,A,It made the space look better,lambenti_relevant_satisfaction,3,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,B,It changed the mood of the room,lambenti_relevant_satisfaction,3,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,C,It was useful or practical,practical_or_other_satisfaction,0,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,D,It felt premium or well-designed,lambenti_relevant_satisfaction,3,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,E,It was fun or satisfying to use,lambenti_relevant_satisfaction,3,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,F,It was smart / automated / app-controlled,lambenti_relevant_satisfaction,2,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,G,It solved a specific problem,practical_or_other_satisfaction,0,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,H,Other: ______,practical_or_other_satisfaction,0,Motivation fit points; combine with Q15 and cap at 10.
+Q17,memorable_product_reason,multi_select,I,Not applicable / I did not buy lighting,practical_or_other_satisfaction,0,Motivation fit points; combine with Q15 and cap at 10.
+Q18,lighting_retailers_24m,multi_select,A,Amazon,,,
+Q18,lighting_retailers_24m,multi_select,B,IKEA,,,
+Q18,lighting_retailers_24m,multi_select,C,Walmart,,,
+Q18,lighting_retailers_24m,multi_select,D,Costco,,,
+Q18,lighting_retailers_24m,multi_select,E,Home Depot,,,
+Q18,lighting_retailers_24m,multi_select,F,Lowe’s / RONA,,,
+Q18,lighting_retailers_24m,multi_select,G,Canadian Tire,,,
+Q18,lighting_retailers_24m,multi_select,H,Best Buy,,,
+Q18,lighting_retailers_24m,multi_select,I,Wayfair,,,
+Q18,lighting_retailers_24m,multi_select,J,A lighting or furniture store,,,
+Q18,lighting_retailers_24m,multi_select,K,A brand’s own website,,,
+Q18,lighting_retailers_24m,multi_select,L,TikTok Shop / Instagram / social media shop,,,
+Q18,lighting_retailers_24m,multi_select,M,Other online store: ______,,,
+Q18,lighting_retailers_24m,multi_select,N,Other physical store: ______,,,
+Q18,lighting_retailers_24m,multi_select,O,I do not remember,,,
+Q18,lighting_retailers_24m,multi_select,P,Not applicable / I did not buy lighting,,,
+Q20,max_space_improvement_spend_24m,single_select,A,$0–49 CAD,space_improvement_spend,1,"Spending fit uses higher of Q20 and Q21, max 10."
+Q20,max_space_improvement_spend_24m,single_select,B,$50–99 CAD,space_improvement_spend,4,"Spending fit uses higher of Q20 and Q21, max 10."
+Q20,max_space_improvement_spend_24m,single_select,C,$100–199 CAD,space_improvement_spend,7,"Spending fit uses higher of Q20 and Q21, max 10."
+Q20,max_space_improvement_spend_24m,single_select,D,$200–399 CAD,space_improvement_spend,9,"Spending fit uses higher of Q20 and Q21, max 10."
+Q20,max_space_improvement_spend_24m,single_select,E,$400+ CAD,space_improvement_spend,10,"Spending fit uses higher of Q20 and Q21, max 10."
+Q21,max_lighting_spend_24m,single_select,A,$0 CAD,lighting_spend,0,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,B,$1–24 CAD,lighting_spend,1,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,C,$25–49 CAD,lighting_spend,2,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,D,$50–99 CAD,lighting_spend,4,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,E,$100–199 CAD,lighting_spend,7,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,F,$200–399 CAD,lighting_spend,9,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,G,$400+ CAD,lighting_spend,10,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q21,max_lighting_spend_24m,single_select,H,I do not remember,lighting_spend,missing,Spending fit uses higher of Q20 and Q21; $100+ flags price-relevant spend.
+Q22,aesthetic_purchase_frequency,single_select,A,Never,,,
+Q22,aesthetic_purchase_frequency,single_select,B,Rarely,,,
+Q22,aesthetic_purchase_frequency,single_select,C,Sometimes,,,
+Q22,aesthetic_purchase_frequency,single_select,D,Often,,,
+Q22,aesthetic_purchase_frequency,single_select,E,Very often,,,
+Q24,likely_lambenti_use_places,multi_select,A,Desk / workspace,,,
+Q24,likely_lambenti_use_places,multi_select,B,TV stand / media area,,,
+Q24,likely_lambenti_use_places,multi_select,C,Gaming setup,,,
+Q24,likely_lambenti_use_places,multi_select,D,Bedroom,,,
+Q24,likely_lambenti_use_places,multi_select,E,Shelf / display area,,,
+Q24,likely_lambenti_use_places,multi_select,F,Living room,,,
+Q24,likely_lambenti_use_places,multi_select,G,Office,,,
+Q24,likely_lambenti_use_places,multi_select,H,I would not use this,,,
+Q24,likely_lambenti_use_places,multi_select,I,Other: ______,,,
+Q25,lambenti_interest_drivers,multi_select_max3,A,It could make my space look better,,,
+Q25,lambenti_interest_drivers,multi_select_max3,B,It could improve the mood or atmosphere of a room,,,
+Q25,lambenti_interest_drivers,multi_select_max3,C,The magnetic interaction sounds satisfying,,,
+Q25,lambenti_interest_drivers,multi_select_max3,D,"It avoids visible buttons, remotes, or apps",,,
+Q25,lambenti_interest_drivers,multi_select_max3,E,It seems unique or novel,,,
+Q25,lambenti_interest_drivers,multi_select_max3,F,"It could improve a desk, gaming, or TV setup",,,
+Q25,lambenti_interest_drivers,multi_select_max3,G,It could be a good gift,,,
+Q25,lambenti_interest_drivers,multi_select_max3,H,I like smart or unusual home products,,,
+Q25,lambenti_interest_drivers,multi_select_max3,I,Nothing interests me about it,,,
+Q25,lambenti_interest_drivers,multi_select_max3,J,Other: ______,,,
+Q26,lambenti_concerns,multi_select,A,Price,,,
+Q26,lambenti_concerns,multi_select,B,Setup / installation,,,
+Q26,lambenti_concerns,multi_select,C,Cable management,,,
+Q26,lambenti_concerns,multi_select,D,Whether I would actually use it,,,
+Q26,lambenti_concerns,multi_select,E,Whether it would look premium,,,
+Q26,lambenti_concerns,multi_select,F,Whether the magnetic control would feel gimmicky,,,
+Q26,lambenti_concerns,multi_select,G,Durability / reliability,,,
+Q26,lambenti_concerns,multi_select,H,Whether it would fit my space,,,
+Q26,lambenti_concerns,multi_select,I,I do not like ambient lighting,,,
+Q26,lambenti_concerns,multi_select,J,I do not have concerns,,,
+Q26,lambenti_concerns,multi_select,K,Other: ______,,,
+Q27,lambenti_price_consideration,single_select,A,Under $50 CAD,below_launch_zone_or_no_buy,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,B,$50–79 CAD,below_launch_zone_or_no_buy,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,C,$80–109 CAD,price_qualified_80plus,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,D,$110–149 CAD,price_qualified_80plus,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,E,$150–199 CAD,price_qualified_80plus,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,F,$200+ CAD,price_qualified_80plus,boolean,price_qualified_80plus = true for C/D/E/F.
+Q27,lambenti_price_consideration,single_select,G,I would not consider buying it,below_launch_zone_or_no_buy,boolean,price_qualified_80plus = true for C/D/E/F.
+Q28,lambenti_purchase_reaction,single_select,A,I would seriously consider buying this,purchase_consideration,boolean,purchase_consideration = A or B; price_sensitive_consideration = B.
+Q28,lambenti_purchase_reaction,single_select,B,"I would be interested, but only at the right price",purchase_consideration,boolean,purchase_consideration = A or B; price_sensitive_consideration = B.
+Q28,lambenti_purchase_reaction,single_select,C,"I like the idea, but I am not sure I would buy it",low_or_uncertain_purchase_intent,boolean,purchase_consideration = A or B; price_sensitive_consideration = B.
+Q28,lambenti_purchase_reaction,single_select,D,"It is interesting, but probably not for me",low_or_uncertain_purchase_intent,boolean,purchase_consideration = A or B; price_sensitive_consideration = B.
+Q28,lambenti_purchase_reaction,single_select,E,I am not interested,low_or_uncertain_purchase_intent,boolean,purchase_consideration = A or B; price_sensitive_consideration = B.
+Q29,wants_demo_video,single_select,A,Yes,,,
+Q29,wants_demo_video,single_select,B,Maybe,,,
+Q29,wants_demo_video,single_select,C,No,,,
