@@ -79,4 +79,38 @@ describe("Atlas Founder OS activity events", () => {
     expect(events[0]).toMatchObject({ category: "Manufacturing", leverageTier: "HIGH", validatedProgress: true, nodeId: "manufacturing.qa" });
     expect(events[0].progressContributionPct).toBeUndefined();
   });
+
+  it("keeps today's worked time current when the weekly export is older than the latest daily export", () => {
+    const weeklyStale = JSON.stringify({
+      period: "weekly",
+      label: "week 2026-07-06 to 2026-07-12",
+      start: "2026-07-06T08:00:00-04:00",
+      end: "2026-07-06T08:30:00-04:00",
+      category: "Planning",
+      leverage: "Medium",
+      confidence: 0.58,
+      depth: "shallow",
+      hours: 0.5,
+      top_signals: ["Planning/priority evidence"],
+      artifact_types: ["file"]
+    });
+    const dailyCurrent = JSON.stringify({
+      period: "daily",
+      label: "2026-07-06",
+      start: "2026-07-06T15:00:00-04:00",
+      end: "2026-07-06T15:45:00-04:00",
+      category: "Engineering",
+      leverage: "High",
+      confidence: 0.76,
+      depth: "deep",
+      hours: 0.75,
+      top_signals: ["Inventory/software engineering evidence"],
+      artifact_types: ["software_source"]
+    });
+
+    const events = parseFounderOsActivityBlocks(`${weeklyStale}\n${dailyCurrent}\n`, { now: new Date("2026-07-06T19:50:00.000Z") });
+
+    expect(events.map((event) => event.category)).toEqual(["Planning", "Engineering"]);
+    expect(events.at(-1)).toMatchObject({ category: "Engineering", durationHours: 0.75, validatedProgress: true });
+  });
 });

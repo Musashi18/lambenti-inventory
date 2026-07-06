@@ -55,7 +55,7 @@ export function parseFounderOsActivityBlocks(text: string, input: { now: Date; b
   const selectedPeriod = selectBestPeriod(blocks, input.now, input.lookbackDays ?? DEFAULT_LOOKBACK_DAYS);
   const deduped = new Map<string, FounderOsActivityBlock>();
   for (const block of selectedPeriod) {
-    const key = [block.period, block.label, block.start, block.end, block.category, block.leverage].join("|");
+    const key = [block.start, block.end, block.category, block.leverage, block.depth].join("|");
     deduped.set(key, block);
   }
 
@@ -87,10 +87,33 @@ function selectBestPeriod(blocks: FounderOsActivityBlock[], now: Date, lookbackD
   });
   const source = recentBlocks.length > 0 ? recentBlocks : blocks;
   const weekly = latestPeriod(source.filter((block) => block.period === "weekly"));
-  if (weekly.length > 0) return weekly;
   const daily = latestPeriod(source.filter((block) => block.period === "daily"));
+  if (weekly.length > 0) {
+    if (daily.length > 0 && shouldMergeDailyIntoWeekly(daily, weekly, now)) return [...weekly, ...daily];
+    return weekly;
+  }
   if (daily.length > 0) return daily;
   return source;
+}
+
+function shouldMergeDailyIntoWeekly(daily: FounderOsActivityBlock[], weekly: FounderOsActivityBlock[], now: Date) {
+  const latestDailyEnd = latestEndMs(daily);
+  const latestWeeklyEnd = latestEndMs(weekly);
+  if (latestDailyEnd > latestWeeklyEnd) return true;
+  const dailyLabel = daily
+    .map((block) => block.label)
+    .filter((label): label is string => Boolean(label))
+    .sort()
+    .at(-1);
+  return dailyLabel === atlasDayKey(now) && latestDailyEnd >= latestWeeklyEnd;
+}
+
+function latestEndMs(blocks: FounderOsActivityBlock[]) {
+  return Math.max(0, ...blocks.map((block) => new Date(block.end ?? "").getTime()).filter(Number.isFinite));
+}
+
+function atlasDayKey(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
 function latestPeriod(blocks: FounderOsActivityBlock[]) {
