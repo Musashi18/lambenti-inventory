@@ -587,8 +587,10 @@ describe("tracking service", () => {
       expect(requestBody).toMatchObject({
         trackingNumber: "LL270153425CN",
         shipmentReference: fixture.externalOrderId,
-        destinationCountryCode: "CA"
+        destinationCountryCode: "CA",
+        courierCode: ["china-post"]
       });
+      expect(requestBody).not.toHaveProperty("courierName");
       expect(requestBody.clientTrackerId).toMatch(new RegExp(`^${tracking.id}-[0-9a-f]{10}$`));
       return new Response(JSON.stringify({
         data: {
@@ -770,6 +772,45 @@ describe("tracking service", () => {
 
     expect(refreshed.currentStatus).toBe("INFO_RECEIVED");
     await expect(prisma.trackingEvent.findFirstOrThrow({ where: { trackingNumberId: refreshed.id } })).resolves.toMatchObject({ status: "INFO_RECEIVED" });
+  });
+
+  it("normalizes Ship24 out-for-delivery milestones as their own shipment stage", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-OFD");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["1Z675EW60490310065"],
+        text: "Tracking Number: 1Z675EW60490310065"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "GET") return new Response(JSON.stringify({ data: { trackers: [] } }), { status: 200 });
+      const requestBody = JSON.parse(String(init?.body));
+      expect(requestBody).toMatchObject({ courierCode: ["ups"] });
+      expect(requestBody).not.toHaveProperty("courierName");
+      return new Response(JSON.stringify({
+        data: {
+          trackings: [{
+            tracker: { trackerId: "ship24-out-for-delivery", trackingNumber: "1Z675EW60490310065", courierCode: ["ups"], clientTrackerId: requestBody.clientTrackerId },
+            shipment: { statusCode: "delivery_out_for_delivery", statusCategory: "delivery", statusMilestone: "out_for_delivery", destinationCountryCode: "CA" },
+            events: [{ status: "Out For Delivery Today", statusCode: "delivery_out_for_delivery", statusCategory: "delivery", statusMilestone: "out_for_delivery", occurrenceDatetime: "2026-07-07T10:31:00-04:00", location: "Concord, ON, Canada" }]
+          }]
+        }
+      }), { status: 200 });
+    });
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "1Z675EW60490310065",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-07-07T16:00:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key", destinationCountryCode: "CA" },
+      fetcher
+    });
+
+    expect(refreshed.currentStatus).toBe("OUT_FOR_DELIVERY");
+    await expect(prisma.trackingEvent.findFirstOrThrow({ where: { trackingNumberId: refreshed.id } })).resolves.toMatchObject({ status: "OUT_FOR_DELIVERY", description: "Out For Delivery Today" });
   });
 
   it("recognizes carrier-has-received-information responses as info received, not pending", async () => {

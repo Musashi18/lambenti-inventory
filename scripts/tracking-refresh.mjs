@@ -8,10 +8,12 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 
 export function parseTrackingRefreshArgs(argv = process.argv.slice(2)) {
-  const options = { verbose: false, jsonOnly: false, limit: 25, agentId: "tracking-refresh-scheduler" };
+  const options = { verbose: false, jsonOnly: false, limit: 25, agentId: "tracking-refresh-scheduler", dueOnly: false };
   for (const arg of argv) {
     if (arg === "--verbose" || arg === "-v") options.verbose = true;
     else if (arg === "--json") options.jsonOnly = true;
+    else if (arg === "--due-only") options.dueOnly = true;
+    else if (arg === "--all-active") options.dueOnly = false;
     else if (arg.startsWith("--limit=")) options.limit = positiveInt(arg.slice("--limit=".length), options.limit);
     else if (arg.startsWith("--agent-id=")) options.agentId = arg.slice("--agent-id=".length).trim() || options.agentId;
     else if (arg.startsWith("--base-url=")) options.baseUrl = arg.slice("--base-url=".length).trim();
@@ -25,7 +27,7 @@ export function shouldAttemptTrackingRefresh(env) {
   return Boolean(blankToUndefined(env.LAMBENTI_TRACKING_STATUS_URL_TEMPLATE));
 }
 
-export function buildTrackingRefreshRequest({ baseUrl, limit, agentId, secret }) {
+export function buildTrackingRefreshRequest({ baseUrl, limit, agentId, secret, dueOnly = false }) {
   const normalizedBaseUrl = String(baseUrl || "http://127.0.0.1:5173").replace(/\/$/, "");
   const headers = {
     "content-type": "application/json",
@@ -37,7 +39,7 @@ export function buildTrackingRefreshRequest({ baseUrl, limit, agentId, secret })
     init: {
       method: "POST",
       headers,
-      body: JSON.stringify({ dueOnly: true, limit: positiveInt(limit, 25) })
+      body: JSON.stringify({ dueOnly, limit: positiveInt(limit, 25) })
     }
   };
 }
@@ -49,8 +51,9 @@ export function shouldNotifyTrackingRefresh(result, options) {
 
 export function formatTrackingRefreshNotification(result, baseUrl) {
   const normalizedBaseUrl = String(baseUrl || "http://127.0.0.1:5173").replace(/\/$/, "");
+  const scope = result.dueOnly === true ? "due" : "active";
   return [
-    `Tracking refresh checked ${result.scanned ?? 0} due number(s); refreshed ${result.refreshed ?? 0}, failed ${result.failed ?? 0}, skipped ${result.skipped ?? 0}.`,
+    `Tracking refresh checked ${result.scanned ?? 0} ${scope} number(s); refreshed ${result.refreshed ?? 0}, failed ${result.failed ?? 0}, skipped ${result.skipped ?? 0}.`,
     `Review tracking workbench: ${normalizedBaseUrl}/tracking`,
     "Tracking refresh updates shipment metadata only; it does not receive stock or confirm delivery."
   ].join("\n");
@@ -71,7 +74,7 @@ export async function runTrackingRefresh({ env = process.env, options = parseTra
   const secret = blankToUndefined(env.LAMBENTI_TRACKING_AGENT_SECRET)
     ?? blankToUndefined(env.LAMBENTI_ALIBABA_AGENT_SECRET)
     ?? blankToUndefined(env.LAMBENTI_EMAIL_SYNC_SECRET);
-  const request = buildTrackingRefreshRequest({ baseUrl, limit: options.limit, agentId: options.agentId, secret });
+  const request = buildTrackingRefreshRequest({ baseUrl, limit: options.limit, agentId: options.agentId, secret, dueOnly: options.dueOnly });
   let response;
   try {
     response = await fetcher(request.url, request.init);
@@ -89,7 +92,7 @@ export async function runTrackingRefresh({ env = process.env, options = parseTra
     const detail = Array.isArray(body.errors) ? body.errors.join("; ") : body.error ?? response.statusText;
     throw new Error(`tracking refresh endpoint returned HTTP ${response.status}: ${detail}`);
   }
-  return { configured: providerConfigured, skipped: false, ...body, trackingUrl: `${baseUrl}/tracking` };
+  return { configured: providerConfigured, skipped: false, dueOnly: options.dueOnly, ...body, trackingUrl: `${baseUrl}/tracking` };
 }
 
 export function loadDotEnv(filePath = path.join(projectRoot, ".env")) {

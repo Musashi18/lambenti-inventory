@@ -88,6 +88,21 @@ describe("local smoke coverage manifest", () => {
     expect(smokeSource).toMatch(/assertCsvApi/);
   });
 
+  it("exposes Atlas command/search/explanation markers in source and UI contracts", () => {
+    const atlasPageSource = readFileSync(join(repoRoot, "src", "app", "atlas", "page.tsx"), "utf8");
+    const atlasMapSource = readFileSync(join(repoRoot, "src", "app", "atlas", "atlas-progress-map.tsx"), "utf8");
+    const uiContractSource = readFileSync(join(repoRoot, "scripts", "ui-contract-smoke.mjs"), "utf8");
+
+    for (const marker of ["Atlas Command Dock", "Blocked By", "Next Workflow"]) {
+      expect(atlasPageSource).toContain(marker);
+      expect(uiContractSource).toContain(marker);
+    }
+    for (const marker of ["Search / Zoom / Path Controls", "Selected Path Only", "Founder Focus Mode", "Strategic Playback", "Atlas Projection Navigation", "Roadmap View", "Risk Map", "Founder Daily View", "Executive Intelligence Panel", "Strategic Score", "Likely Completion", "Atlas AI Layer", "Predict Delays", "Estimate Launch Impact", "Done So Far", "Needs Development", "Why This Node Is Here", "What Would Move It"]) {
+      expect(atlasMapSource).toContain(marker);
+      expect(uiContractSource).toContain(marker);
+    }
+  });
+
   it("exposes reusable local runtime and UI contract smoke scripts", () => {
     const packageSource = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
     const runtimeSource = readFileSync(join(repoRoot, "scripts", "lambenti-runtime.mjs"), "utf8");

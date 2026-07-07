@@ -1880,7 +1880,7 @@ function buildShip24TrackerRequestBody(row: TrackingProviderRow, config: Trackin
   const shipmentReference = row.externalOrderId ?? row.purchaseOrderId ?? row.emailOrderImportId ?? row.id;
   const destinationCountryCode = normalizeCountryCode(config.destinationCountryCode) ?? "CA";
   const originCountryCode = normalizeCountryCode(config.originCountryCode);
-  const courierName = row.carrier ?? undefined;
+  const courierCode = ship24CourierCodeFromCarrier(row.carrier);
   return pruneUndefined({
     trackingNumber: row.trackingNumber,
     clientTrackerId: buildShip24ClientTrackerId(row.id, {
@@ -1888,13 +1888,23 @@ function buildShip24TrackerRequestBody(row: TrackingProviderRow, config: Trackin
       shipmentReference,
       destinationCountryCode,
       originCountryCode,
-      courierName
+      courierCode
     }),
     shipmentReference,
     destinationCountryCode,
     originCountryCode,
-    courierName
+    courierCode
   });
+}
+
+function ship24CourierCodeFromCarrier(carrier: string | null) {
+  const normalized = carrier?.toLowerCase().replace(/[_\s/]+/g, "-").replace(/-tracking$/, "").trim();
+  if (!normalized) return undefined;
+  if (normalized === "ups") return ["ups"];
+  if (normalized === "fedex") return ["fedex"];
+  if (normalized === "canada-post" || normalized === "canadapost") return ["canada-post"];
+  if (normalized === "china-post" || normalized === "ems" || normalized === "china-post-ems") return ["china-post"];
+  return undefined;
 }
 
 function buildShip24ClientTrackerId(rowId: string, input: Record<string, unknown>) {
@@ -2113,22 +2123,38 @@ function normalizeTrackingEvent(value: unknown): NormalizedTrackingEvent | null 
 
 async function persistTrackingEvents(trackingNumberId: string, events: NormalizedTrackingStatus["events"]) {
   for (const event of events) {
+    const status = normalizeTrackingEventStatus(event);
+    const location = event.location ?? null;
+    const occurredAt = event.occurredAt ?? null;
+    const rawEventJson = toJson(event.raw);
     const existing = await prisma.trackingEvent.findFirst({
       where: {
         trackingNumberId,
         description: event.description,
-        occurredAt: event.occurredAt ?? null
+        occurredAt
       }
     });
-    if (existing) continue;
+    if (existing) {
+      if (existing.status !== status || existing.location !== location) {
+        await prisma.trackingEvent.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            location,
+            rawEventJson
+          }
+        });
+      }
+      continue;
+    }
     await prisma.trackingEvent.create({
       data: {
         trackingNumberId,
-        status: normalizeTrackingEventStatus(event),
+        status,
         description: event.description,
-        location: event.location,
-        occurredAt: event.occurredAt ?? null,
-        rawEventJson: toJson(event.raw)
+        location,
+        occurredAt,
+        rawEventJson
       }
     });
   }
@@ -2139,7 +2165,8 @@ function normalizeTrackingStatus(value: string) {
   if (!normalized) return "UNKNOWN";
   if (normalized.includes("DELIVERED") || ["SIGNED", "SUCCESSFULLY_DELIVERED"].includes(normalized)) return "DELIVERED";
   if (normalized.includes("EXCEPTION") || ["FAILED", "RETURNED", "EXPIRED"].includes(normalized)) return normalized.includes("EXCEPTION") ? "EXCEPTION" : normalized;
-  if (normalized.includes("TRANSIT") || normalized.includes("OUT_FOR_DELIVERY") || ["SHIPPED", "SHIPMENT_STARTED", "DISPATCHED"].includes(normalized)) return "IN_TRANSIT";
+  if (normalized.includes("OUT_FOR_DELIVERY")) return "OUT_FOR_DELIVERY";
+  if (normalized.includes("TRANSIT") || ["SHIPPED", "SHIPMENT_STARTED", "DISPATCHED"].includes(normalized)) return "IN_TRANSIT";
   if (["INFO_RECEIVED", "INFORMATION_RECEIVED"].includes(normalized) || normalized.includes("INFORMATION_RECEIVED") || normalized.includes("RECEIVED_INFORMATION")) return "INFO_RECEIVED";
   if (["PENDING", "PRE_TRANSIT", "WAITING_FOR_PICKUP"].includes(normalized) || normalized.startsWith("DATA")) return "PENDING";
   return normalized;

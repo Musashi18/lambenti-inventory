@@ -328,7 +328,7 @@ function OpenShipments({ rows }: { rows: TrackingDashboardRow[] }) {
       {rows.length === 0 ? (
         <div className="p-5 text-sm text-slate-500">No Open Shipments. Delivered tracking information is retained in history below.</div>
       ) : (
-        <div className="grid gap-4 p-5 xl:grid-cols-2">
+        <div className="grid gap-4 p-5">
           {rows.map((row) => <TrackingRowCard key={row.id} row={row} />)}
         </div>
       )}
@@ -339,11 +339,11 @@ function OpenShipments({ rows }: { rows: TrackingDashboardRow[] }) {
 function TrackingRowCard({ row }: { row: TrackingDashboardRow }) {
   const problematic = row.refreshStatus === "FAILED" || row.currentStatus === "FAILED" || row.currentStatus === "EXCEPTION";
   return (
-    <article data-testid="tracking-row" className={`rounded-xl border p-4 ${problematic ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}>
+    <article data-testid="tracking-row" className={`min-w-0 rounded-xl border p-4 ${problematic ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="font-mono text-base font-semibold text-slate-900">{row.trackingNumber}</div>
-          <div className="mt-1 text-sm font-medium text-slate-800">Linked Order: {row.linkedOrderLabel}</div>
+        <div className="min-w-0">
+          <div className="break-all font-mono text-base font-semibold text-slate-900">{row.trackingNumber}</div>
+          <div className="mt-1 break-words text-sm font-medium text-slate-800">Linked Order: {row.linkedOrderLabel}</div>
           {row.screenedShipmentCount > 1 ? (
             <div className="mt-1 text-xs text-slate-500">
               Duplicate shipment screen: showing active stream; linked shipment numbers {row.relatedTrackingNumbers.join(", ")}.
@@ -380,14 +380,14 @@ function ShipmentProgressRail({ row }: { row: TrackingDashboardRow }) {
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Shipment Progress</div>
         {blocked ? <div className="text-xs font-medium text-red-700">Provider needs review before this rail can advance.</div> : null}
       </div>
-      <div className="mt-3 grid grid-cols-5 gap-2">
+      <div className="mt-3 grid gap-2 sm:grid-cols-5">
         {stages.map((stage, index) => {
           const active = !blocked && index <= currentIndex;
           const current = !blocked && index === currentIndex;
           return (
             <div key={stage.key} className="min-w-0">
               <div className={`h-2 rounded-full ${active ? "bg-emerald-500" : blocked && index === 0 ? "bg-red-400" : "bg-slate-200"}`} />
-              <div className={`mt-1 truncate text-[11px] ${current ? "font-semibold text-slate-900" : "text-slate-500"}`}>{stage.label}</div>
+              <div className={`mt-1 text-[11px] leading-4 ${current ? "font-semibold text-slate-900" : "text-slate-500"}`}>{stage.label}</div>
             </div>
           );
         })}
@@ -974,6 +974,8 @@ function Metric({ label, value, hint, tone = "neutral" }: { label: string; value
 function StatusBadge({ status }: { status: string }) {
   const tone = status === "DELIVERED"
     ? "bg-emerald-100 text-emerald-800"
+    : status === "OUT_FOR_DELIVERY"
+      ? "bg-cyan-100 text-cyan-800"
     : status === "IN_TRANSIT"
       ? "bg-blue-100 text-blue-800"
     : status === "FAILED" || status === "EXCEPTION"

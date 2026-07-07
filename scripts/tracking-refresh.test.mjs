@@ -19,7 +19,7 @@ describe("tracking refresh scheduler script helpers", () => {
     const fetcher = vi.fn();
     await expect(runTrackingRefresh({
       env: { LAMBENTI_INVENTORY_BASE_URL: "http://127.0.0.1:5173", LAMBENTI_TRACKING_STATUS_URL_TEMPLATE: "" },
-      options: { verbose: true, jsonOnly: false, limit: 25, agentId: "tracking-refresh-scheduler" },
+      options: { verbose: true, jsonOnly: false, limit: 25, agentId: "tracking-refresh-scheduler", dueOnly: false },
       fetcher
     })).resolves.toMatchObject({ configured: false, skipped: true });
     expect(fetcher).not.toHaveBeenCalled();
@@ -40,6 +40,17 @@ describe("tracking refresh scheduler script helpers", () => {
       "x-lambenti-agent-id": "tracking-refresh-scheduler",
       authorization: "Bearer test-secret"
     });
+    expect(JSON.parse(String(request.init.body))).toEqual({ dueOnly: false, limit: 17 });
+  });
+
+  it("can intentionally restrict the scheduled refresh to due-only rows", () => {
+    const request = buildTrackingRefreshRequest({
+      baseUrl: "http://127.0.0.1:5173/",
+      limit: 17,
+      agentId: "tracking-refresh-scheduler",
+      dueOnly: true
+    });
+
     expect(JSON.parse(String(request.init.body))).toEqual({ dueOnly: true, limit: 17 });
   });
 
@@ -50,7 +61,8 @@ describe("tracking refresh scheduler script helpers", () => {
   });
 
   it("formats a useful operator notification with the tracking workbench URL", () => {
-    expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 due number(s); refreshed 1, failed 0, skipped 3.");
+    expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 active number(s); refreshed 1, failed 0, skipped 3.");
+    expect(formatTrackingRefreshNotification({ dueOnly: true, scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 due number(s); refreshed 1, failed 0, skipped 3.");
     expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("http://127.0.0.1:5173/tracking");
   });
 });

@@ -23,7 +23,7 @@ export default async function AtlasPage() {
   const decisionTimeline = buildAtlasDecisionTimeline(atlas);
 
   return (
-    <div className="space-y-6 bg-slate-950 text-slate-100 lg:-m-6 lg:p-6">
+    <div className="space-y-6 bg-slate-950 pb-24 text-slate-100 lg:-m-6 lg:p-6 lg:pb-24">
       <header className="rounded-3xl border border-cyan-400/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.18),transparent_36%),linear-gradient(135deg,#020617,#0f172a_55%,#111827)] p-6 shadow-2xl shadow-slate-950">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
           <div className="max-w-4xl">
@@ -49,6 +49,8 @@ export default async function AtlasPage() {
           <CommandMetric label="Remaining Hours" value={atlas.remainingHours == null ? "Unknown" : `${atlas.remainingHours}h`} detail="Phase I weighted estimate" />
         </div>
       </header>
+
+      <AtlasCommandDock atlas={atlas} />
 
       <AtlasProgressMap atlas={atlasView} />
 
@@ -141,6 +143,51 @@ export default async function AtlasPage() {
       </MissionPanel>
     </div>
   );
+}
+
+function AtlasCommandDock({ atlas }: { atlas: AtlasMissionControl }) {
+  const nextWorkflowHref = atlas.highestLeverageTask?.href ?? atlas.currentBottleneck?.href ?? atlas.largestRisk?.href ?? "/atlas/simulator";
+  const nextWorkflowTitle = atlas.highestLeverageTask?.title ?? atlas.currentBottleneck?.title ?? atlas.largestRisk?.title ?? "Open Simulator";
+  return (
+    <section className="rounded-3xl border border-emerald-300/20 bg-[linear-gradient(135deg,rgba(7,64,71,0.62),rgba(15,23,42,0.94))] p-5 shadow-2xl shadow-slate-950/40">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-200">Atlas Command Dock</div>
+          <h2 className="mt-1 text-2xl font-semibold text-white">Now, blocker, risk, trust, next workflow.</h2>
+          <p className="mt-1 text-xs text-emerald-100/70">Live database read · updated {formatAtlasGeneratedAt(atlas.generatedAt)}</p>
+        </div>
+        <Link href={nextWorkflowHref} className="inline-flex w-fit rounded-full border border-cyan-200/40 bg-cyan-200/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-200/20">
+          Open Next Workflow
+        </Link>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <CommandDockCard label="Now" title={atlas.highestLeverageTask?.title ?? "Collect Stronger Evidence"} detail={atlas.highestLeverageTask?.summary ?? "Atlas needs stronger validated evidence before ranking a high-leverage next move."} href={atlas.highestLeverageTask?.href} />
+        <CommandDockCard label="Blocked By" title={atlas.currentBottleneck?.title ?? "No Dominant Bottleneck"} detail={atlas.currentBottleneck?.summary ?? "No single launch dependency is currently dominating the graph."} href={atlas.currentBottleneck?.href} />
+        <CommandDockCard label="Largest Risk" title={atlas.largestRisk?.title ?? "No Major Risk Ranked"} detail={atlas.largestRisk?.summary ?? "Risk ranking will strengthen as evidence coverage improves."} href={atlas.largestRisk?.href} />
+        <CommandDockCard label="Trust" title={`${atlas.evidenceCoverage.confidencePct}% Evidence Confidence`} detail={`${atlas.evidenceCoverage.nodeCoveragePct}% node coverage · ${atlas.evidenceCoverage.staleEvidenceCount} stale signal${atlas.evidenceCoverage.staleEvidenceCount === 1 ? "" : "s"}. Sources: ${atlas.evidenceCoverage.sourceCount}.`} href="/atlas/overlay" />
+        <CommandDockCard label="Next Workflow" title={nextWorkflowTitle} detail="Follow the linked human workflow; Atlas remains read-only and does not mutate operations." href={nextWorkflowHref} />
+      </div>
+    </section>
+  );
+}
+
+function CommandDockCard({ label, title, detail, href }: { label: string; title: string; detail: string; href?: string }) {
+  const className = "block min-h-full rounded-2xl border border-white/10 bg-slate-950/55 p-4 transition hover:border-cyan-300/40 hover:bg-cyan-300/10";
+  const body = (
+    <>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">{label}</div>
+      <div className="mt-2 text-sm font-semibold leading-5 text-white">{title}</div>
+      <p className="mt-2 text-xs leading-5 text-slate-400">{detail}</p>
+      {href ? <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Open workflow →</div> : null}
+    </>
+  );
+  return href ? <Link href={href} className={className}>{body}</Link> : <div className={className}>{body}</div>;
+}
+
+function formatAtlasGeneratedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "from current source snapshot";
+  return new Intl.DateTimeFormat("en-CA", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function VisualCommandDeck({ atlas }: { atlas: AtlasMissionControl }) {
