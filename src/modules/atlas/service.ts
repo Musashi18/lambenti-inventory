@@ -4,7 +4,7 @@ import { getDashboardSummary } from "@/modules/dashboard/service";
 import { getTrackingDashboard } from "@/modules/tracking/service";
 import { getAtlasSeedGraph } from "./seed-graph";
 import { buildAtlasMissionControl } from "./scoring";
-import { collectAtlasOperationalEvidence } from "./evidence-adapters";
+import { collectAtlasOperationalEvidence, getAtlasPhaseOneReadiness } from "./evidence-adapters";
 import { loadAtlasActivityEvents } from "./activity-events";
 import type { AtlasActivityEvent, AtlasMissionControl } from "./types";
 
@@ -47,6 +47,7 @@ export function buildAtlasMissionControlFromSources(input: {
   return buildAtlasMissionControl({
     nodes: getAtlasSeedGraph(),
     evidence,
+    phaseOneReadiness: getAtlasPhaseOneReadiness(input.sources.dashboard),
     activityEvents: input.activityEvents ?? [],
     now
   });

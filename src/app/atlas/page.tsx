@@ -1,3 +1,4 @@
+/*
 import Link from "next/link";
 import { requirePermission } from "@/modules/auth/permissions";
 import { buildAtlasDecisionTimeline, buildAtlasMissionControlView } from "@/modules/atlas/presentation";
@@ -30,7 +31,7 @@ export default async function AtlasPage() {
             <div className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-200">Project Atlas · Founder Operating System</div>
             <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white">Mission Control</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-              Atlas models Lambenti as an evidence-backed dependency graph. It does not reward time alone; only verified operational evidence moves the company closer to launch.
+              Atlas models Lambenti as an evidence-backed dependency graph. Planning baselines never count as measured progress; only current operational evidence moves the Phase I evidence score.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -43,8 +44,8 @@ export default async function AtlasPage() {
           </div>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <CommandMetric label="Mission Completion" value={`${atlas.missionCompletionPct}%`} detail="Weighted graph progress" />
-          <CommandMetric label="Launch Probability" value={formatInterval(atlas.launchProbability)} detail={`${atlas.launchProbability.confidencePct}% confidence`} />
+          <CommandMetric label="Phase I Evidence Progress" value={`${atlas.missionCompletionPct}%`} detail="Weighted measured progress" />
+          <CommandMetric label="Launch Readiness Index" value={formatInterval(atlas.launchProbability)} detail={`Modelled · ${atlas.launchProbability.confidencePct}% confidence`} />
           <CommandMetric label="Projected Launch Date" value={formatDateInterval(atlas.projectedLaunchDate)} detail="Uses validated velocity only" />
           <CommandMetric label="Remaining Hours" value={atlas.remainingHours == null ? "Unknown" : `${atlas.remainingHours}h`} detail="Phase I weighted estimate" />
         </div>
@@ -52,21 +53,24 @@ export default async function AtlasPage() {
 
       <AtlasCommandDock atlas={atlas} />
 
+      <PhaseOneGoalPosition atlas={atlas} />
+
       <AtlasProgressMap atlas={atlasView} />
 
       <VisualCommandDeck atlas={atlas} />
 
       <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <MissionPanel title="Opportunity Engine" kicker="Highest expected probability gain">
+        <MissionPanel title="Opportunity Engine" kicker="Highest modelled readiness leverage">
           <OpportunityCard atlas={atlas} />
         </MissionPanel>
         <MissionPanel title="Reality Engine" kicker="Evidence-based, no shame, no flattery">
           <p className="text-lg leading-7 text-white">{atlas.realityStatement}</p>
           <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Evidence Coverage</div>
-            <div className="mt-2 grid gap-3 sm:grid-cols-4">
+            <div className="mt-2 grid gap-3 sm:grid-cols-5">
               <MiniMetric label="Sources" value={atlas.evidenceCoverage.sourceCount.toString()} />
               <MiniMetric label="Node Coverage" value={`${atlas.evidenceCoverage.nodeCoveragePct}%`} />
+              <MiniMetric label="Weighted Coverage" value={`${atlas.evidenceCoverage.weightedNodeCoveragePct}%`} />
               <MiniMetric label="Confidence" value={`${atlas.evidenceCoverage.confidencePct}%`} />
               <MiniMetric label="Stale Signals" value={atlas.evidenceCoverage.staleEvidenceCount.toString()} />
             </div>
@@ -87,7 +91,7 @@ export default async function AtlasPage() {
         <MissionPanel title="Largest Risk" kicker="Highest residual risk signal">
           <SignalCard signal={atlas.largestRisk} empty="No major risk ranked yet." />
         </MissionPanel>
-        <MissionPanel title="Momentum Engine" kicker="Velocity without fake progress">
+        <MissionPanel title="Momentum Engine" kicker="Conservatively classified founder activity">
           <div className="grid gap-3">
             <MiniMetric label="Weekly Deep Work" value={atlas.momentum.weeklyDeepWorkHours == null ? "Unknown" : `${atlas.momentum.weeklyDeepWorkHours}h`} />
             <MiniMetric label="Execution Ratio" value={atlas.momentum.executionRatio == null ? "Unknown" : `${Math.round(atlas.momentum.executionRatio * 100)}%`} />
@@ -110,7 +114,7 @@ export default async function AtlasPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <MissionPanel title="Company Health Model" kicker="Intervals widen when evidence is sparse">
+        <MissionPanel title="Company Health Model" kicker="Probability Bands · intervals widen when evidence is sparse">
           <div className="grid gap-3 sm:grid-cols-2">
             <HealthMetric label="First Batch Success" interval={atlas.firstBatchSuccessProbability} />
             <HealthMetric label="Customer Experience" interval={atlas.customerExperienceProbability} />
@@ -171,6 +175,95 @@ function AtlasCommandDock({ atlas }: { atlas: AtlasMissionControl }) {
   );
 }
 
+function PhaseOneGoalPosition({ atlas }: { atlas: AtlasMissionControl }) {
+  const position = atlas.goalPosition;
+  if (!position) {
+    return (
+      <section className="rounded-3xl border border-amber-300/25 bg-amber-300/10 p-5">
+        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-100">Goal Position</div>
+        <p className="mt-2 text-sm text-amber-50">Atlas has graph evidence but no current ledger-backed Phase I package-readiness summary. It will not infer physical launch position.</p>
+      </section>
+    );
+  }
+
+  const physical = position.physicalTarget;
+  const nextAction = physical.nextActions[0];
+  const materialCovered = Math.min(physical.materialCoveredTowardTarget, physical.targetPackages);
+
+  return (
+    <section className="rounded-3xl border border-violet-300/25 bg-[radial-gradient(circle_at_92%_12%,rgba(139,92,246,0.18),transparent_32%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,27,75,0.78))] p-5 shadow-2xl shadow-slate-950/40">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.28em] text-violet-200">Goal Position · Live Operational Truth</div>
+          <h2 className="mt-1 text-2xl font-semibold text-white">Exactly where Lambenti stands against Phase I</h2>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">{position.summary} Ledger-built packages, direct buildability, and material coverage are separate states; Atlas never counts available parts as completed product.</p>
+        </div>
+        <div className="w-fit rounded-full border border-violet-200/35 bg-violet-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100">
+          {physical.status.replaceAll("_", " ")}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <GoalMetric label="Ledger-Built Packages" value={`${physical.assembledPackages}/${physical.targetPackages}`} detail={`${physical.packageSku} physical output only`} tone="emerald" />
+        <GoalMetric label="Direct Builds Now" value={physical.buildableTowardTarget.toString()} detail="Requires explicit BUILD movement" tone="cyan" />
+        <GoalMetric label="Material Covered" value={`${materialCovered}/${physical.targetPackages}`} detail="Inputs, not built units" tone="sky" />
+        <GoalMetric label="Build Gap" value={physical.remainingBuildGap.toString()} detail="Units not yet ledger-built" tone="amber" />
+        <GoalMetric label="Input Gap" value={physical.remainingMaterialGap.toString()} detail={physical.bottleneckSku ? `Constraint: ${physical.bottleneckSku}` : "No constraint named"} tone="rose" />
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-4">
+        {position.milestones.map((milestone) => {
+          const statusLabel = milestone.measurementStatus === "MEASURED"
+            ? `${milestone.completionPct}% measured`
+            : milestone.measurementStatus === "STALE"
+              ? "stale measurement"
+              : "unmeasured";
+          const body = (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-200">{milestone.horizon.replace("_", " ")}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{statusLabel}</span>
+              </div>
+              <div className="mt-2 text-sm font-semibold text-white">{milestone.title}</div>
+              <p className="mt-2 text-xs leading-5 text-slate-400">{milestone.summary}</p>
+            </>
+          );
+          const className = "min-h-full rounded-2xl border border-white/10 bg-slate-950/55 p-4 transition hover:border-violet-300/40 hover:bg-violet-300/10";
+          return milestone.href ? <Link key={milestone.id} href={milestone.href} className={className}>{body}</Link> : <div key={milestone.id} className={className}>{body}</div>;
+        })}
+      </div>
+
+      {nextAction ? (
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.08] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Next Human-Gated Workflow</div>
+            <div className="mt-1 text-sm font-semibold text-white">{nextAction.label}</div>
+            <p className="mt-1 text-xs leading-5 text-slate-300">{nextAction.reason}</p>
+          </div>
+          <Link href={nextAction.href} className="inline-flex w-fit rounded-full border border-cyan-200/35 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-200/10">Open Workflow</Link>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function GoalMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "emerald" | "cyan" | "sky" | "amber" | "rose" }) {
+  const toneClass = {
+    emerald: "border-emerald-300/20 bg-emerald-300/[0.08] text-emerald-100",
+    cyan: "border-cyan-300/20 bg-cyan-300/[0.08] text-cyan-100",
+    sky: "border-sky-300/20 bg-sky-300/[0.08] text-sky-100",
+    amber: "border-amber-300/20 bg-amber-300/[0.08] text-amber-100",
+    rose: "border-rose-300/20 bg-rose-300/[0.08] text-rose-100"
+  }[tone];
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] opacity-75">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
+      <div className="mt-1 text-xs leading-5 text-slate-300">{detail}</div>
+    </div>
+  );
+}
+
 function CommandDockCard({ label, title, detail, href }: { label: string; title: string; detail: string; href?: string }) {
   const className = "block min-h-full rounded-2xl border border-white/10 bg-slate-950/55 p-4 transition hover:border-cyan-300/40 hover:bg-cyan-300/10";
   const body = (
@@ -203,7 +296,7 @@ function VisualCommandDeck({ atlas }: { atlas: AtlasMissionControl }) {
           <h2 className="mt-1 text-2xl font-semibold text-white">Launch System at a Glance</h2>
         </div>
         <p className="max-w-2xl text-sm leading-6 text-slate-300">
-          Visual readout of mission progress, probability bands, and the Phase I critical path. Every light is backed by existing operational evidence; no Atlas view mutates stock, accounting, purchasing, or Alibaba state.
+          Visual readout of measured Phase I progress, modelled readiness bands, and the critical path. Index bands are decision aids, not calibrated probabilities; no Atlas view mutates stock, accounting, purchasing, or Alibaba state.
         </p>
       </div>
 
@@ -233,19 +326,19 @@ function MissionOrbit({ atlas }: { atlas: AtlasMissionControl }) {
           <div
             className="absolute inset-10 rounded-full opacity-80"
             style={{ background: `conic-gradient(#34d399 ${clampPercent(atlas.launchProbability.p50)}%, rgba(15,23,42,0.88) 0)` }}
-            aria-label="Launch probability orbit"
+            aria-label="Launch readiness index orbit"
           />
           <div className="absolute inset-16 rounded-full bg-slate-950" />
           <div className="relative text-center">
             <div className="text-5xl font-semibold text-white">{atlas.missionCompletionPct}%</div>
             <div className="mt-1 text-xs uppercase tracking-[0.22em] text-cyan-200">Mission</div>
-            <div className="mt-3 text-sm text-emerald-200">P50 Launch {atlas.launchProbability.p50}%</div>
+            <div className="mt-3 text-sm text-emerald-200">P50 Readiness {atlas.launchProbability.p50}%</div>
           </div>
         </div>
       </div>
       <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-slate-300">
-        <LegendDot label="Mission Completion" tone="cyan" value={`${atlas.missionCompletionPct}%`} />
-        <LegendDot label="Launch P50" tone="emerald" value={`${atlas.launchProbability.p50}%`} />
+        <LegendDot label="Phase I Evidence" tone="cyan" value={`${atlas.missionCompletionPct}%`} />
+        <LegendDot label="Readiness P50" tone="emerald" value={`${atlas.launchProbability.p50}%`} />
         <LegendDot label="Evidence Confidence" tone="violet" value={`${atlas.evidenceCoverage.confidencePct}%`} />
         <LegendDot label="Node Coverage" tone="amber" value={`${atlas.evidenceCoverage.nodeCoveragePct}%`} />
       </div>
@@ -295,10 +388,10 @@ function CriticalPath({ nodes }: { nodes: AtlasNodeScore[] }) {
 function ProbabilityBands({ atlas }: { atlas: AtlasMissionControl }) {
   return (
     <div className="rounded-3xl border border-slate-700/80 bg-slate-950/70 p-5">
-      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Probability Bands</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Modelled Readiness Bands</div>
       <h3 className="mt-1 text-lg font-semibold text-white">Outcome Intervals</h3>
       <div className="mt-5 grid gap-4">
-        <IntervalBand label="Launch Probability" interval={atlas.launchProbability} tone="cyan" />
+        <IntervalBand label="Launch Readiness Index" interval={atlas.launchProbability} tone="cyan" />
         <IntervalBand label="First Batch Success" interval={atlas.firstBatchSuccessProbability} tone="emerald" />
         <IntervalBand label="Manufacturing Delay Risk" interval={atlas.manufacturingDelayRisk} tone="rose" />
         <IntervalBand label="Cash Shortage Risk" interval={atlas.cashShortageRisk} tone="amber" />
@@ -373,7 +466,7 @@ function OpportunityCard({ atlas }: { atlas: AtlasMissionControl }) {
         <p className="mt-2 text-sm leading-6 text-slate-300">{opportunity.summary}</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
-        <MiniMetric label="Expected Lift" value={`+${opportunity.expectedProbabilityIncrease.low}–${opportunity.expectedProbabilityIncrease.high} pts`} />
+        <MiniMetric label="Modelled Lift" value={`+${opportunity.expectedProbabilityIncrease.low}–${opportunity.expectedProbabilityIncrease.high} pts`} />
         <MiniMetric label="Estimated Time" value={opportunity.estimatedHours == null ? "Unknown" : `${opportunity.estimatedHours}h`} />
         <MiniMetric label="Confidence" value={`${opportunity.confidencePct}%`} />
       </div>
@@ -550,4 +643,14 @@ function formatDateInterval(interval: { low: string | null; p50: string | null; 
 
 function formatHorizon(horizon: string) {
   return horizon.replace("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+*/
+
+import { permanentRedirect } from "next/navigation";
+
+/** Atlas is deliberately retired; its prior implementation remains above for future reuse. */
+export const dynamic = "force-dynamic";
+
+export default function AtlasPage() {
+  permanentRedirect("/");
 }

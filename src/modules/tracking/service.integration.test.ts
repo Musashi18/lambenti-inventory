@@ -813,6 +813,131 @@ describe("tracking service", () => {
     await expect(prisma.trackingEvent.findFirstOrThrow({ where: { trackingNumberId: refreshed.id } })).resolves.toMatchObject({ status: "OUT_FOR_DELIVERY", description: "Out For Delivery Today" });
   });
 
+  it("archives the Ship24 backend tracker when provider refresh marks a shipment delivered", async () => {
+    const fixture = await createOrderImportFixture("SHIP24-DELIVERED-ARCHIVE");
+    await captureTrackingNumbersFromPortalSnapshot({
+      snapshot: {
+        sourceUrl: `https://biz.alibaba.com/ta/detail.htm?orderId=${fixture.externalOrderId}`,
+        orderId: fixture.externalOrderId,
+        trackingNumbers: ["LL270153446CN"],
+        text: "Tracking Number: LL270153446CN"
+      },
+      actorId: `${TEST_PREFIX}-agent`
+    });
+    const patchedTrackerIds: string[] = [];
+    let trackerListCalls = 0;
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        trackerListCalls += 1;
+        return new Response(JSON.stringify({
+          data: {
+            trackers: trackerListCalls === 1 ? [] : [
+              { trackerId: "ship24-delivered-to-archive", trackingNumber: "LL270153446CN", clientTrackerId: "delivered-client", isTracked: true, isSubscribed: true, createdAt: "2026-07-08T00:00:00.000Z" }
+            ]
+          }
+        }), { status: 200 });
+      }
+      if (init?.method === "PATCH") {
+        patchedTrackerIds.push(url.split("/").at(-1) ?? "");
+        expect(JSON.parse(String(init.body))).toEqual({ isSubscribed: false, isTracked: false });
+        return new Response(JSON.stringify({ data: { tracker: { isTracked: false, isSubscribed: false } } }), { status: 200 });
+      }
+      expect(init?.method).toBe("POST");
+      return new Response(JSON.stringify({
+        data: {
+          trackings: [{
+            tracker: { trackerId: "ship24-delivered-to-archive", trackingNumber: "LL270153446CN" },
+            shipment: { statusMilestone: "delivered", deliveredDatetime: "2026-07-08T12:00:00.000Z", destinationCountryCode: "CA" },
+            events: [{ status: "Delivered", statusMilestone: "delivered", occurrenceDatetime: "2026-07-08T12:00:00.000Z", location: "Toronto, Canada" }]
+          }]
+        }
+      }), { status: 200 });
+    });
+
+    const refreshed = await refreshTrackingNumber({
+      trackingNumber: "LL270153446CN",
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-07-08T12:30:00.000Z"),
+      config: { provider: "SHIP24", authToken: "ship24-test-key", ship24BaseUrl: "https://api.ship24.test", destinationCountryCode: "CA" },
+      fetcher
+    });
+
+    expect(refreshed.currentStatus).toBe("DELIVERED");
+    expect(refreshed.refreshStatus).toBe("SUCCESS");
+    expect(refreshed.nextRefreshAt).toBeNull();
+    expect(patchedTrackerIds).toEqual(["ship24-delivered-to-archive"]);
+    await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-agent`, action: "ARCHIVE_SHIP24_BACKEND_TRACKER" } })).resolves.toBe(1);
+  });
+
+  it("clears already-delivered local shipments from Ship24 before polling active shipments and respects the 10-active limit", async () => {
+    await prisma.trackingNumber.create({
+      data: {
+        trackingNumber: `${TEST_PREFIX}-DELIVERED-BACKEND-ARCHIVE`,
+        source: "TEST",
+        currentStatus: "DELIVERED",
+        provider: "SHIP24",
+        refreshStatus: "SUCCESS",
+        deliveredAt: new Date("2026-07-08T10:00:00.000Z"),
+        sourceUrl: `${TEST_PREFIX}-delivered-backend-archive`
+      }
+    });
+    await Promise.all(Array.from({ length: 12 }, (_, index) => prisma.trackingNumber.create({
+      data: {
+        trackingNumber: `${TEST_PREFIX}-SHIP24-CAP-${String(index).padStart(2, "0")}`,
+        source: "TEST",
+        currentStatus: "PENDING",
+        provider: "SHIP24",
+        refreshStatus: "PENDING",
+        nextRefreshAt: new Date("2026-07-08T00:00:00.000Z"),
+        sourceUrl: `${TEST_PREFIX}-ship24-cap-${index}`
+      }
+    })));
+    const patchedTrackerIds: string[] = [];
+    const postTrackingNumbers: string[] = [];
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "GET") {
+        return new Response(JSON.stringify({
+          data: {
+            trackers: [
+              { trackerId: "already-delivered-active-slot", trackingNumber: `${TEST_PREFIX}-DELIVERED-BACKEND-ARCHIVE`, clientTrackerId: "delivered-slot", isTracked: true, isSubscribed: true, createdAt: "2026-07-08T00:00:00.000Z" }
+            ]
+          }
+        }), { status: 200 });
+      }
+      if (init?.method === "PATCH") {
+        patchedTrackerIds.push(url.split("/").at(-1) ?? "");
+        return new Response(JSON.stringify({ data: { tracker: { isTracked: false, isSubscribed: false } } }), { status: 200 });
+      }
+      expect(init?.method).toBe("POST");
+      const requestBody = JSON.parse(String(init?.body));
+      postTrackingNumbers.push(requestBody.trackingNumber);
+      return new Response(JSON.stringify({
+        data: {
+          trackings: [{
+            tracker: { trackerId: `ship24-${postTrackingNumbers.length}`, trackingNumber: requestBody.trackingNumber, clientTrackerId: requestBody.clientTrackerId },
+            shipment: { statusMilestone: "in_transit", destinationCountryCode: "CA" },
+            events: [{ status: "In transit", statusMilestone: "in_transit", occurrenceDatetime: "2026-07-08T11:00:00.000Z" }]
+          }]
+        }
+      }), { status: 200 });
+    });
+
+    const result = await refreshActiveTrackingNumbers({
+      actorId: `${TEST_PREFIX}-agent`,
+      now: new Date("2026-07-08T12:00:00.000Z"),
+      limit: 12,
+      config: { provider: "SHIP24", authToken: "ship24-test-key", ship24BaseUrl: "https://api.ship24.test" },
+      fetcher
+    });
+
+    expect(result.scanned).toBe(10);
+    expect(result.skipped).toBeGreaterThanOrEqual(2);
+    expect(result.archivedOnProvider).toBe(1);
+    expect(postTrackingNumbers).toHaveLength(10);
+    expect(patchedTrackerIds).toContain("already-delivered-active-slot");
+    await expect(prisma.auditLog.count({ where: { actorId: `${TEST_PREFIX}-agent`, action: "ARCHIVE_SHIP24_BACKEND_TRACKER" } })).resolves.toBe(1);
+  });
+
   it("recognizes carrier-has-received-information responses as info received, not pending", async () => {
     const fixture = await createOrderImportFixture("INFO-RECEIVED-PHRASE");
     await captureTrackingNumbersFromPortalSnapshot({

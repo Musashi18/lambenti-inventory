@@ -61,8 +61,8 @@ describe("tracking refresh scheduler script helpers", () => {
   });
 
   it("formats a useful operator notification with the tracking workbench URL", () => {
-    expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 active number(s); refreshed 1, failed 0, skipped 3.");
-    expect(formatTrackingRefreshNotification({ dueOnly: true, scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 due number(s); refreshed 1, failed 0, skipped 3.");
+    expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3, archivedOnProvider: 1 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 active number(s); refreshed 1, failed 0, skipped 3, archived 1 delivered Ship24 backend tracker(s).");
+    expect(formatTrackingRefreshNotification({ dueOnly: true, scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("Tracking refresh checked 2 due number(s); refreshed 1, failed 0, skipped 3, archived 0 delivered Ship24 backend tracker(s).");
     expect(formatTrackingRefreshNotification({ scanned: 2, refreshed: 1, failed: 0, skipped: 3 }, "http://127.0.0.1:5173")).toContain("http://127.0.0.1:5173/tracking");
   });
 });

@@ -52,11 +52,13 @@ export function resolveItemUnitCostIndex(
   }
 
   const resolved = new Map<string, ResolvedItemUnitCost>();
+  const unresolved = new Set<string>();
   const resolving = new Set<string>();
 
   const resolve = (itemId: string): ResolvedItemUnitCost | null => {
     const existing = resolved.get(itemId);
     if (existing) return existing;
+    if (unresolved.has(itemId)) return null;
     if (resolving.has(itemId)) return null;
 
     const item = itemsById.get(itemId);
@@ -98,36 +100,42 @@ export function resolveItemUnitCostIndex(
     if (!bom) return null;
 
     resolving.add(itemId);
-    const componentCosts: Array<{ sku: string; quantity: number; unitCost: number }> = [];
-    for (const line of bom.lines) {
-      const component = resolve(line.componentItemId);
-      const quantity = numericQuantity(line.quantity);
-      if (!component || quantity <= 0) {
-        resolving.delete(itemId);
+    try {
+      const componentCosts: Array<{ sku: string; quantity: number; unitCost: number }> = [];
+      for (const line of bom.lines) {
+        const component = resolve(line.componentItemId);
+        const quantity = numericQuantity(line.quantity);
+        if (!component || quantity <= 0) {
+          unresolved.add(itemId);
+          return null;
+        }
+        componentCosts.push({
+          sku: line.componentItem?.sku ?? component.sku,
+          quantity,
+          unitCost: component.unitCost
+        });
+      }
+
+      const unitCost = roundUnitCost(componentCosts.reduce((total, line) => total + line.unitCost * line.quantity, 0));
+      if (!Number.isFinite(unitCost) || unitCost <= 0) {
+        unresolved.add(itemId);
         return null;
       }
-      componentCosts.push({
-        sku: line.componentItem?.sku ?? component.sku,
-        quantity,
-        unitCost: component.unitCost
-      });
+
+      const bomResult: ResolvedItemUnitCost = {
+        itemId,
+        sku: item.sku,
+        unitCost,
+        currency: DEFAULT_CURRENCY,
+        source: "BOM_ROLLUP",
+        sourceLabel: `BOM rollup · ${bom.version}`,
+        sourceRefs: [`BOM ${bom.version}: ${componentCosts.map((line) => `${line.quantity} × ${line.sku} @ ${line.unitCost.toFixed(4)}`).join("; ")}`]
+      };
+      resolved.set(itemId, bomResult);
+      return bomResult;
+    } finally {
+      resolving.delete(itemId);
     }
-    resolving.delete(itemId);
-
-    const unitCost = roundUnitCost(componentCosts.reduce((total, line) => total + line.unitCost * line.quantity, 0));
-    if (!Number.isFinite(unitCost) || unitCost <= 0) return null;
-
-    const bomResult: ResolvedItemUnitCost = {
-      itemId,
-      sku: item.sku,
-      unitCost,
-      currency: DEFAULT_CURRENCY,
-      source: "BOM_ROLLUP",
-      sourceLabel: `BOM rollup · ${bom.version}`,
-      sourceRefs: [`BOM ${bom.version}: ${componentCosts.map((line) => `${line.quantity} × ${line.sku} @ ${line.unitCost.toFixed(4)}`).join("; ")}`]
-    };
-    resolved.set(itemId, bomResult);
-    return bomResult;
   };
 
   for (const item of items) resolve(item.id);

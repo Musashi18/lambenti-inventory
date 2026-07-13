@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getAtlasSeedGraph } from "./seed-graph";
-import { buildAtlasMissionControl, isStaleEvidence, scoreAtlasNodes } from "./scoring";
+import { buildAtlasMissionControl, isStaleEvidence, scoreAtlasNodes, summarizeMomentum } from "./scoring";
 import type { AtlasActivityEvent, AtlasEvidence } from "./types";
 
 const now = new Date("2026-07-01T12:00:00.000Z");
@@ -26,6 +26,56 @@ describe("Atlas scoring", () => {
 
     const after = scoreAtlasNodes(nodes, [], [unvalidatedActivity]);
     expect(after.find((node) => node.id === "engineering.firmware")?.completionPct).toBe(before.find((node) => node.id === "engineering.firmware")?.completionPct);
+    expect(after.find((node) => node.id === "engineering.firmware")?.measurementStatus).toBe("UNMEASURED");
+  });
+
+  it("does not present planning baselines as measured progress when no operational completion evidence exists", () => {
+    const nodes = scoreAtlasNodes(getAtlasSeedGraph(), [], [], now);
+    const firmware = nodes.find((node) => node.id === "engineering.firmware");
+
+    expect(firmware).toMatchObject({
+      planningBaselineCompletionPct: 55,
+      completionPct: 0,
+      measurementStatus: "UNMEASURED",
+      evidenceCompletionPct: null
+    });
+  });
+
+  it("keeps Phase I physical position separate from graph completion and planning baselines", () => {
+    const result = buildAtlasMissionControl({
+      nodes: getAtlasSeedGraph(),
+      evidence: [],
+      phaseOneReadiness: {
+        packageSku: "LAMBENTI_PACKAGE",
+        packageDescription: "Complete Package Assembly",
+        packageDisplayName: "LAMBENTI_PACKAGE — Complete Package Assembly",
+        targetPackages: 25,
+        assembledPackages: 2,
+        buildCapacityNow: 3,
+        buildableTowardTarget: 3,
+        materialCoverageNow: 5,
+        materialCoveredTowardTarget: 5,
+        remainingBuildGap: 23,
+        remainingMaterialGap: 20,
+        bottleneckSku: "MAIN_UNIT",
+        status: "BLOCKED",
+        nextActions: [{ label: "Draft component purchase requests", reason: "Stock gap remains.", href: "/purchasing/recommendations" }]
+      },
+      now
+    });
+
+    expect(result.goalPosition).toMatchObject({
+      physicalTarget: {
+        assembledPackages: 2,
+        buildableTowardTarget: 3,
+        materialCoveredTowardTarget: 5,
+        remainingBuildGap: 23,
+        remainingMaterialGap: 20
+      }
+    });
+    expect(result.goalPosition?.summary).toContain("2/25 LAMBENTI_PACKAGE unit(s) are ledger-built");
+    expect(result.goalPosition?.milestones.find((item) => item.id === "phase1.first-batch")?.measurementStatus).toBe("UNMEASURED");
+    expect(result.missionCompletionPct).toBe(0);
   });
 
   it("lets validated evidence drive launch probability and highest-leverage task", () => {
@@ -150,7 +200,7 @@ describe("Atlas scoring", () => {
       }
     ];
 
-    const result = buildAtlasMissionControl({ nodes: getAtlasSeedGraph(), evidence: [], activityEvents, now });
+    const result = buildAtlasMissionControl({ nodes: getAtlasSeedGraph(), evidence: [], activityEvents, now: new Date("2026-07-01T16:00:00.000Z") });
 
     expect(result.momentum.dailyTotalHours).toBe(2.5);
     expect(result.momentum.dailySectorWork).toEqual([
@@ -158,6 +208,60 @@ describe("Atlas scoring", () => {
       { sector: "Planning", hours: 0.5, highLeverageHours: 0, eventCount: 1, confidencePct: 70 }
     ]);
     expect(result.momentum.weeklyDeepWorkHours).toBe(3);
+  });
+
+  it("keeps daily, weekly, and monthly activity windows distinct and derives trend from comparable weeks", () => {
+    const activityEvents: AtlasActivityEvent[] = [
+      { id: "current-week", category: "Engineering", leverageTier: "HIGH", confidencePct: 80, startedAt: "2026-07-09T12:00:00.000Z", endedAt: "2026-07-09T16:00:00.000Z", summary: "4h current-week execution.", sourceType: "FILE", sourceRef: "test", validatedProgress: true },
+      { id: "previous-week", category: "Engineering", leverageTier: "HIGH", confidencePct: 80, startedAt: "2026-06-30T12:00:00.000Z", endedAt: "2026-06-30T14:00:00.000Z", summary: "2h prior-week execution.", sourceType: "FILE", sourceRef: "test", validatedProgress: true },
+      { id: "older-month", category: "Engineering", leverageTier: "HIGH", confidencePct: 80, startedAt: "2026-06-15T12:00:00.000Z", endedAt: "2026-06-15T15:00:00.000Z", summary: "3h monthly execution.", sourceType: "FILE", sourceRef: "test", validatedProgress: true }
+    ];
+
+    const result = buildAtlasMissionControl({ nodes: getAtlasSeedGraph(), evidence: [], activityEvents, now: new Date("2026-07-10T12:00:00.000Z") });
+
+    expect(result.weeklyVelocity.currentHours).toBe(4);
+    expect(result.momentum.weeklyDeepWorkHours).toBe(4);
+    expect(result.momentum.monthlyDeepWorkHours).toBe(9);
+    expect(result.momentum.velocityTrend).toBe("accelerating");
+  });
+
+  it("merges contiguous minute-scale activity samples into work sessions before reporting focus and transitions", () => {
+    const activityEvents: AtlasActivityEvent[] = [
+      { id: "sample-a", category: "Engineering", leverageTier: "HIGH", confidencePct: 80, startedAt: "2026-07-10T08:00:00.000Z", endedAt: "2026-07-10T08:10:00.000Z", summary: "sample", sourceType: "FILE", sourceRef: "test", validatedProgress: true },
+      { id: "sample-b", category: "Planning", leverageTier: "MEDIUM", confidencePct: 80, startedAt: "2026-07-10T08:10:00.000Z", endedAt: "2026-07-10T08:20:00.000Z", summary: "sample", sourceType: "FILE", sourceRef: "test", validatedProgress: false },
+      { id: "sample-c", category: "Firmware", leverageTier: "HIGH", confidencePct: 80, startedAt: "2026-07-10T08:20:00.000Z", endedAt: "2026-07-10T08:30:00.000Z", summary: "sample", sourceType: "FILE", sourceRef: "test", validatedProgress: true }
+    ];
+
+    const result = buildAtlasMissionControl({ nodes: getAtlasSeedGraph(), evidence: [], activityEvents, now: new Date("2026-07-10T12:00:00.000Z") });
+
+    expect(result.momentum.averageFocusMinutes).toBe(30);
+    expect(result.momentum.contextSwitches).toBe(0);
+  });
+
+  it("excludes idle, distraction, and uncertain classified blocks from dashboard worked time", () => {
+    const event = (id: string, classification: AtlasActivityEvent["activityClassification"], category: AtlasActivityEvent["category"]): AtlasActivityEvent => ({
+      id,
+      category,
+      leverageTier: "HIGH",
+      confidencePct: 80,
+      startedAt: "2026-07-10T08:00:00.000Z",
+      endedAt: "2026-07-10T09:00:00.000Z",
+      summary: id,
+      sourceType: "FILE",
+      sourceRef: "test",
+      validatedProgress: classification === "WORK",
+      activityClassification: classification
+    });
+    const momentum = summarizeMomentum([
+      event("work", "WORK", "Engineering"),
+      event("idle", "IDLE", "Unknown"),
+      event("distraction", "DISTRACTION", "Distraction"),
+      event("uncertain", "UNCERTAIN", "Planning")
+    ], new Date("2026-07-10T12:00:00.000Z"));
+
+    expect(momentum.dailyTotalHours).toBe(1);
+    expect(momentum.dailySectorWork).toEqual([{ sector: "Engineering", hours: 1, highLeverageHours: 1, eventCount: 1, confidencePct: 80 }]);
+    expect(momentum.classificationCounts).toEqual({ work: 1, idle: 1, distraction: 1, uncertain: 1 });
   });
 
   it("counts stale evidence and discounts confidence instead of treating old signals as current truth", () => {

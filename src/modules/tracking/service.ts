@@ -157,6 +157,7 @@ export type LeadTimeLog = {
 
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 240;
 const DEFAULT_SHIP24_BASE_URL = "https://api.ship24.com";
+const SHIP24_ACTIVE_TRACKER_LIMIT = 10;
 const TRACKING_REGEX = /\b(?:1Z[0-9A-Z]{16}|[A-Z]{2}\d{9}[A-Z]{2}|[A-Z]{1,5}\d{8,24}[A-Z]{0,4}|\d{10,24})\b/gi;
 const STRONG_TRACKING_REGEX = /\b(?:1Z[0-9A-Z]{16}|[A-Z]{2}\d{9}[A-Z]{2})\b/gi;
 const TRACKING_CONTEXT_REGEX = /\b(?:tracking|track\s+shipment|logistics|shipment|waybill|carrier|运单|物流|快递|追踪)\b/i;
@@ -628,13 +629,33 @@ export async function refreshTrackingNumber(input: {
         deliveredAt: updated.deliveredAt
       }
     });
+    let finalTracking = updated;
     if (status === "DELIVERED") {
+      const ship24Archive = await archiveShip24BackendTrackersForRows({
+        rows: [{ id: updated.id, trackingNumber: updated.trackingNumber }],
+        config,
+        fetcher: input.fetcher ?? fetch,
+        actorId: input.actorId,
+        actorType: "AGENT",
+        now,
+        reason: "Shipment was marked delivered locally; archive the Ship24 backend tracker so it no longer consumes the active-shipment quota."
+      });
+      if (ship24Archive.failed > 0) {
+        finalTracking = await prisma.trackingNumber.update({
+          where: { id: updated.id },
+          data: {
+            refreshStatus: "FAILED",
+            refreshError: `Delivered locally, but Ship24 backend archive failed: ${ship24Archive.errors[0] ?? "unknown Ship24 archive failure"}`.slice(0, 1000),
+            nextRefreshAt: null
+          }
+        });
+      }
       await archiveAssociatedActiveTrackingNumbers({ delivered: updated, actorId: input.actorId, actorType: "AGENT", now });
     }
-    if (updated.purchaseOrderId) {
-      await syncLeadTimeAveragesForPurchaseOrder(updated.purchaseOrderId, input.actorId, "AGENT");
+    if (finalTracking.purchaseOrderId) {
+      await syncLeadTimeAveragesForPurchaseOrder(finalTracking.purchaseOrderId, input.actorId, "AGENT");
     }
-    return updated;
+    return finalTracking;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const updated = await prisma.trackingNumber.update({
@@ -772,6 +793,110 @@ async function archiveAssociatedActiveTrackingNumbers(input: {
   return archived;
 }
 
+async function archiveDeliveredShip24BackendTrackers(input: {
+  config: TrackingServiceConfig;
+  fetcher: FetchLike;
+  actorId: string;
+  actorType: "USER" | "AGENT";
+  now: Date;
+}) {
+  const config = mergeTrackingServiceConfig(input.config);
+  if (config.provider !== "SHIP24" || !config.authToken) return emptyShip24ArchiveResult();
+  const rows = await prisma.trackingNumber.findMany({
+    where: { currentStatus: "DELIVERED" },
+    select: { id: true, trackingNumber: true },
+    take: 1000
+  });
+  return archiveShip24BackendTrackersForRows({
+    rows,
+    config,
+    fetcher: input.fetcher,
+    actorId: input.actorId,
+    actorType: input.actorType,
+    now: input.now,
+    reason: "Delivered shipment is retained locally as history but archived on Ship24 so it no longer consumes the active-shipment quota."
+  });
+}
+
+async function archiveShip24BackendTrackersForRows(input: {
+  rows: Array<{ id: string; trackingNumber: string }>;
+  config: TrackingServiceConfig;
+  fetcher: FetchLike;
+  actorId: string;
+  actorType: "USER" | "AGENT";
+  now: Date;
+  reason: string;
+}) {
+  const config = mergeTrackingServiceConfig(input.config);
+  if (config.provider !== "SHIP24" || !config.authToken || input.rows.length === 0) return emptyShip24ArchiveResult();
+  const baseUrl = (config.ship24BaseUrl ?? DEFAULT_SHIP24_BASE_URL).replace(/\/$/, "");
+  const deliveredRowsByTrackingNumber = new Map(input.rows.map((row) => [normalizeTrackingNumber(row.trackingNumber), row]));
+  const result = emptyShip24ArchiveResult();
+
+  let trackers: Ship24TrackerListEntry[];
+  try {
+    trackers = await listShip24Trackers(baseUrl, config.authToken, input.fetcher);
+  } catch (error) {
+    result.failed += deliveredRowsByTrackingNumber.size;
+    result.errors.push(error instanceof Error ? error.message : String(error));
+    return result;
+  }
+
+  const activeDeliveredTrackers = trackers.filter((tracker) => {
+    const normalized = normalizeTrackingNumber(tracker.trackingNumber);
+    return deliveredRowsByTrackingNumber.has(normalized) && (tracker.isTracked || tracker.isSubscribed);
+  });
+
+  for (const tracker of activeDeliveredTrackers) {
+    const row = deliveredRowsByTrackingNumber.get(normalizeTrackingNumber(tracker.trackingNumber));
+    if (!row) continue;
+    try {
+      await deactivateShip24Tracker(baseUrl, config.authToken, tracker, input.fetcher);
+      result.archived += 1;
+      result.trackerIds.push(tracker.trackerId);
+      await writeAuditLog({
+        actorType: input.actorType,
+        actorId: input.actorId,
+        action: "ARCHIVE_SHIP24_BACKEND_TRACKER",
+        entityType: "TrackingNumber",
+        entityId: row.id,
+        payload: {
+          trackingNumber: row.trackingNumber,
+          ship24TrackerId: tracker.trackerId,
+          clientTrackerId: tracker.clientTrackerId,
+          reason: input.reason,
+          archivedAt: input.now.toISOString(),
+          boundary: "Ship24 backend subscription/tracking was disabled to clear active API quota. Local tracking evidence remains DELIVERED history; no stock, receiving, payment, invoice, Alibaba, or supplier-message side effect occurred."
+        }
+      });
+    } catch (error) {
+      result.failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      result.errors.push(message);
+      await writeAuditLog({
+        actorType: input.actorType,
+        actorId: input.actorId,
+        action: "ARCHIVE_SHIP24_BACKEND_TRACKER_FAILED",
+        entityType: "TrackingNumber",
+        entityId: row.id,
+        payload: {
+          trackingNumber: row.trackingNumber,
+          ship24TrackerId: tracker.trackerId,
+          reason: input.reason,
+          error: message.slice(0, 1000),
+          attemptedAt: input.now.toISOString()
+        }
+      });
+    }
+  }
+
+  return result;
+}
+
+function emptyShip24ArchiveResult() {
+  return { archived: 0, failed: 0, trackerIds: [] as string[], errors: [] as string[] };
+}
+
 function trackingNumberSnapshot(row: {
   id: string;
   trackingNumber: string;
@@ -825,7 +950,16 @@ async function refreshTrackingRows(input: {
   fetcher?: FetchLike;
 }) {
   const now = input.now ?? new Date();
+  const config = mergeTrackingServiceConfig(input.config);
+  const deliveredArchive = await archiveDeliveredShip24BackendTrackers({
+    config,
+    fetcher: input.fetcher ?? fetch,
+    actorId: input.actorId,
+    actorType: "AGENT",
+    now
+  });
   const activeWhere = activeTrackingNumberWhere();
+  const effectiveLimit = config.provider === "SHIP24" ? Math.min(input.limit, SHIP24_ACTIVE_TRACKER_LIMIT) : input.limit;
   const totalCandidates = await prisma.trackingNumber.count({ where: activeWhere });
   const rows = await prisma.trackingNumber.findMany({
     where: {
@@ -833,7 +967,7 @@ async function refreshTrackingRows(input: {
       ...(input.dueOnly ? { OR: [{ nextRefreshAt: null }, { nextRefreshAt: { lte: now } }] } : {})
     },
     orderBy: input.dueOnly ? [{ nextRefreshAt: "asc" }, { updatedAt: "asc" }] : [{ updatedAt: "desc" }, { capturedAt: "desc" }],
-    take: input.limit
+    take: effectiveLimit
   });
 
   let refreshed = 0;
@@ -843,13 +977,13 @@ async function refreshTrackingRows(input: {
       trackingNumber: row.trackingNumber,
       actorId: input.actorId,
       now,
-      config: input.config,
+      config,
       fetcher: input.fetcher
     });
     if (result.refreshStatus === "SUCCESS" || result.refreshStatus === "CONFIG_REQUIRED") refreshed += 1;
     else failed += 1;
   }
-  return { scanned: rows.length, refreshed, failed, skipped: Math.max(0, totalCandidates - rows.length) };
+  return { scanned: rows.length, refreshed, failed, skipped: Math.max(0, totalCandidates - rows.length), archivedOnProvider: deliveredArchive.archived };
 }
 
 export async function getTrackingDashboard(input: { now?: Date; config?: TrackingServiceConfig } = {}) {
@@ -1960,6 +2094,19 @@ async function dedupeShip24Trackers(input: {
       await deactivateShip24Tracker(input.baseUrl, input.authToken, staleEntry, input.fetcher);
     }
   }
+}
+
+async function listShip24Trackers(baseUrl: string, authToken: string, fetcher: FetchLike) {
+  const response = await fetcher(`${baseUrl}/public/v1/trackers?limit=100`, {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${authToken}`
+    }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(formatShip24HttpError(response.status, body));
+  return extractShip24TrackerList(body);
 }
 
 function extractShip24TrackerList(body: unknown): Ship24TrackerListEntry[] {

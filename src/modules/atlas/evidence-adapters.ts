@@ -1,12 +1,22 @@
-import type { AtlasEvidence } from "./types";
+import type { AtlasEvidence, AtlasPhaseOneReadinessInput } from "./types";
 
 type DashboardEvidenceSource = {
   launchReadiness: {
+    packageSku?: string;
+    packageDescription?: string;
+    packageDisplayName?: string;
     targetPackages: number;
+    assembledPackages?: number;
     readyNow: number;
-    remainingToTarget: number;
+    buildCapacityNow?: number;
+    buildableTowardTarget?: number;
+    materialCoverageNow?: number;
+    materialCoveredTowardTarget?: number;
+    remainingBuildGap?: number;
+    remainingMaterialGap?: number;
+    remainingToTarget?: number;
     bottleneckSku: string;
-    status: string;
+    status: AtlasPhaseOneReadinessInput["status"];
     nextActions: Array<{ label: string; reason: string; href: string }>;
   };
   dashboardGraphs?: {
@@ -51,9 +61,47 @@ export function collectAtlasOperationalEvidence(input: {
   ];
 }
 
+/**
+ * Keeps the exact 25-unit package position separate from graph/scenario scores.
+ * `assembledPackages` is ledger-built physical output only; buildable and material coverage are
+ * explicitly adjacent readiness states, never quietly treated as completed units.
+ */
+export function getAtlasPhaseOneReadiness(summary: DashboardEvidenceSource): AtlasPhaseOneReadinessInput {
+  const readiness = summary.launchReadiness;
+  const targetPackages = Math.max(readiness.targetPackages, 1);
+  const assembledPackages = Math.max(0, readiness.assembledPackages ?? readiness.readyNow);
+  const buildCapacityNow = Math.max(0, readiness.buildCapacityNow ?? 0);
+  const remainingBuildGap = Math.max(0, readiness.remainingBuildGap ?? targetPackages - assembledPackages);
+  const buildableTowardTarget = Math.min(Math.max(0, readiness.buildableTowardTarget ?? buildCapacityNow), remainingBuildGap);
+  const materialCoverageNow = Math.max(assembledPackages, readiness.materialCoverageNow ?? assembledPackages + buildCapacityNow);
+  const materialCoveredTowardTarget = Math.min(targetPackages, Math.max(assembledPackages, readiness.materialCoveredTowardTarget ?? assembledPackages + buildableTowardTarget));
+  const remainingMaterialGap = Math.max(0, readiness.remainingMaterialGap ?? readiness.remainingToTarget ?? targetPackages - materialCoverageNow);
+
+  return {
+    packageSku: readiness.packageSku ?? "LAMBENTI_PACKAGE",
+    packageDescription: readiness.packageDescription ?? "Complete Package Assembly",
+    packageDisplayName: readiness.packageDisplayName ?? "LAMBENTI_PACKAGE — Complete Package Assembly",
+    targetPackages,
+    assembledPackages,
+    buildCapacityNow,
+    buildableTowardTarget,
+    materialCoverageNow,
+    materialCoveredTowardTarget,
+    remainingBuildGap,
+    remainingMaterialGap,
+    bottleneckSku: readiness.bottleneckSku,
+    status: readiness.status,
+    nextActions: readiness.nextActions.map((action) => ({ label: action.label, reason: action.reason, href: action.href }))
+  };
+}
+
 export function collectDashboardEvidence(summary: DashboardEvidenceSource, observedAt: string): AtlasEvidence[] {
   const target = Math.max(summary.launchReadiness.targetPackages, 1);
-  const readyPct = boundedPercent(summary.launchReadiness.readyNow, target);
+  const ledgerBuilt = Math.max(0, summary.launchReadiness.assembledPackages ?? summary.launchReadiness.readyNow);
+  const materialCoveredTowardTarget = summary.launchReadiness.materialCoveredTowardTarget ?? ledgerBuilt;
+  const materialPct = boundedPercent(materialCoveredTowardTarget, target);
+  const remainingBuildGap = Math.max(0, summary.launchReadiness.remainingBuildGap ?? target - ledgerBuilt);
+  const remainingMaterialGap = Math.max(0, summary.launchReadiness.remainingMaterialGap ?? summary.launchReadiness.remainingToTarget ?? target - materialCoveredTowardTarget);
   const recommendations = summary.recommendations ?? [];
   const incomingOrders = summary.incomingOrders ?? [];
   const stockPressure = summary.dashboardGraphs?.stockPressureBars ?? [];
@@ -66,14 +114,14 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       nodeId: "inventory.phase1-coverage",
       sourceType: "INVENTORY",
       sourceRef: "getDashboardSummary.launchReadiness",
-      summary: `${summary.launchReadiness.readyNow}/${summary.launchReadiness.targetPackages} Phase I units are assembled or buildable; ${summary.launchReadiness.remainingToTarget} remain uncovered.`,
+      summary: `${ledgerBuilt}/${summary.launchReadiness.targetPackages} Phase I packages are ledger-built; ${summary.launchReadiness.buildCapacityNow ?? 0} more package build action(s) are possible from already-built package inputs, leaving ${remainingBuildGap} explicit build(s) and ${remainingMaterialGap} package-input gap unit(s).`,
       confidencePct: 88,
       observedAt,
       href: "/",
-      completionPct: readyPct,
+      completionPct: materialPct,
       impactScore: 100,
-      riskScore: summary.launchReadiness.remainingToTarget > 0 ? Math.min(90, 35 + summary.launchReadiness.remainingToTarget * 2) : 10,
-      estimatedHours: summary.launchReadiness.remainingToTarget > 0 ? 20 : 5,
+      riskScore: remainingMaterialGap > 0 ? Math.min(90, 35 + remainingMaterialGap * 2) : remainingBuildGap > 0 ? 45 : 10,
+      estimatedHours: remainingBuildGap > 0 ? 20 : 5,
       validatedProgress: true
     },
     {
@@ -82,14 +130,16 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       sourceType: "INVENTORY",
       sourceRef: "getDashboardSummary.launchReadiness",
       summary: summary.launchReadiness.status === "COVERED"
-        ? "Phase I package coverage is ready for the production-unit routine."
-        : `Production-unit path is constrained by ${summary.launchReadiness.bottleneckSku || "unresolved package coverage"}.`,
+        ? "Phase I package assemblies are built for the production-unit routine."
+        : summary.launchReadiness.status === "BUILD_READY"
+          ? "Phase I package materials are covered, but explicit BUILD movements are still needed before units are ready."
+          : `Production-unit path is constrained by ${summary.launchReadiness.bottleneckSku || "unresolved package coverage"}.`,
       confidencePct: 82,
       observedAt,
       href: "/",
-      completionPct: Math.max(readyPct - 10, 0),
+
       impactScore: 100,
-      riskScore: summary.launchReadiness.status === "COVERED" ? 20 : 70,
+      riskScore: summary.launchReadiness.status === "COVERED" ? 20 : summary.launchReadiness.status === "BUILD_READY" ? 45 : 70,
       validatedProgress: true
     }
   ];
@@ -104,7 +154,6 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       confidencePct: 82,
       observedAt,
       href: "/boms",
-      completionPct: readyPct,
       impactScore: 96,
       riskScore: bottleneck.capacity <= 0 ? 85 : 62,
       estimatedHours: 18,
@@ -123,7 +172,6 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       confidencePct: 80,
       observedAt,
       href: "/purchasing/recommendations",
-      completionPct: Math.max(15, 70 - recommendations.length * 8),
       impactScore: 94,
       riskScore: Math.min(90, 50 + recommendations.length * 6),
       estimatedHours: 12,
@@ -139,7 +187,6 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       confidencePct: 75,
       observedAt,
       href: "/purchasing/recommendations",
-      completionPct: 70,
       impactScore: 80,
       riskScore: 25,
       validatedProgress: true
@@ -156,7 +203,6 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
       confidencePct: 78,
       observedAt,
       href: "/incoming",
-      completionPct: 45,
       impactScore: 78,
       riskScore: 52,
       estimatedHours: 8,
@@ -198,6 +244,21 @@ export function collectDashboardEvidence(summary: DashboardEvidenceSource, obser
     });
   }
 
+  evidence.push({
+    id: "dashboard:first-batch-built",
+    nodeId: "phase1.first-batch",
+    sourceType: "INVENTORY",
+    sourceRef: "getDashboardSummary.launchReadiness",
+    summary: `${ledgerBuilt}/${summary.launchReadiness.targetPackages} Phase I package assemblies are ledger-built. This measures completed package output only; material coverage and incoming orders remain separate evidence.`,
+    confidencePct: 90,
+    observedAt,
+    href: "/",
+    completionPct: boundedPercent(ledgerBuilt, target),
+    impactScore: 100,
+    riskScore: remainingBuildGap > 0 ? 75 : 20,
+    validatedProgress: true
+  });
+
   return evidence;
 }
 
@@ -220,7 +281,6 @@ export function collectTrackingEvidence(summary: TrackingEvidenceSource, observe
       confidencePct: summary.service.configured ? 82 : 50,
       observedAt,
       href: "/tracking",
-      completionPct: summary.summary.total > 0 ? Math.max(30, Math.min(85, summary.summary.delivered * 20 + (summary.service.configured ? 25 : 0) - summary.summary.failed * 10)) : 30,
       impactScore: 78,
       riskScore,
       estimatedHours: riskScore >= 60 ? 6 : 3,
@@ -243,7 +303,6 @@ export function collectAccountingEvidence(workbench: AccountingEvidenceSource, o
       confidencePct: 76,
       observedAt,
       href: "/accounting",
-      completionPct: needsReview.length > 0 ? Math.max(20, 70 - needsReview.length * 8) : 72,
       impactScore: 72,
       riskScore: needsReview.length > 0 ? Math.min(80, 45 + needsReview.length * 8) : 28,
       estimatedHours: needsReview.length > 0 ? Math.min(12, needsReview.length * 2) : 2,
@@ -265,7 +324,6 @@ export function collectAutomationEvidence(overview: AutomationEvidenceSource, ob
       confidencePct: 70,
       observedAt,
       href: "/automation",
-      completionPct: riskScore > 60 ? 35 : 58,
       impactScore: 80,
       riskScore,
       estimatedHours: riskScore > 60 ? 10 : 4,

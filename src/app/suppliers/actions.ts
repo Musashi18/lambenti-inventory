@@ -4,6 +4,7 @@ import { CostConfidence } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/modules/auth/permissions";
+import { revalidateWorkspace } from "@/app/revalidate-workspace";
 import { archiveSupplierCleanupCandidates, archiveSupplierProfile, deleteArchivedSupplier, unarchiveSupplierProfile, updateItemSupplierEntry, updateSupplierContactProfile } from "@/modules/suppliers/service";
 
 const supplierContactSchema = z.object({
@@ -85,9 +86,7 @@ export async function updateItemSupplierEntryAction(formData: FormData) {
     actorType: actor.actorType === "AGENT" ? "AGENT" : "USER",
     actorId: actor.id
   });
-  revalidatePath("/suppliers");
-  revalidatePath("/inventory/items");
-  revalidatePath("/inventory/valuation");
+  revalidateWorkspace();
 }
 
 export async function archiveSupplierAction(formData: FormData) {

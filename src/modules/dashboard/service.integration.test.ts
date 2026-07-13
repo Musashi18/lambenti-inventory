@@ -104,7 +104,7 @@ async function ensureLambentiAssembledPackageItem(locationId: string) {
     update: {},
     create: {
       sku: "LAMBENTI_PACKAGE",
-      description: "Lambenti Assembled package finished good",
+      description: "Complete package assembly",
       category: ItemCategory.FINISHED_GOOD,
       unit: Unit.EACH,
       reorderPoint: 0,
@@ -233,6 +233,73 @@ describe("dashboard stock quantities", () => {
     });
   });
 
+  it("does not report package builds from unbuilt finished-good subassemblies", async () => {
+    const location = await prisma.storageLocation.create({
+      data: { code: `${TEST_PREFIX}-UNBUILT-SUB-LOC`, name: "Dashboard unbuilt subassembly fixture" }
+    });
+    const assembledPackage = await ensureLambentiAssembledPackageItem(location.id);
+    const unbuiltMainUnit = await createTestItem(location.id, "UNBUILT-MAIN", ItemCategory.FINISHED_GOOD, "Unbuilt Lambenti main unit subassembly");
+    const stockedPackageInput = await createTestItem(location.id, "PACKAGE-INPUT", ItemCategory.COMPONENT, "Stocked package input");
+    const mainUnitComponent = await createTestItem(location.id, "MAIN-UNIT-COMP", ItemCategory.COMPONENT, "Buildable main unit component");
+
+    await prisma.bOM.create({
+      data: {
+        parentItemId: assembledPackage.id,
+        version: `${TEST_PREFIX}-UNBUILT-PACKAGE-BOM`,
+        active: true,
+        lines: { create: [
+          { componentItemId: unbuiltMainUnit.id, quantity: 1 },
+          { componentItemId: stockedPackageInput.id, quantity: 1 }
+        ] }
+      }
+    });
+    await prisma.bOM.create({
+      data: {
+        parentItemId: unbuiltMainUnit.id,
+        version: `${TEST_PREFIX}-MAIN-UNIT-BOM`,
+        active: true,
+        lines: { create: [{ componentItemId: mainUnitComponent.id, quantity: 1 }] }
+      }
+    });
+    await prisma.stockMovement.createMany({
+      data: [
+        { itemId: stockedPackageInput.id, movementType: MovementType.RECEIVE, quantity: 25, reason: "stocked package input fixture", actorType: "USER", actorId: TEST_PREFIX },
+        { itemId: mainUnitComponent.id, movementType: MovementType.RECEIVE, quantity: 26, reason: "buildable main unit component fixture", actorType: "USER", actorId: TEST_PREFIX }
+      ]
+    });
+
+    const summary = await getDashboardSummary();
+
+    expect(summary.buildCapacity).toMatchObject({
+      finishedSku: "LAMBENTI_PACKAGE",
+      finishedBuildCapacity: 0,
+      bottleneckSku: `${TEST_PREFIX}-UNBUILT-MAIN`
+    });
+    expect(summary.launchReadiness).toMatchObject({
+      buildCapacityNow: 0,
+      remainingMaterialGap: 25,
+      status: "BLOCKED"
+    });
+    expect(summary.buildCapacity).toMatchObject({
+      materialComponentsRequired: 2,
+      materialComponentsInStock: 2,
+      materialComponentsMissing: 0,
+      materialCoveragePercent: 100
+    });
+    expect(summary.buildCapacity.componentCapacities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sku: `${TEST_PREFIX}-UNBUILT-MAIN`,
+        available: 0,
+        buildableSubassemblyCapacity: 26,
+        capacity: 0
+      })
+    ]));
+    expect(summary.buildCapacity.buildRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sku: "LAMBENTI_PACKAGE", buildableUnits: 0, isPackageTarget: true }),
+      expect.objectContaining({ sku: `${TEST_PREFIX}-UNBUILT-MAIN`, buildableUnits: 26, isPackageTarget: false })
+    ]));
+  });
+
   it("targets the Lambenti package BOM and sums BOM line quantities for the build capability card", async () => {
     const location = await prisma.storageLocation.create({
       data: { code: `${TEST_PREFIX}-BUILD-LOC`, name: "Dashboard build fixture" }
@@ -283,6 +350,9 @@ describe("dashboard stock quantities", () => {
       expect.objectContaining({ sku: `${TEST_PREFIX}-COMP-A`, requiredPerBuild: 2, available: 20, capacity: 10 }),
       expect.objectContaining({ sku: `${TEST_PREFIX}-COMP-B`, requiredPerBuild: 5, available: 30, capacity: 6 })
     ]));
+    expect(summary.buildCapacity.buildRows).toEqual([
+      expect.objectContaining({ sku: "LAMBENTI_PACKAGE", buildableUnits: 6, isPackageTarget: true })
+    ]);
   });
 
   it("does not show email import catalog-matching notices on the dashboard", async () => {

@@ -31,9 +31,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ refreshed: tracking.refreshStatus === "SUCCESS" ? 1 : 0, failed: tracking.refreshStatus === "FAILED" ? 1 : 0, tracking, heartbeat });
   }
 
-  const result = body.dueOnly === false
-    ? await refreshActiveTrackingNumbers({ actorId, limit: body.limit ?? 100 })
-    : await refreshDueTrackingNumbers({ actorId, limit: body.limit ?? 25 });
+  const result = body.dueOnly === true
+    ? await refreshDueTrackingNumbers({ actorId, limit: body.limit ?? 25 })
+    : await refreshActiveTrackingNumbers({ actorId, limit: body.limit ?? 100 });
   const heartbeat = await getTrackingRefreshHeartbeat();
   return NextResponse.json({ ...result, heartbeat }, { status: result.failed > 0 && result.refreshed === 0 ? 207 : 200 });
 }

@@ -9,8 +9,9 @@ import { prisma } from "@/lib/prisma";
 import type { ShortageSummary, StockSummary } from "@/types/inventory";
 import type { Prisma } from "@prisma/client";
 
-const LAMBENTI_ASSEMBLED_PACKAGE_SKU = "LAMBENTI_PACKAGE";
-const LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS = [/lambenti\s+assembled\s+package/i, /complete\s+package\s+assembly/i];
+const PHASE_ONE_LAUNCH_PACKAGE_SKU = "LAMBENTI_PACKAGE";
+const PHASE_ONE_LAUNCH_PACKAGE_DESCRIPTION = "Complete Package Assembly";
+const PHASE_ONE_LAUNCH_PACKAGE_DISPLAY_NAME = `${PHASE_ONE_LAUNCH_PACKAGE_SKU} — ${PHASE_ONE_LAUNCH_PACKAGE_DESCRIPTION}`;
 
 export async function getDashboardSummary() {
   const stock = await getStockSummaries();
@@ -69,12 +70,12 @@ export async function getDashboardSummary() {
   const componentsOnHand = stock
     .filter((item) => itemCategoryById.get(item.itemId) !== "FINISHED_GOOD")
     .reduce((total, item) => total + item.onHand, 0);
-  const assembledPackageItem = findLambentiAssembledPackageItem(activeItems);
+  const assembledPackageItem = findPhaseOneLaunchPackageItem(activeItems);
   const assembledPackages = assembledPackageItem ? stockByItemId.get(assembledPackageItem.id)?.onHand ?? 0 : 0;
   const packageBoms = assembledPackageItem
     ? activeFinishedBoms.filter((bom) => bom.parentItem.id === assembledPackageItem.id)
-    : activeFinishedBoms.filter((bom) => isLambentiAssembledPackageItem(bom.parentItem));
-  const buildCapacity = summarizeBuildCapacity(packageBoms, stockByItemId);
+    : activeFinishedBoms.filter((bom) => isPhaseOneLaunchPackageItem(bom.parentItem));
+  const buildCapacity = summarizeBuildCapacity(packageBoms, stockByItemId, activeFinishedBoms);
 
   const pricedItemInputs = await getActivePricedItemValuationInputs();
   const itemValuations = calculatePricedItemValuations(pricedItemInputs);
@@ -196,7 +197,7 @@ export async function getDashboardSummary() {
   };
 }
 
-export type LaunchReadinessStatus = "BLOCKED" | "IN_PROGRESS" | "COVERED";
+export type LaunchReadinessStatus = "BLOCKED" | "IN_PROGRESS" | "BUILD_READY" | "COVERED";
 
 type LaunchReadinessInput = {
   assembledPackages: number;
@@ -219,19 +220,25 @@ const PHASE_ONE_TARGET_UNITS = 25;
 const READ_ONLY_LAUNCH_BOUNDARY = "Requires explicit human action; no stock, purchasing, or accounting mutation is performed here.";
 
 export function summarizeLaunchReadiness(input: LaunchReadinessInput) {
-  const readyNow = input.assembledPackages + input.buildCapacityNow;
-  const remainingToTarget = Math.max(PHASE_ONE_TARGET_UNITS - readyNow, 0);
-  const status: LaunchReadinessStatus = remainingToTarget === 0
+  const readyNow = input.assembledPackages;
+  const remainingBuildGap = Math.max(PHASE_ONE_TARGET_UNITS - readyNow, 0);
+  const buildableTowardTarget = Math.min(input.buildCapacityNow, remainingBuildGap);
+  const materialCoverageNow = readyNow + input.buildCapacityNow;
+  const materialCoveredTowardTarget = Math.min(PHASE_ONE_TARGET_UNITS, readyNow + buildableTowardTarget);
+  const remainingMaterialGap = Math.max(PHASE_ONE_TARGET_UNITS - materialCoverageNow, 0);
+  const status: LaunchReadinessStatus = remainingBuildGap === 0
     ? "COVERED"
-    : input.buildCapacityNow <= 0
-      ? "BLOCKED"
-      : "IN_PROGRESS";
+    : remainingMaterialGap === 0
+      ? "BUILD_READY"
+      : input.buildCapacityNow <= 0
+        ? "BLOCKED"
+        : "IN_PROGRESS";
   const nextActions: LaunchReadinessAction[] = [];
 
   if (status === "COVERED") {
     nextActions.push({
-      label: "Prepare Phase I build/ship routine",
-      reason: `${readyNow} unit(s) are assembled or buildable against the 25-unit Phase I target. Prepare QA, packaging, and shipping workflow before committing stock.`,
+      label: "Prepare Phase I QA/ship routine",
+      reason: `${readyNow} assembled package unit(s) are ledger-built against the 25-unit Phase I target. Prepare QA, packaging, and shipping workflow before committing stock.`,
       href: "/inventory/movements",
       mutationBoundary: READ_ONLY_LAUNCH_BOUNDARY
     });
@@ -239,7 +246,7 @@ export function summarizeLaunchReadiness(input: LaunchReadinessInput) {
     if (input.buildCapacityNow > 0) {
       nextActions.push({
         label: "Plan the next package build batch",
-        reason: `${input.buildCapacityNow} unit(s) are buildable now; ${remainingToTarget} still needed for the 25-unit Phase I target.`,
+        reason: `${input.buildCapacityNow} package unit(s) are buildable now; ${remainingBuildGap} still need explicit BUILD movements before Phase I is ready.`,
         href: "/inventory/movements",
         mutationBoundary: READ_ONLY_LAUNCH_BOUNDARY
       });
@@ -274,11 +281,19 @@ export function summarizeLaunchReadiness(input: LaunchReadinessInput) {
   }
 
   return {
+    packageSku: PHASE_ONE_LAUNCH_PACKAGE_SKU,
+    packageDescription: PHASE_ONE_LAUNCH_PACKAGE_DESCRIPTION,
+    packageDisplayName: PHASE_ONE_LAUNCH_PACKAGE_DISPLAY_NAME,
     targetPackages: PHASE_ONE_TARGET_UNITS,
     assembledPackages: input.assembledPackages,
     buildCapacityNow: input.buildCapacityNow,
+    buildableTowardTarget,
+    materialCoverageNow,
+    materialCoveredTowardTarget,
     readyNow,
-    remainingToTarget,
+    remainingToTarget: remainingMaterialGap,
+    remainingBuildGap,
+    remainingMaterialGap,
     bottleneckSku: input.bottleneckSku,
     status,
     nextActions
@@ -289,17 +304,34 @@ export type DashboardGraphInput = {
   launchReadiness: ReturnType<typeof summarizeLaunchReadiness>;
   buildCapacity: {
     bottleneckSku: string;
+    buildRows?: Array<{
+      sku: string;
+      description: string;
+      buildableUnits: number;
+      availableBuiltUnits: number;
+      isPackageTarget?: boolean;
+      isBottleneck?: boolean;
+    }>;
     componentCapacities: Array<{
       sku: string;
       description: string;
       requiredPerBuild: number;
       available: number;
+      buildableSubassemblyCapacity?: number;
+      effectiveAvailable?: number;
+      isLeafConstraint?: boolean;
       capacity: number;
     }>;
+    materialComponentsRequired?: number;
+    materialComponentsInStock?: number;
+    materialComponentsMissing?: number;
+    materialCoveragePercent?: number;
+    missingMaterialSkus?: string[];
   };
   lowStockItems: Array<{
     sku: string;
     description: string;
+    category?: string | null;
     available: number;
     reorderPoint: number;
     targetStock: number;
@@ -325,7 +357,11 @@ export type DashboardGraphInput = {
 export function summarizeDashboardGraphs(input: DashboardGraphInput) {
   const launchProgress = {
     readyPercent: boundedPercent(input.launchReadiness.readyNow, input.launchReadiness.targetPackages),
-    gapPercent: boundedPercent(input.launchReadiness.remainingToTarget, input.launchReadiness.targetPackages)
+    materialPercent: input.buildCapacity.materialCoveragePercent ?? boundedPercent(input.launchReadiness.materialCoveredTowardTarget, input.launchReadiness.targetPackages),
+    materialComponentsInStock: input.buildCapacity.materialComponentsInStock ?? 0,
+    materialComponentsRequired: input.buildCapacity.materialComponentsRequired ?? 0,
+    materialComponentsMissing: input.buildCapacity.materialComponentsMissing ?? 0,
+    gapPercent: boundedPercent(input.launchReadiness.remainingMaterialGap, input.launchReadiness.targetPackages)
   };
   const launchCoverageSegments = summarizeLaunchCoverageSegments(input.launchReadiness);
 
@@ -339,7 +375,18 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
       isBottleneck: component.sku === input.buildCapacity.bottleneckSku || component.capacity === 0
     }));
 
+  const buildCapacityMax = Math.max(0, ...(input.buildCapacity.buildRows ?? []).map((build) => build.buildableUnits));
+  const buildCapacityBars = [...(input.buildCapacity.buildRows ?? [])]
+    .sort((left, right) => Number(Boolean(right.isPackageTarget)) - Number(Boolean(left.isPackageTarget)) || Number(Boolean(right.isBottleneck)) - Number(Boolean(left.isBottleneck)) || left.buildableUnits - right.buildableUnits || left.sku.localeCompare(right.sku))
+    .slice(0, 8)
+    .map((build) => ({
+      ...build,
+      percentOfMax: boundedPercent(build.buildableUnits, buildCapacityMax),
+      isBottleneck: Boolean(build.isBottleneck)
+    }));
+
   const stockPressureBars = input.lowStockItems
+    .filter((item) => item.category !== "FINISHED_GOOD")
     .map((item) => {
       const coveragePercent = item.reorderPoint > 0 ? boundedPercent(item.available, item.reorderPoint) : 100;
       return {
@@ -397,6 +444,7 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
     launchProgress,
     launchCoverageSegments,
     componentCapacityBars,
+    buildCapacityBars,
     stockPressureBars,
     leadTimeBars,
     operationsFlow,
@@ -407,12 +455,15 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
 function summarizeLaunchCoverageSegments(readiness: ReturnType<typeof summarizeLaunchReadiness>) {
   const target = Math.max(0, readiness.targetPackages);
   const assembledUnits = Math.min(readiness.assembledPackages, target);
-  const buildableUnits = Math.min(readiness.buildCapacityNow, Math.max(target - assembledUnits, 0));
-  const gapUnits = Math.max(target - assembledUnits - buildableUnits, 0);
+  const buildableUnits = readiness.buildableTowardTarget;
+  const bufferUnits = Math.max(readiness.materialCoverageNow - target, 0);
+  const gapUnits = readiness.remainingMaterialGap;
   return [
-    { label: "Assembled", units: assembledUnits + buildableUnits, percent: boundedPercent(assembledUnits + buildableUnits, target), tone: "emerald" },
-    { label: "Remaining gap", units: gapUnits, percent: boundedPercent(gapUnits, target), tone: "slate" }
-  ];
+    { label: "Built", units: assembledUnits, percent: boundedPercent(assembledUnits, target), tone: "emerald" },
+    { label: "Buildable", units: buildableUnits, percent: boundedPercent(buildableUnits, target), tone: "cyan" },
+    { label: "Buffer beyond target", units: bufferUnits, percent: 0, tone: "sky" },
+    { label: "Material gap", units: gapUnits, percent: boundedPercent(gapUnits, target), tone: "slate" }
+  ].filter((segment) => segment.units > 0 || segment.label !== "Buffer beyond target");
 }
 
 function summarizeInventoryValueByCategory(rows: PricedItemValuationRow[], categoryByItemId: Map<string, string>) {
@@ -473,15 +524,49 @@ type ActiveFinishedBom = {
   }>;
 };
 
-function findLambentiAssembledPackageItem(items: DashboardItemOption[]) {
-  return items.find((item) => item.sku === LAMBENTI_ASSEMBLED_PACKAGE_SKU)
-    ?? items.find(isLambentiAssembledPackageItem);
+type BuildCapacityComponent = {
+  itemId: string;
+  sku: string;
+  description: string;
+  requiredPerBuild: number;
+  available: number;
+  buildableSubassemblyCapacity: number;
+  effectiveAvailable: number;
+  isLeafConstraint?: boolean;
+  capacity: number;
+};
+
+type BuildCapacityBuild = {
+  sku: string;
+  description: string;
+  buildableUnits: number;
+  availableBuiltUnits: number;
+  isPackageTarget: boolean;
+  isBottleneck: boolean;
+};
+
+type BuildCapacitySummary = {
+  finishedSku: string;
+  finishedDescription: string;
+  bomVersion: string;
+  componentsRequiredPerBuild: number;
+  finishedBuildCapacity: number;
+  bottleneckSku: string;
+  componentCapacities: BuildCapacityComponent[];
+  buildRows: BuildCapacityBuild[];
+  materialComponentsRequired: number;
+  materialComponentsInStock: number;
+  materialComponentsMissing: number;
+  materialCoveragePercent: number;
+  missingMaterialSkus: string[];
+};
+
+function findPhaseOneLaunchPackageItem(items: DashboardItemOption[]) {
+  return items.find(isPhaseOneLaunchPackageItem);
 }
 
-function isLambentiAssembledPackageItem(item: Pick<DashboardItemOption, "sku" | "description" | "category">) {
-  return item.category === "FINISHED_GOOD"
-    && (item.sku === LAMBENTI_ASSEMBLED_PACKAGE_SKU
-      || LAMBENTI_ASSEMBLED_PACKAGE_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(item.description)));
+function isPhaseOneLaunchPackageItem(item: Pick<DashboardItemOption, "sku" | "category">) {
+  return item.category === "FINISHED_GOOD" && item.sku === PHASE_ONE_LAUNCH_PACKAGE_SKU;
 }
 
 function partitionLowStockByFinishedGoodNeed(
@@ -531,47 +616,282 @@ function partitionLowStockByFinishedGoodNeed(
   return { currentlyNeeded, notCurrentlyNeeded };
 }
 
-function summarizeBuildCapacity(activeFinishedBoms: ActiveFinishedBom[], stockByItemId: Map<string, DashboardStockEntry>) {
-  const candidates = activeFinishedBoms.map((bom) => {
-    const componentCapacities = bom.lines.map((line) => {
-      const available = stockByItemId.get(line.componentItemId)?.available ?? 0;
-      const requiredPerBuild = Number(line.quantity);
-      return {
-        sku: line.componentItem.sku,
-        description: line.componentItem.description,
-        requiredPerBuild,
-        available,
-        capacity: requiredPerBuild > 0 ? Math.floor(available / requiredPerBuild) : 0
-      };
-    });
-    const bottleneck = componentCapacities.reduce<typeof componentCapacities[number] | undefined>((lowest, current) => {
-      if (!lowest || current.capacity < lowest.capacity) return current;
-      return lowest;
-    }, undefined);
-    const componentsRequiredPerBuild = componentCapacities.reduce((total, component) => total + component.requiredPerBuild, 0);
+export function summarizeBuildCapacity(
+  activeFinishedBoms: ActiveFinishedBom[],
+  stockByItemId: Map<string, DashboardStockEntry>,
+  allActiveFinishedBoms: ActiveFinishedBom[] = activeFinishedBoms
+) {
+  const bomsByParentItemId = new Map<string, ActiveFinishedBom[]>();
+  const itemDetailsById = new Map<string, { sku: string; description: string }>();
+  for (const bom of allActiveFinishedBoms) {
+    const boms = bomsByParentItemId.get(bom.parentItem.id) ?? [];
+    boms.push(bom);
+    bomsByParentItemId.set(bom.parentItem.id, boms);
+    itemDetailsById.set(bom.parentItem.id, { sku: bom.parentItem.sku, description: bom.parentItem.description });
+    for (const line of bom.lines) {
+      itemDetailsById.set(line.componentItemId, { sku: line.componentItem.sku, description: line.componentItem.description });
+    }
+  }
 
-    return {
-      finishedSku: bom.parentItem.sku,
-      finishedDescription: bom.parentItem.description,
-      bomVersion: bom.version,
-      componentsRequiredPerBuild,
-      finishedBuildCapacity: bottleneck?.capacity ?? 0,
-      bottleneckSku: bottleneck?.sku ?? "",
-      componentCapacities
-    };
-  });
-
-  return candidates.reduce((best, current) => {
-    if (!best.finishedSku || current.finishedBuildCapacity > best.finishedBuildCapacity) return current;
-    return best;
-  }, {
+  const emptySummary: BuildCapacitySummary = {
     finishedSku: "",
     finishedDescription: "",
     bomVersion: "",
     componentsRequiredPerBuild: 0,
     finishedBuildCapacity: 0,
     bottleneckSku: "",
-    componentCapacities: [] as Array<{ sku: string; description: string; requiredPerBuild: number; available: number; capacity: number }>
+    componentCapacities: [],
+    buildRows: [],
+    materialComponentsRequired: 0,
+    materialComponentsInStock: 0,
+    materialComponentsMissing: 0,
+    materialCoveragePercent: 0,
+    missingMaterialSkus: []
+  };
+
+  function summarizeBom(bom: ActiveFinishedBom, visitedParentIds: Set<string>): BuildCapacitySummary {
+    const componentRequirements = new Map<string, BuildCapacityComponent>();
+
+    for (const line of bom.lines) {
+      const requiredPerBuild = Number(line.quantity);
+      const existing = componentRequirements.get(line.componentItemId);
+      if (existing) {
+        existing.requiredPerBuild += requiredPerBuild;
+        continue;
+      }
+
+      const available = stockByItemId.get(line.componentItemId)?.available ?? 0;
+      const buildableSubassemblyCapacity = summarizeNestedBuildCapacity(line.componentItemId, visitedParentIds);
+      const effectiveAvailable = available + buildableSubassemblyCapacity;
+      componentRequirements.set(line.componentItemId, {
+        itemId: line.componentItemId,
+        sku: line.componentItem.sku,
+        description: line.componentItem.description,
+        requiredPerBuild,
+        available,
+        buildableSubassemblyCapacity,
+        effectiveAvailable,
+        capacity: 0
+      });
+    }
+
+    const componentCapacities = [...componentRequirements.values()].map((component) => ({
+      ...component,
+      capacity: component.requiredPerBuild > 0 ? Math.floor(component.available / component.requiredPerBuild) : 0
+    }));
+    const finishedBuildCapacity = calculateBuildableUnitsForBom(bom);
+    const failedBottleneckId = findFirstFailedRequirement(bom, finishedBuildCapacity + 1);
+    const directBottleneck = componentCapacities.reduce<typeof componentCapacities[number] | undefined>((lowest, current) => {
+      if (!lowest || current.capacity < lowest.capacity) return current;
+      return lowest;
+    }, undefined);
+    const failedBottleneckDetails = failedBottleneckId ? itemDetailsById.get(failedBottleneckId) : undefined;
+    const bottleneckSku = failedBottleneckDetails?.sku ?? directBottleneck?.sku ?? "";
+    const componentsRequiredPerBuild = componentCapacities.reduce((total, component) => total + component.requiredPerBuild, 0);
+    const materialCoverage = summarizeMaterialComponentCoverage(bom);
+
+    return {
+      finishedSku: bom.parentItem.sku,
+      finishedDescription: bom.parentItem.description,
+      bomVersion: bom.version,
+      componentsRequiredPerBuild,
+      finishedBuildCapacity,
+      bottleneckSku,
+      componentCapacities,
+      buildRows: [],
+      ...materialCoverage
+    };
+  }
+
+  function summarizeMaterialComponentCoverage(bom: ActiveFinishedBom) {
+    const requirements = new Map<string, { itemId: string; sku: string; requiredQuantity: number; available: number }>();
+    for (const line of bom.lines) {
+      collectLeafMaterialRequirement(
+        line.componentItemId,
+        Number(line.quantity),
+        requirements,
+        new Set([bom.parentItem.id])
+      );
+    }
+
+    const componentRequirements = [...requirements.values()].filter((requirement) => requirement.requiredQuantity > 0);
+    const stockedComponents = componentRequirements.filter((requirement) => requirement.available >= requirement.requiredQuantity);
+    const missingMaterialSkus = componentRequirements
+      .filter((requirement) => requirement.available < requirement.requiredQuantity)
+      .map((requirement) => requirement.sku)
+      .sort((left, right) => left.localeCompare(right));
+
+    return {
+      materialComponentsRequired: componentRequirements.length,
+      materialComponentsInStock: stockedComponents.length,
+      materialComponentsMissing: missingMaterialSkus.length,
+      materialCoveragePercent: boundedPercent(stockedComponents.length, componentRequirements.length),
+      missingMaterialSkus
+    };
+  }
+
+  function collectLeafMaterialRequirement(
+    itemId: string,
+    requiredQuantity: number,
+    requirements: Map<string, { itemId: string; sku: string; requiredQuantity: number; available: number }>,
+    visitedParentIds: Set<string>
+  ) {
+    const nestedBom = (bomsByParentItemId.get(itemId) ?? [])[0];
+    if (nestedBom && !visitedParentIds.has(itemId)) {
+      const nextVisited = new Set(visitedParentIds);
+      nextVisited.add(itemId);
+      for (const line of nestedBom.lines) {
+        collectLeafMaterialRequirement(
+          line.componentItemId,
+          requiredQuantity * Number(line.quantity),
+          requirements,
+          nextVisited
+        );
+      }
+      return;
+    }
+
+    const itemDetails = itemDetailsById.get(itemId);
+    const existing = requirements.get(itemId);
+    const available = stockByItemId.get(itemId)?.available ?? 0;
+    requirements.set(itemId, {
+      itemId,
+      sku: itemDetails?.sku ?? itemId,
+      requiredQuantity: roundQuantity((existing?.requiredQuantity ?? 0) + requiredQuantity),
+      available
+    });
+  }
+
+  function summarizeNestedBuildCapacity(itemId: string, visitedParentIds: Set<string>) {
+    if (visitedParentIds.has(itemId)) return 0;
+    const nestedBoms = bomsByParentItemId.get(itemId) ?? [];
+    if (nestedBoms.length === 0) return 0;
+
+    const nextVisited = new Set(visitedParentIds);
+    nextVisited.add(itemId);
+    return Math.max(0, ...nestedBoms.map((bom) => summarizeBom(bom, nextVisited).finishedBuildCapacity));
+  }
+
+  function calculateBuildableUnitsForBom(bom: ActiveFinishedBom) {
+    const simpleUpperBound = Math.max(
+      0,
+      ...bom.lines.map((line) => {
+        const requiredPerBuild = Number(line.quantity);
+        if (requiredPerBuild <= 0) return 0;
+        const available = stockByItemId.get(line.componentItemId)?.available ?? 0;
+        return Math.floor(available / requiredPerBuild);
+      })
+    );
+    let low = 0;
+    let high = Math.max(simpleUpperBound, 0);
+    while (low < high) {
+      const midpoint = Math.ceil((low + high + 1) / 2);
+      if (canBuildBomUnits(bom, midpoint)) {
+        low = midpoint;
+      } else {
+        high = midpoint - 1;
+      }
+    }
+    return low;
+  }
+
+  function findFirstFailedRequirement(bom: ActiveFinishedBom, units: number) {
+    const stock = cloneStockByItemId(stockByItemId);
+    const result = consumeBomRequirements(bom, units, stock);
+    return result.ok === false ? result.bottleneckItemId : undefined;
+  }
+
+  function canBuildBomUnits(bom: ActiveFinishedBom, units: number) {
+    const stock = cloneStockByItemId(stockByItemId);
+    return consumeBomRequirements(bom, units, stock).ok;
+  }
+
+  function consumeBomRequirements(
+    bom: ActiveFinishedBom,
+    units: number,
+    stock: Map<string, number>
+  ): { ok: true } | { ok: false; bottleneckItemId: string } {
+    for (const line of bom.lines) {
+      const result = consumeItemRequirement(
+        line.componentItemId,
+        units * Number(line.quantity),
+        stock
+      );
+      if (!result.ok) return result;
+    }
+    return { ok: true };
+  }
+
+  function consumeItemRequirement(
+    itemId: string,
+    quantity: number,
+    stock: Map<string, number>
+  ): { ok: true } | { ok: false; bottleneckItemId: string } {
+    if (quantity <= 0) return { ok: true };
+    const available = stock.get(itemId) ?? 0;
+    const consumed = Math.min(available, quantity);
+    stock.set(itemId, roundQuantity(available - consumed));
+    const remaining = roundQuantity(quantity - consumed);
+    if (remaining <= 0) return { ok: true };
+    return { ok: false, bottleneckItemId: itemId };
+  }
+
+  function cloneStockByItemId(entries: Map<string, DashboardStockEntry>) {
+    return new Map([...entries.entries()].map(([itemId, entry]) => [itemId, entry.available]));
+  }
+
+
+  function collectReachableBuildBoms(rootBoms: ActiveFinishedBom[]) {
+    const reachable: ActiveFinishedBom[] = [];
+    const seen = new Set<string>();
+
+    function visit(bom: ActiveFinishedBom) {
+      const key = `${bom.parentItem.id}:${bom.version}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      reachable.push(bom);
+
+      for (const line of bom.lines) {
+        for (const nestedBom of bomsByParentItemId.get(line.componentItemId) ?? []) {
+          visit(nestedBom);
+        }
+      }
+    }
+
+    for (const bom of rootBoms) visit(bom);
+    return reachable;
+  }
+
+  const candidates = activeFinishedBoms.map((bom) => ({
+    bom,
+    summary: summarizeBom(bom, new Set([bom.parentItem.id]))
+  }));
+  const selected = candidates[0];
+  const summary = selected?.summary ?? emptySummary;
+  if (!selected || !summary.finishedSku) return summary;
+
+  const reachableBuildBoms = collectReachableBuildBoms([selected.bom]);
+  const buildRows = reachableBuildBoms.map((bom) => {
+    const buildSummary = summarizeBom(bom, new Set([bom.parentItem.id]));
+    const availableBuiltUnits = stockByItemId.get(bom.parentItem.id)?.available ?? 0;
+    const isPackageTarget = bom.parentItem.sku === summary.finishedSku;
+    return {
+      sku: bom.parentItem.sku,
+      description: bom.parentItem.description,
+      buildableUnits: buildSummary.finishedBuildCapacity,
+      availableBuiltUnits,
+      isPackageTarget,
+      isBottleneck: !isPackageTarget && availableBuiltUnits + buildSummary.finishedBuildCapacity <= summary.finishedBuildCapacity
+    } satisfies BuildCapacityBuild;
   });
+
+  return {
+    ...summary,
+    buildRows
+  };
+}
+
+function roundQuantity(value: number) {
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 

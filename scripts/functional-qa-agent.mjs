@@ -58,9 +58,7 @@ const pageRoutes = [
   ["/integrations/alibaba-email", "Order Email Agent"],
   ["/automation", "Manual Safe Automation"],
   ["/tracking", "Tracking Workbench"],
-  ["/atlas", "Mission Control"],
-  ["/atlas/overlay", "Daily Mission Ring"],
-  ["/atlas/simulator", "Predictive Simulator"],
+
   ["/accounting", "Accounting Workbench"],
   ["/accounting/accounts", "GL Account Mapping"],
   ["/accounting/customer-invoices", "Customer Invoices / AR"],
@@ -72,7 +70,7 @@ const pageRoutes = [
 ];
 
 const apiRoutes = [
-  ["/api/atlas/mission-control", 200, "object"],
+
   ["/api/agent/stock", 200, "array"],
   ["/api/agent/shortages", 200, "array"],
   ["/api/agent/boms", 200, "array"],

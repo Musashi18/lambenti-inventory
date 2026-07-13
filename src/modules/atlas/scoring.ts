@@ -5,6 +5,9 @@ import type {
   AtlasEvidence,
   AtlasEvidenceCoverage,
   AtlasMissionControl,
+  AtlasGoalMilestone,
+  AtlasGoalPosition,
+  AtlasPhaseOneReadinessInput,
   AtlasMomentumSummary,
   AtlasNode,
   AtlasNodeScore,
@@ -21,15 +24,16 @@ export function buildAtlasMissionControl(input: {
   nodes: AtlasNode[];
   evidence: AtlasEvidence[];
   activityEvents?: AtlasActivityEvent[];
+  phaseOneReadiness?: AtlasPhaseOneReadinessInput;
   now?: Date;
 }): AtlasMissionControl {
   const now = input.now ?? new Date();
   const nodeScores = scoreAtlasNodes(input.nodes, input.evidence, input.activityEvents ?? [], now);
   const dependencies = input.nodes.flatMap((node) => node.dependencies.map((dependency) => ({ from: dependency, to: node.id })));
-  const missionCompletionPct = weightedAverage(nodeScores, (node) => node.completionPct, (node) => node.weight);
   const phaseOneNodes = nodeScores.filter((node) => node.horizon === "PHASE_1");
-  const companyCompletionPct = Math.round(missionCompletionPct * 0.7 + weightedAverage(nodeScores, (node) => node.confidencePct, (node) => node.weight) * 0.3);
-  const phaseOneCompletion = weightedAverage(phaseOneNodes, (node) => node.completionPct, (node) => node.weight);
+  const missionCompletionPct = weightedAverage(phaseOneNodes, (node) => node.completionPct, (node) => node.weight);
+  const companyCompletionPct = weightedAverage(nodeScores, (node) => node.completionPct, (node) => node.weight);
+  const phaseOneCompletion = missionCompletionPct;
   const confidence = evidenceConfidence(input.evidence, nodeScores, now);
   const averageRisk = weightedAverage(nodeScores, (node) => node.effectiveRiskScore, (node) => node.weight);
   const riskPenalty = Math.round(averageRisk * 0.22);
@@ -39,9 +43,10 @@ export function buildAtlasMissionControl(input: {
   const largestRisk = rankRisks(nodeScores)[0] ?? null;
   const highestLeverageTask = rankOpportunities(nodeScores)[0] ?? null;
   const remainingHours = estimateRemainingHours(phaseOneNodes);
-  const weeklyVelocity = estimateWeeklyVelocity(input.activityEvents ?? [], remainingHours);
+  const weeklyVelocity = estimateWeeklyVelocity(input.activityEvents ?? [], remainingHours, now);
   const projectedLaunchDate = projectLaunchDate({ now, remainingHours, weeklyHours: weeklyVelocity.currentHours, confidencePct: weeklyVelocity.confidencePct });
   const coverage = summarizeEvidenceCoverage(input.nodes, input.evidence, confidence, now);
+  const goalPosition = input.phaseOneReadiness ? buildGoalPosition(input.phaseOneReadiness, nodeScores) : null;
 
   return {
     missionCompletionPct,
@@ -63,6 +68,7 @@ export function buildAtlasMissionControl(input: {
     momentum: summarizeMomentum(input.activityEvents ?? [], now),
     graph: { nodes: nodeScores, dependencies },
     evidenceCoverage: coverage,
+    goalPosition,
     realityStatement: buildRealityStatement({ coverage, highestLeverageTask, largestRisk, activityEvents: input.activityEvents ?? [] }),
     counterfactuals: buildCounterfactuals({ remainingHours, weeklyVelocity, highestLeverageTask, launchProbability: interval(launchP50, intervalWidth, confidence) }),
     generatedAt: now.toISOString()
@@ -76,16 +82,36 @@ export function scoreAtlasNodes(nodes: AtlasNode[], evidence: AtlasEvidence[], a
   return nodes.map((node) => {
     const nodeEvidence = evidenceByNode.get(node.id) ?? [];
     const activityProgress = Math.max(0, ...((validatedActivityByNode.get(node.id) ?? []).map((event) => event.progressContributionPct ?? 0)));
-    const evidenceCompletion = Math.max(0, ...nodeEvidence.map((item) => item.validatedProgress === false ? 0 : item.completionPct ?? 0));
-    const completionPct = clamp(Math.round(Math.max(node.baselineCompletionPct, evidenceCompletion, node.baselineCompletionPct + activityProgress)), 0, 100);
+    const currentCompletionEvidence = nodeEvidence.filter((item) =>
+      item.validatedProgress !== false &&
+      Number.isFinite(item.completionPct) &&
+      !isStaleEvidence(item, now)
+    );
+    const staleCompletionEvidence = nodeEvidence.filter((item) =>
+      item.validatedProgress !== false &&
+      Number.isFinite(item.completionPct) &&
+      isStaleEvidence(item, now)
+    );
+    const evidenceCompletion = currentCompletionEvidence.length > 0
+      ? weightedAverage(currentCompletionEvidence, (item) => item.completionPct ?? 0, (item) => item.confidencePct)
+      : null;
+    // Time can only augment a separately validated progress contribution. It never turns a planning baseline into proof.
+    const completionPct = evidenceCompletion == null
+      ? 0
+      : clamp(Math.round(Math.max(evidenceCompletion, evidenceCompletion + activityProgress)), 0, 100);
     const staleCount = nodeEvidence.filter((item) => isStaleEvidence(item, now)).length;
     const stalePenalty = Math.min(35, staleCount * 8);
     const evidenceConfidence = nodeEvidence.length > 0 ? Math.max(15, average(nodeEvidence.map((item) => item.confidencePct)) - stalePenalty) : 30;
     const activityConfidence = average((validatedActivityByNode.get(node.id) ?? []).map((event) => event.confidencePct));
-    const confidencePct = clamp(Math.round(Math.max(node.status === "NOT_STARTED" ? 20 : 35, evidenceConfidence, activityConfidence || 0)), 0, 100);
+    const measurementStatus = evidenceCompletion != null ? "MEASURED" : staleCompletionEvidence.length > 0 ? "STALE" : "UNMEASURED";
+    const confidencePct = measurementStatus === "MEASURED"
+      ? clamp(Math.round(Math.max(evidenceConfidence, activityConfidence || 0)), 0, 100)
+      : measurementStatus === "STALE"
+        ? clamp(Math.round(Math.min(35, evidenceConfidence)), 0, 100)
+        : 0;
     const riskEvidence = Math.max(0, ...nodeEvidence.map((item) => item.riskScore ?? 0));
     const completionRiskRelief = Math.round(completionPct * 0.35);
-    const effectiveRiskScore = clamp(Math.round(Math.max(node.riskScore, riskEvidence) + stalePenalty - completionRiskRelief), 0, 100);
+    const effectiveRiskScore = clamp(Math.round(Math.max(node.riskScore || evidenceConfidence, riskEvidence) + stalePenalty - completionRiskRelief), 0, 100);
     const blockers = nodeEvidence
       .filter((item) => (item.riskScore ?? 0) >= 55 || (item.impactScore ?? 0) >= 70)
       .sort((left, right) => (right.riskScore ?? 0) - (left.riskScore ?? 0));
@@ -93,6 +119,9 @@ export function scoreAtlasNodes(nodes: AtlasNode[], evidence: AtlasEvidence[], a
     return {
       ...node,
       completionPct,
+      evidenceCompletionPct: evidenceCompletion == null ? null : clamp(Math.round(evidenceCompletion), 0, 100),
+      planningBaselineCompletionPct: node.baselineCompletionPct,
+      measurementStatus,
       confidencePct,
       effectiveRiskScore,
       evidence: nodeEvidence,
@@ -152,6 +181,48 @@ export function rankOpportunities(nodes: AtlasNodeScore[]): AtlasOpportunity[] {
   });
 }
 
+function buildGoalPosition(readiness: AtlasPhaseOneReadinessInput, nodeScores: AtlasNodeScore[]): AtlasGoalPosition {
+  const milestoneIds = ["phase1.first-batch", "phase1.production-unit", "phase1.customer-order", "phase2.first-50-sales"];
+  const milestones = milestoneIds
+    .map((nodeId) => nodeScores.find((node) => node.id === nodeId))
+    .filter((node): node is AtlasNodeScore => Boolean(node))
+    .map((node): AtlasGoalMilestone => ({
+      id: node.id,
+      title: node.title,
+      horizon: node.horizon,
+      href: node.href,
+      measurementStatus: node.measurementStatus,
+      completionPct: node.completionPct,
+      confidencePct: node.confidencePct,
+      effectiveRiskScore: node.effectiveRiskScore,
+      summary: goalMilestoneSummary(node)
+    }));
+
+  const materialState = readiness.remainingMaterialGap > 0
+    ? `${readiness.remainingMaterialGap} package input unit(s) still missing`
+    : "Package inputs cover the full target";
+  const buildState = readiness.buildableTowardTarget > 0
+    ? `${readiness.buildableTowardTarget} more package build action(s) are possible from already-built direct inputs`
+    : "No additional package build action is currently possible from direct inputs";
+
+  return {
+    title: "Phase I Launch Position",
+    physicalTarget: readiness,
+    milestones,
+    summary: `${readiness.assembledPackages}/${readiness.targetPackages} ${readiness.packageSku} unit(s) are ledger-built. ${buildState}; ${materialState}. ${readiness.bottleneckSku ? `Current physical constraint: ${readiness.bottleneckSku}.` : "No physical bottleneck is currently named."}`
+  };
+}
+
+function goalMilestoneSummary(node: AtlasNodeScore) {
+  if (node.measurementStatus === "MEASURED") {
+    return `${node.completionPct}% evidence-measured · ${node.effectiveRiskScore}% residual risk · ${node.confidencePct}% confidence.`;
+  }
+  if (node.measurementStatus === "STALE") {
+    return `Measurement is stale; Atlas will not treat the old signal as current progress. ${node.effectiveRiskScore}% residual risk.`;
+  }
+  return `No current completion measurement. The ${node.planningBaselineCompletionPct}% planning baseline remains context only, not progress proof.`;
+}
+
 function summarizeRadar(nodes: AtlasNodeScore[]): AtlasRadarSector[] {
   const areas: AtlasArea[] = ["Engineering", "Manufacturing", "Brand", "Operations", "Customer Validation", "Finance", "Execution"];
   return areas.map((area) => {
@@ -181,19 +252,29 @@ function summarizeEvidenceCoverage(nodes: AtlasNode[], evidence: AtlasEvidence[]
   return {
     sourceCount: sources.size,
     nodeCoveragePct: clamp(Math.round((coveredNodes.size / Math.max(nodes.length, 1)) * 100), 0, 100),
+    weightedNodeCoveragePct: weightedCoverage(nodes, coveredNodes),
+    phaseOneWeightedCoveragePct: weightedCoverage(nodes.filter((node) => node.horizon === "PHASE_1"), coveredNodes),
     staleEvidenceCount,
     confidencePct: clamp(confidencePct - Math.min(25, staleEvidenceCount * 3), 0, 100),
     missingCriticalSources
   };
 }
 
-function summarizeMomentum(activityEvents: AtlasActivityEvent[], now: Date): AtlasMomentumSummary {
+function weightedCoverage(nodes: AtlasNode[], coveredNodeIds: Set<string>) {
+  const totalWeight = nodes.reduce((total, node) => total + Math.max(node.weight, 0), 0);
+  if (totalWeight <= 0) return 0;
+  const coveredWeight = nodes.reduce((total, node) => total + (coveredNodeIds.has(node.id) ? Math.max(node.weight, 0) : 0), 0);
+  return clamp(Math.round((coveredWeight / totalWeight) * 100), 0, 100);
+}
+
+export function summarizeMomentum(activityEvents: AtlasActivityEvent[], now: Date): AtlasMomentumSummary {
   if (activityEvents.length === 0) {
     return {
       dailyDeepWorkHours: null,
       weeklyDeepWorkHours: null,
       monthlyDeepWorkHours: null,
       dailyTotalHours: null,
+      weeklyWorkHistory: [],
       dailySectorWork: [],
       executionRatio: null,
       learningRatio: null,
@@ -203,37 +284,87 @@ function summarizeMomentum(activityEvents: AtlasActivityEvent[], now: Date): Atl
       contextSwitches: null,
       velocityTrend: "unknown",
       confidencePct: 10,
-      note: "Atlas is functional from operational evidence, but passive activity coverage is not enabled yet. Momentum metrics are intentionally unknown rather than invented."
+      classificationCounts: { work: 0, idle: 0, distraction: 0, uncertain: 0 },
+      note: "No Founder OS activity blocks are available yet. The dashboard leaves work metrics unknown rather than estimating them."
     };
   }
 
   const measuredEvents = activityEvents.filter(isMeasuredActivityEvent);
   const totalHours = measuredEvents.reduce((total, event) => total + eventDurationHours(event), 0);
-  const todaysEvents = activityEvents.filter((event) => isSameAtlasDay(new Date(event.startedAt), now) && isWorkActivityEvent(event));
+  const todaysClassifiedEvents = activityEvents.filter((event) => isSameAtlasDay(new Date(event.startedAt), now));
+  const todaysEvents = todaysClassifiedEvents.filter(isWorkActivityEvent);
   const dailyTotalHours = todaysEvents.reduce((total, event) => total + eventDurationHours(event), 0);
   const dailyDeepWorkHours = todaysEvents.filter((event) => event.leverageTier === "HIGH").reduce((total, event) => total + eventDurationHours(event), 0);
   const executionHours = measuredEvents.filter((event) => ["Engineering", "Firmware", "Manufacturing", "Supplier Communication", "Marketing", "Customer Development"].includes(event.category)).reduce((total, event) => total + eventDurationHours(event), 0);
   const learningHours = measuredEvents.filter((event) => ["Learning", "Research"].includes(event.category)).reduce((total, event) => total + eventDurationHours(event), 0);
   const planningHours = measuredEvents.filter((event) => event.category === "Planning").reduce((total, event) => total + eventDurationHours(event), 0);
   const distractionHours = measuredEvents.filter((event) => event.category === "Distraction").reduce((total, event) => total + eventDurationHours(event), 0);
-  const deepWorkHours = activityEvents.filter((event) => event.leverageTier === "HIGH").reduce((total, event) => total + eventDurationHours(event), 0);
+  const weeklyEvents = activityEvents.filter((event) => occursWithinDays(event, now, 7));
+  const previousWeekEvents = activityEvents.filter((event) => occursWithinRange(event, now, 14, 7));
+  const monthlyEvents = activityEvents.filter((event) => occursWithinDays(event, now, 30));
+  const weeklyDeepWorkHours = highLeverageHours(weeklyEvents);
+  const previousWeekDeepWorkHours = highLeverageHours(previousWeekEvents);
+  const monthlyDeepWorkHours = highLeverageHours(monthlyEvents);
+  const workSessions = summarizeWorkSessions(measuredEvents);
 
   return {
     dailyDeepWorkHours: dailyDeepWorkHours > 0 ? roundOne(dailyDeepWorkHours) : null,
-    weeklyDeepWorkHours: roundOne(deepWorkHours),
-    monthlyDeepWorkHours: roundOne(deepWorkHours),
+    weeklyDeepWorkHours: weeklyDeepWorkHours > 0 ? roundOne(weeklyDeepWorkHours) : null,
+    monthlyDeepWorkHours: monthlyDeepWorkHours > 0 ? roundOne(monthlyDeepWorkHours) : null,
     dailyTotalHours: dailyTotalHours > 0 ? roundOne(dailyTotalHours) : null,
+    weeklyWorkHistory: [],
     dailySectorWork: summarizeDailySectorWork(todaysEvents),
     executionRatio: ratio(executionHours, totalHours),
     learningRatio: ratio(learningHours, totalHours),
     planningRatio: ratio(planningHours, totalHours),
     distractionRatio: ratio(distractionHours, totalHours),
-    averageFocusMinutes: Math.round((totalHours * 60) / Math.max(activityEvents.length, 1)),
-    contextSwitches: Math.max(activityEvents.length - 1, 0),
-    velocityTrend: "unknown",
-    confidencePct: Math.round(average(activityEvents.map((event) => event.confidencePct))),
-    note: "Momentum is computed from explicit Atlas activity events only; time alone does not increase company completion."
+    averageFocusMinutes: workSessions.length > 0 ? Math.round(average(workSessions.map((session) => session.durationMinutes))) : null,
+    contextSwitches: Math.max(workSessions.length - 1, 0),
+    velocityTrend: velocityTrend(weeklyDeepWorkHours, previousWeekDeepWorkHours),
+    confidencePct: Math.round(average((todaysClassifiedEvents.length > 0 ? todaysClassifiedEvents : activityEvents).map((event) => event.confidencePct))),
+    classificationCounts: summarizeActivityClassifications(todaysClassifiedEvents),
+    note: "Momentum uses distinct current-day, rolling-7-day, and rolling-30-day windows. Today’s block counts and work metrics include only direct-evidence work; idle, distraction, and uncertain blocks are excluded."
   };
+}
+
+function occursWithinDays(event: AtlasActivityEvent, now: Date, days: number) {
+  return occursWithinRange(event, now, days, 0);
+}
+
+function occursWithinRange(event: AtlasActivityEvent, now: Date, olderDays: number, newerDays: number) {
+  const startedAt = new Date(event.startedAt).getTime();
+  const nowMs = now.getTime();
+  return Number.isFinite(startedAt) && startedAt >= nowMs - olderDays * 86_400_000 && startedAt < nowMs - newerDays * 86_400_000;
+}
+
+function highLeverageHours(events: AtlasActivityEvent[]) {
+  return events.filter((event) => event.leverageTier === "HIGH" && event.validatedProgress).reduce((total, event) => total + eventDurationHours(event), 0);
+}
+
+function velocityTrend(currentHours: number, previousHours: number): AtlasMomentumSummary["velocityTrend"] {
+  if (currentHours <= 0 || previousHours <= 0) return "unknown";
+  if (currentHours >= previousHours * 1.2) return "accelerating";
+  if (currentHours <= previousHours * 0.8) return "regressing";
+  return "stable";
+}
+
+function summarizeWorkSessions(events: AtlasActivityEvent[]) {
+  // The Founder OS exporter can emit minute-scale category samples. Treat category churn inside
+  // a continuous work stretch as classifier noise, not hundreds of founder context switches.
+  const sessions: Array<{ endedAt: number; durationMinutes: number }> = [];
+  for (const event of [...events].sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime())) {
+    const startedAt = new Date(event.startedAt).getTime();
+    const endedAt = new Date(event.endedAt).getTime();
+    if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) continue;
+    const prior = sessions.at(-1);
+    if (prior && startedAt - prior.endedAt <= 10 * 60_000) {
+      prior.durationMinutes += (endedAt - Math.max(startedAt, prior.endedAt)) / 60_000;
+      prior.endedAt = Math.max(prior.endedAt, endedAt);
+      continue;
+    }
+    sessions.push({ endedAt, durationMinutes: (endedAt - startedAt) / 60_000 });
+  }
+  return sessions;
 }
 
 function summarizeDailySectorWork(activityEvents: AtlasActivityEvent[]): AtlasDailySectorWork[] {
@@ -255,11 +386,23 @@ function summarizeDailySectorWork(activityEvents: AtlasActivityEvent[]): AtlasDa
 }
 
 function isMeasuredActivityEvent(event: AtlasActivityEvent) {
-  return event.category !== "Unknown";
+  return event.activityClassification ? event.activityClassification === "WORK" : event.category !== "Unknown";
 }
 
 function isWorkActivityEvent(event: AtlasActivityEvent) {
-  return event.category !== "Unknown" && event.category !== "Distraction" && event.leverageTier !== "LOW";
+  return isMeasuredActivityEvent(event) && event.category !== "Distraction" && event.leverageTier !== "LOW";
+}
+
+function summarizeActivityClassifications(events: AtlasActivityEvent[]) {
+  return events.reduce((counts, event) => {
+    const classification = event.activityClassification
+      ?? (event.category === "Distraction" ? "DISTRACTION" : event.category === "Unknown" ? "UNCERTAIN" : "WORK");
+    if (classification === "WORK") counts.work += 1;
+    else if (classification === "IDLE") counts.idle += 1;
+    else if (classification === "DISTRACTION") counts.distraction += 1;
+    else counts.uncertain += 1;
+    return counts;
+  }, { work: 0, idle: 0, distraction: 0, uncertain: 0 });
 }
 
 function isSameAtlasDay(left: Date, right: Date) {
@@ -320,8 +463,10 @@ function projectLaunchDate(input: { now: Date; remainingHours: number | null; we
   };
 }
 
-function estimateWeeklyVelocity(activityEvents: AtlasActivityEvent[], remainingHours: number | null) {
-  const validatedHours = activityEvents.filter((event) => event.validatedProgress && event.leverageTier === "HIGH").reduce((total, event) => total + eventDurationHours(event), 0);
+function estimateWeeklyVelocity(activityEvents: AtlasActivityEvent[], remainingHours: number | null, now: Date) {
+  const validatedHours = activityEvents
+    .filter((event) => occursWithinDays(event, now, 7) && event.validatedProgress && event.leverageTier === "HIGH")
+    .reduce((total, event) => total + eventDurationHours(event), 0);
   const currentHours = validatedHours > 0 ? roundOne(validatedHours) : null;
   return {
     currentHours,

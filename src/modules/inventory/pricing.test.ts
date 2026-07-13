@@ -71,4 +71,54 @@ describe("resolveItemUnitCostIndex", () => {
 
     expect(costs.get("finished")).toBeUndefined();
   });
+
+  it("recalculates nested downstream finished-good rollups whenever a constituent price becomes available or changes", () => {
+    const items = [
+      { id: "pcb", sku: "PCB", category: "COMPONENT", estimatedUnitCost: 1, costCurrency: "USD" },
+      { id: "housing", sku: "HOUSING", category: "COMPONENT", estimatedUnitCost: 2, costCurrency: "USD" },
+      { id: "packaging", sku: "PACKAGING", category: "COMPONENT", estimatedUnitCost: null as number | null, costCurrency: "USD" },
+      { id: "main", sku: "LAMBENTI_MAIN_UNIT", category: "FINISHED_GOOD", estimatedUnitCost: null as number | null, costCurrency: "USD" },
+      { id: "connector", sku: "LED_CONN", category: "FINISHED_GOOD", estimatedUnitCost: null as number | null, costCurrency: "USD" },
+      { id: "package", sku: "LAMBENTI_PACKAGE", category: "FINISHED_GOOD", estimatedUnitCost: null as number | null, costCurrency: "USD" }
+    ];
+    const boms = [
+      { parentItemId: "main", version: "main-v1", lines: [{ componentItemId: "pcb", quantity: 2, componentItem: { sku: "PCB" } }] },
+      { parentItemId: "connector", version: "connector-v1", lines: [{ componentItemId: "housing", quantity: 1, componentItem: { sku: "HOUSING" } }] },
+      {
+        parentItemId: "package",
+        version: "package-v1",
+        lines: [
+          { componentItemId: "main", quantity: 1, componentItem: { sku: "LAMBENTI_MAIN_UNIT" } },
+          { componentItemId: "connector", quantity: 2, componentItem: { sku: "LED_CONN" } },
+          { componentItemId: "packaging", quantity: 1, componentItem: { sku: "PACKAGING" } }
+        ]
+      }
+    ];
+
+    expect(resolveItemUnitCostIndex(items, boms).get("package")).toBeUndefined();
+
+    items[2].estimatedUnitCost = 4;
+    expect(resolveItemUnitCostIndex(items, boms).get("package")).toMatchObject({ unitCost: 10, source: "BOM_ROLLUP" });
+
+    items[0].estimatedUnitCost = 1.5;
+    items[1].estimatedUnitCost = 2.5;
+    expect(resolveItemUnitCostIndex(items, boms).get("package")).toMatchObject({ unitCost: 12, source: "BOM_ROLLUP" });
+  });
+
+  it("contains malformed circular BOM cost dependencies without blocking unrelated rollups", () => {
+    const costs = resolveItemUnitCostIndex([
+      { id: "a", sku: "ASSEMBLY_A", category: "FINISHED_GOOD", estimatedUnitCost: null, costCurrency: "USD" },
+      { id: "b", sku: "ASSEMBLY_B", category: "FINISHED_GOOD", estimatedUnitCost: null, costCurrency: "USD" },
+      { id: "component", sku: "KNOWN_COMPONENT", category: "COMPONENT", estimatedUnitCost: 3, costCurrency: "USD" },
+      { id: "healthy", sku: "HEALTHY_PACKAGE", category: "FINISHED_GOOD", estimatedUnitCost: null, costCurrency: "USD" }
+    ], [
+      { parentItemId: "a", version: "a-v1", lines: [{ componentItemId: "b", quantity: 1, componentItem: { sku: "ASSEMBLY_B" } }] },
+      { parentItemId: "b", version: "b-v1", lines: [{ componentItemId: "a", quantity: 1, componentItem: { sku: "ASSEMBLY_A" } }] },
+      { parentItemId: "healthy", version: "healthy-v1", lines: [{ componentItemId: "component", quantity: 2, componentItem: { sku: "KNOWN_COMPONENT" } }] }
+    ]);
+
+    expect(costs.get("a")).toBeUndefined();
+    expect(costs.get("b")).toBeUndefined();
+    expect(costs.get("healthy")).toMatchObject({ unitCost: 6, source: "BOM_ROLLUP" });
+  });
 });

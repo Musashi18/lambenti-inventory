@@ -9,7 +9,7 @@ vi.mock("@/modules/tracking/service", () => ({
 }));
 
 import * as route from "./route";
-import { refreshDueTrackingNumbers } from "@/modules/tracking/service";
+import { refreshActiveTrackingNumbers, refreshDueTrackingNumbers } from "@/modules/tracking/service";
 
 function postRequest(url: string, body: unknown, headers: Record<string, string> = {}) {
   return new NextRequest(new Request(url, {
@@ -45,6 +45,24 @@ describe("tracking refresh API auth", () => {
     expect(refreshDueTrackingNumbers).toHaveBeenCalledWith(expect.objectContaining({
       actorId: "tracking-page-auto-refresh"
     }));
+  });
+
+  it("defaults API refresh to all active tracking numbers unless dueOnly is explicitly true", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LAMBENTI_ALLOW_LOCAL_PROD_AUTH", "true");
+
+    const response = await route.POST(postRequest("http://127.0.0.1:5173/api/tracking/refresh", {}, {
+      host: "127.0.0.1:5173",
+      "x-lambenti-agent-id": "tracking-api-default"
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ scanned: 2, refreshed: 2, failed: 0 });
+    expect(refreshActiveTrackingNumbers).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: "tracking-api-default",
+      limit: 100
+    }));
+    expect(refreshDueTrackingNumbers).not.toHaveBeenCalled();
   });
 
   it("fails closed for non-loopback production refresh when no secret is configured", async () => {

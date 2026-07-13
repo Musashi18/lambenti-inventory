@@ -3,6 +3,8 @@ import { StatCard } from "@/components/stat-card";
 import { DashboardTable } from "@/components/dashboard-table";
 import { getDashboardSummary } from "@/modules/dashboard/service";
 import { requirePermission } from "@/modules/auth/permissions";
+import { getFounderOsMomentum } from "@/modules/atlas/momentum-service";
+import type { AtlasMomentumSummary } from "@/modules/atlas/types";
 import { getItemUseGroup, type ItemUseClassificationInput } from "@/modules/inventory/item-option-groups";
 import { formatQuantity } from "@/modules/inventory/quantity-format";
 
@@ -14,7 +16,7 @@ type LaunchReadiness = DashboardSummary["launchReadiness"];
 
 export default async function DashboardPage() {
   await requirePermission("item:view");
-  const summary = await getDashboardSummary();
+  const [summary, momentum] = await Promise.all([getDashboardSummary(), getFounderOsMomentum()]);
 
   return (
     <div className="space-y-6">
@@ -38,10 +40,10 @@ export default async function DashboardPage() {
               </span>
             </div>
             <div className="mt-5 grid gap-3 md:grid-cols-4">
-              <LaunchMetric label="25-unit Phase I target" value={summary.launchReadiness.targetPackages.toString()} detail="first self-assembled launch batch" />
-              <LaunchMetric label="Ready now" value={summary.launchReadiness.readyNow.toString()} detail={`${summary.launchReadiness.assembledPackages} assembled + ${summary.launchReadiness.buildCapacityNow} buildable`} />
-              <LaunchMetric label="Remaining gap" value={summary.launchReadiness.remainingToTarget.toString()} detail="units still not covered" />
-              <LaunchMetric label="Build bottleneck" value={summary.launchReadiness.bottleneckSku || "—"} detail="current package BOM limiter" />
+              <LaunchMetric label="25-unit Phase I target" value={summary.launchReadiness.targetPackages.toString()} detail={summary.launchReadiness.packageDisplayName} />
+              <LaunchMetric label="Ready now" value={summary.launchReadiness.readyNow.toString()} detail="built package assemblies on ledger" />
+              <LaunchMetric label="Buildable now" value={summary.launchReadiness.buildCapacityNow.toString()} detail={`${summary.launchReadiness.buildableTowardTarget} package builds now; subassemblies must already be ledger-built`} />
+              <LaunchMetric label="Assembly gap" value={summary.launchReadiness.remainingBuildGap.toString()} detail="packages still to build" />
             </div>
           </div>
           <LaunchGauge readiness={summary.launchReadiness} graphs={summary.dashboardGraphs} />
@@ -62,14 +64,17 @@ export default async function DashboardPage() {
           <GraphPanel title="Operations Flow" kicker="Where operator work is queued">
             <OperationsFlowGraph graphs={summary.dashboardGraphs} />
           </GraphPanel>
-          <GraphPanel title="Package Bottlenecks" kicker="Buildable packages by BOM component">
-            <ComponentCapacityGraph graphs={summary.dashboardGraphs} />
+          <GraphPanel title="Build Capacity by Build" kicker="Buildable units by active build">
+            <BuildCapacityGraph graphs={summary.dashboardGraphs} />
           </GraphPanel>
           <GraphPanel title="Stock Pressure" kicker="Lowest coverage vs reorder point">
             <StockPressureGraph graphs={summary.dashboardGraphs} />
           </GraphPanel>
           <GraphPanel title="Lead-Time Horizon" kicker="Longest item planning windows" className="lg:col-span-2">
             <LeadTimeHorizonGraph graphs={summary.dashboardGraphs} />
+          </GraphPanel>
+          <GraphPanel title="Momentum Engine" kicker="Conservatively classified founder activity" className="lg:col-span-2">
+            <MomentumEngineGraph momentum={momentum} />
           </GraphPanel>
         </div>
       </section>
@@ -81,10 +86,10 @@ export default async function DashboardPage() {
           label="Build capacity"
           value={summary.buildCapacity.finishedBuildCapacity}
           helperText={summary.buildCapacity.finishedSku
-            ? `${summary.buildCapacity.finishedSku}${summary.buildCapacity.bottleneckSku ? ` · bottleneck ${summary.buildCapacity.bottleneckSku}` : ""}`
+            ? `Package build actions possible from already-built subassemblies and direct package inputs; excludes ${summary.assembledPackages} already built.`
             : "No active finished-good BOM with component requirements."}
         />
-        <StatCard label="Assembled packages" value={summary.assembledPackages} helperText="Total assembled packages currently on hand from finished-build inventory." />
+        <StatCard label="Assembled packages" value={summary.assembledPackages} helperText={`Ledger on-hand only; excludes ${summary.buildCapacity.finishedBuildCapacity} buildable package${summary.buildCapacity.finishedBuildCapacity === 1 ? "" : "s"}.`} />
         <StatCard label="Upcoming Shortages" value={summary.shortages.length} />
         <StatCard label="Inventory Valuation" value={`USD $${summary.inventoryValuation.toFixed(2)}`} />
         <StatCard label="Incoming Orders" value={summary.incomingOrders.length} />
@@ -194,12 +199,16 @@ function LaunchMetric({ label, value, detail }: { label: string; value: string; 
 }
 
 function LaunchGauge({ readiness, graphs }: { readiness: LaunchReadiness; graphs: DashboardGraphs }) {
+  const materialDetail = graphs.launchProgress.materialComponentsRequired > 0
+    ? `${graphs.launchProgress.materialComponentsInStock}/${graphs.launchProgress.materialComponentsRequired} components stocked`
+    : `${readiness.readyNow} built · ${readiness.buildCapacityNow} package-buildable`;
+
   return (
-    <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-full border border-white/10 p-3 shadow-2xl shadow-cyan-950/40" style={{ background: `conic-gradient(#22c55e ${graphs.launchProgress.readyPercent}%, #0f172a 0)` }} aria-label="Launch readiness gauge">
+    <div className="mx-auto flex h-48 w-48 items-center justify-center rounded-full border border-white/10 p-3 shadow-2xl shadow-cyan-950/40" style={{ background: `conic-gradient(#22c55e ${graphs.launchProgress.materialPercent}%, #0f172a 0)` }} aria-label="Phase I material coverage gauge">
       <div className="flex h-36 w-36 flex-col items-center justify-center rounded-full border border-white/10 bg-slate-950 text-center">
-        <div className="text-4xl font-semibold">{graphs.launchProgress.readyPercent}%</div>
-        <div className="mt-1 text-xs uppercase tracking-[0.25em] text-cyan-200">ready</div>
-        <div className="mt-2 text-xs text-slate-400">{readiness.readyNow}/{readiness.targetPackages} units</div>
+        <div className="text-4xl font-semibold">{graphs.launchProgress.materialPercent}%</div>
+        <div className="mt-1 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">material covered</div>
+        <div className="mt-2 text-xs text-slate-400">{materialDetail}</div>
       </div>
     </div>
   );
@@ -230,15 +239,12 @@ function LaunchTargetGraph({ readiness, graphs }: { readiness: LaunchReadiness; 
   return (
     <div className="space-y-4">
       <LaunchCoverageBar graphs={graphs} />
-      <div className="h-5 overflow-hidden rounded-full bg-slate-200 shadow-inner" aria-label="Ready versus remaining launch gap">
-        <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" style={{ width: `${graphs.launchProgress.readyPercent}%` }} />
+      <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+        <GraphNumber label="Built" value={readiness.readyNow.toString()} />
+        <GraphNumber label="Buildable" value={readiness.buildCapacityNow.toString()} />
+        <GraphNumber label="Assembly gap" value={readiness.remainingBuildGap.toString()} />
+        <GraphNumber label="Material gap" value={readiness.remainingMaterialGap.toString()} />
       </div>
-      <div className="grid grid-cols-3 gap-3 text-sm">
-        <GraphNumber label="Ready" value={readiness.readyNow.toString()} />
-        <GraphNumber label="Gap" value={readiness.remainingToTarget.toString()} />
-        <GraphNumber label="Target" value={readiness.targetPackages.toString()} />
-      </div>
-      <div className="text-xs text-slate-500">Gap share: {graphs.launchProgress.gapPercent}% of Phase I target remains uncovered.</div>
     </div>
   );
 }
@@ -246,9 +252,9 @@ function LaunchTargetGraph({ readiness, graphs }: { readiness: LaunchReadiness; 
 function LaunchCoverageBar({ graphs }: { graphs: DashboardGraphs }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Phase I coverage bridge</div>
-      <div className="flex h-4 overflow-hidden rounded-full bg-slate-200" aria-label="Ready and remaining launch coverage">
-        {graphs.launchCoverageSegments.map((segment) => (
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Phase I material coverage</div>
+      <div className="flex h-4 overflow-hidden rounded-full bg-slate-200" aria-label="Built, buildable, buffer, and material-gap launch coverage">
+        {graphs.launchCoverageSegments.filter((segment) => segment.percent > 0).map((segment) => (
           <div
             key={segment.label}
             className={`h-full ${launchSegmentClass(segment.tone)}`}
@@ -257,7 +263,7 @@ function LaunchCoverageBar({ graphs }: { graphs: DashboardGraphs }) {
           />
         ))}
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
         {graphs.launchCoverageSegments.map((segment) => (
           <div key={segment.label} className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
@@ -275,24 +281,29 @@ function LaunchCoverageBar({ graphs }: { graphs: DashboardGraphs }) {
 function launchSegmentClass(tone: string) {
   if (tone === "emerald") return "bg-emerald-500";
   if (tone === "cyan") return "bg-cyan-500";
+  if (tone === "sky") return "bg-sky-500";
   return "bg-slate-300";
 }
 
-function ComponentCapacityGraph({ graphs }: { graphs: DashboardGraphs }) {
-  if (graphs.componentCapacityBars.length === 0) {
-    return <div className="text-sm text-slate-500">No active package BOM components to graph.</div>;
+function BuildCapacityGraph({ graphs }: { graphs: DashboardGraphs }) {
+  if (graphs.buildCapacityBars.length === 0) {
+    return <div className="text-sm text-slate-500">No active package-related builds to graph.</div>;
   }
 
   return (
     <div className="space-y-3">
-      {graphs.componentCapacityBars.map((component) => (
-        <div key={component.sku}>
+      {graphs.buildCapacityBars.map((build) => (
+        <div key={build.sku}>
           <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
-            <span className="truncate font-medium text-slate-700" title={component.description}>{component.sku}</span>
-            <span className={component.isBottleneck ? "font-semibold text-red-600" : "text-slate-500"}>{component.capacity} buildable</span>
+            <span className="truncate font-medium text-slate-700" title={build.description}>{build.sku}</span>
+            <span className={build.isBottleneck ? "font-semibold text-red-600" : "text-slate-500"}>{build.buildableUnits} buildable</span>
+          </div>
+          <div className="mb-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
+            {build.isPackageTarget ? <span>Phase I package target</span> : <span>Build/subassembly</span>}
+            <span>{formatQuantity(build.availableBuiltUnits, { fixed: true })} already built</span>
           </div>
           <div className="h-3 overflow-hidden rounded-full bg-slate-200">
-            <div className={component.isBottleneck ? "h-full rounded-full bg-red-500" : "h-full rounded-full bg-cyan-500"} style={{ width: `${Math.max(component.percentOfMax, component.capacity > 0 ? 4 : 1)}%` }} />
+            <div className={build.isBottleneck ? "h-full rounded-full bg-red-500" : "h-full rounded-full bg-cyan-500"} style={{ width: `${Math.max(build.percentOfMax, build.buildableUnits > 0 ? 4 : 1)}%` }} />
           </div>
         </div>
       ))}
@@ -342,6 +353,53 @@ function LeadTimeHorizonGraph({ graphs }: { graphs: DashboardGraphs }) {
       ))}
     </div>
   );
+}
+
+function MomentumEngineGraph({ momentum }: { momentum: AtlasMomentumSummary }) {
+  const classified = momentum.classificationCounts;
+  const excludedBlocks = classified.idle + classified.distraction + classified.uncertain;
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <GraphNumber label="Weekly High-Leverage" value={momentum.weeklyDeepWorkHours == null ? "—" : `${momentum.weeklyDeepWorkHours}h`} />
+        <GraphNumber label="Classified Work Today" value={momentum.dailyTotalHours == null ? "—" : `${momentum.dailyTotalHours}h`} />
+        <GraphNumber label="Classification Confidence" value={`${momentum.confidencePct}%`} />
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Today&apos;s Work by Category</div>
+            <div className="mt-1 text-xs text-slate-500">Only blocks with direct work evidence appear below.</div>
+          </div>
+          <div className="text-right text-xs text-slate-500">{classified.work} verified today · {excludedBlocks} excluded</div>
+        </div>
+        {momentum.dailySectorWork.length > 0 ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {momentum.dailySectorWork.slice(0, 4).map((sector) => (
+              <div key={sector.sector} className="min-w-0">
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="truncate font-medium text-slate-700">{sector.sector}</span>
+                  <span className="shrink-0 text-slate-500">{sector.hours}h · {sector.confidencePct}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`${sector.sector} classified work today`}>
+                  <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400" style={{ width: `${momentumWidth(sector.hours, momentum.dailyTotalHours)}%` }} />
+                </div>
+                <div className="mt-1 text-[11px] uppercase tracking-wide text-slate-400">{sector.highLeverageHours}h high leverage · {sector.eventCount} block{sector.eventCount === 1 ? "" : "s"}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500">No verified work blocks have been detected today.</p>
+        )}
+      </div>
+      <p className="text-xs leading-5 text-slate-500">{momentum.note}</p>
+    </div>
+  );
+}
+
+function momentumWidth(hours: number, totalHours: number | null) {
+  if (!totalHours || totalHours <= 0) return 0;
+  return Math.max(4, Math.min(100, (hours / totalHours) * 100));
 }
 
 function formatLeadTimeSource(item: DashboardGraphs["leadTimeBars"][number]) {
@@ -446,7 +504,8 @@ function stockPressureColor(severity: string) {
 }
 
 function formatLaunchStatus(status: string) {
-  if (status === "COVERED") return "Target covered";
+  if (status === "COVERED") return "Launch ready";
+  if (status === "BUILD_READY") return "Build ready";
   if (status === "BLOCKED") return "Blocked";
   return "In progress";
 }

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { AtlasActivityCategory, AtlasActivityEvent, AtlasLeverageTier } from "./types";
+import type { AtlasActivityCategory, AtlasActivityEvent, AtlasLeverageTier, FounderOsActivityClassification } from "./types";
 
 type FounderOsActivityBlock = {
   period?: string;
@@ -23,7 +23,7 @@ type FounderOsActivityBlock = {
   top_domains?: string[];
 };
 
-const DEFAULT_LOOKBACK_DAYS = 7;
+const DEFAULT_LOOKBACK_DAYS = 30;
 const DEFAULT_ACTIVITY_BLOCKS_PATH = join(homedir(), "AppData", "Local", "hermes", "profiles", "lambenti", "founder_os", "activity_blocks.jsonl");
 
 export async function loadAtlasActivityEvents(input: { now?: Date; blocksPath?: string; lookbackDays?: number } = {}): Promise<AtlasActivityEvent[]> {
@@ -87,33 +87,12 @@ function selectBestPeriod(blocks: FounderOsActivityBlock[], now: Date, lookbackD
   });
   const source = recentBlocks.length > 0 ? recentBlocks : blocks;
   const weekly = latestPeriod(source.filter((block) => block.period === "weekly"));
-  const daily = latestPeriod(source.filter((block) => block.period === "daily"));
-  if (weekly.length > 0) {
-    if (daily.length > 0 && shouldMergeDailyIntoWeekly(daily, weekly, now)) return [...weekly, ...daily];
-    return weekly;
-  }
-  if (daily.length > 0) return daily;
+  const daily = source.filter((block) => block.period === "daily");
+  // Daily exports provide the comparable history; the current weekly export backfills any
+  // blocks the daily tick has not written yet. Later stable-key deduplication removes overlap.
+  if (daily.length > 0) return weekly.length > 0 ? [...weekly, ...daily] : daily;
+  if (weekly.length > 0) return weekly;
   return source;
-}
-
-function shouldMergeDailyIntoWeekly(daily: FounderOsActivityBlock[], weekly: FounderOsActivityBlock[], now: Date) {
-  const latestDailyEnd = latestEndMs(daily);
-  const latestWeeklyEnd = latestEndMs(weekly);
-  if (latestDailyEnd > latestWeeklyEnd) return true;
-  const dailyLabel = daily
-    .map((block) => block.label)
-    .filter((label): label is string => Boolean(label))
-    .sort()
-    .at(-1);
-  return dailyLabel === atlasDayKey(now) && latestDailyEnd >= latestWeeklyEnd;
-}
-
-function latestEndMs(blocks: FounderOsActivityBlock[]) {
-  return Math.max(0, ...blocks.map((block) => new Date(block.end ?? "").getTime()).filter(Number.isFinite));
-}
-
-function atlasDayKey(date: Date) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
 function latestPeriod(blocks: FounderOsActivityBlock[]) {
@@ -130,11 +109,14 @@ function toAtlasActivityEvent(block: FounderOsActivityBlock, index: number, bloc
   const endedAt = block.end ? new Date(block.end) : null;
   if (!startedAt || !endedAt || !Number.isFinite(startedAt.getTime()) || !Number.isFinite(endedAt.getTime()) || endedAt <= startedAt) return null;
 
-  const category = normalizeCategory(block.category);
-  const leverageTier = normalizeLeverage(block.leverage);
+  const durationHours = blockDurationHours(block, startedAt, endedAt);
+  const parsedCategory = normalizeCategory(block.category);
+  const classification = classifyActivityBlock({ block, category: parsedCategory, durationHours });
+  const category = classification === "IDLE" ? "Unknown" : parsedCategory;
+  const leverageTier = classification === "IDLE" ? "LOW" : normalizeLeverage(block.leverage);
   const confidencePct = normalizeConfidence(block.confidence);
   const evidenceSignals = compactStrings([...(block.top_signals ?? []), ...(block.artifact_types ?? []), ...(block.file_examples ?? [])]);
-  const validatedActivity = isValidatedActivityBlock({ block, category, leverageTier, confidencePct, evidenceSignals });
+  const validatedActivity = isValidatedActivityBlock({ block, classification, category, leverageTier, confidencePct, evidenceSignals });
   const nodeId = inferNodeId(block, category);
 
   return {
@@ -145,11 +127,12 @@ function toAtlasActivityEvent(block: FounderOsActivityBlock, index: number, bloc
     confidencePct,
     startedAt: startedAt.toISOString(),
     endedAt: endedAt.toISOString(),
-    durationHours: blockDurationHours(block, startedAt, endedAt),
+    durationHours,
     summary: summarizeBlock(block, category, leverageTier),
     sourceType: "FILE",
     sourceRef: blocksPath,
-    validatedProgress: validatedActivity
+    validatedProgress: validatedActivity,
+    activityClassification: classification
   };
 }
 
@@ -206,13 +189,44 @@ function normalizeConfidence(confidence: number | undefined) {
   return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)));
 }
 
+function classifyActivityBlock(input: { block: FounderOsActivityBlock; category: AtlasActivityCategory; durationHours: number }): FounderOsActivityClassification {
+  const depth = (input.block.depth ?? "").trim().toLowerCase();
+  const idleSeconds = largestIdleSeconds(input.block.top_signals ?? []);
+  const durationSeconds = input.durationHours * 3_600;
+  const directWorkEvidence = hasDirectWorkEvidence(input.block);
+  const onlyIdleApps = (input.block.top_apps ?? []).length > 0 && (input.block.top_apps ?? []).every(isIdleApp);
+
+  if (depth === "idle" || idleSeconds >= Math.max(300, durationSeconds * 0.6) || (onlyIdleApps && !directWorkEvidence)) return "IDLE";
+  if (input.category === "Distraction") return "DISTRACTION";
+  if (input.category === "Unknown" || !directWorkEvidence || normalizeConfidence(input.block.confidence) < 45) return "UNCERTAIN";
+  return "WORK";
+}
+
+function hasDirectWorkEvidence(block: FounderOsActivityBlock) {
+  if (compactStrings([...(block.artifact_types ?? []), ...(block.file_examples ?? []), ...(block.git_dirty_repos ?? [])]).length > 0) return true;
+  return compactStrings(block.top_signals ?? []).some((signal) => /\b(evidence|artifact|git|commit|diff|file|build|compile|test|firmware|engineering|manufacturing|supplier|invoice|purchase|design|research|planning)\b/i.test(signal));
+}
+
+function largestIdleSeconds(signals: string[]) {
+  return compactStrings(signals).reduce((largest, signal) => {
+    const match = signal.match(/idle_seconds\s*=\s*(\d+(?:\.\d+)?)/i);
+    return match ? Math.max(largest, Number(match[1])) : largest;
+  }, 0);
+}
+
+function isIdleApp(app: string) {
+  return /^(hermes\.exe|lockapp\.exe|system idle process|screen saver)$/i.test(app.trim());
+}
+
 function isValidatedActivityBlock(input: {
   block: FounderOsActivityBlock;
+  classification: FounderOsActivityClassification;
   category: AtlasActivityCategory;
   leverageTier: AtlasLeverageTier;
   confidencePct: number;
   evidenceSignals: string[];
 }) {
+  if (input.classification !== "WORK") return false;
   if (input.category === "Unknown" || input.category === "Distraction") return false;
   if (input.leverageTier !== "HIGH") return false;
   if (input.confidencePct < 55) return false;

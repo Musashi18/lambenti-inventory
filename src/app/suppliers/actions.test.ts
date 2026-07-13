@@ -4,6 +4,10 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn()
 }));
 
+vi.mock("@/app/revalidate-workspace", () => ({
+  revalidateWorkspace: vi.fn()
+}));
+
 vi.mock("@/modules/auth/permissions", () => ({
   requirePermission: vi.fn(async () => ({ actorType: "USER", id: "test-operator" }))
 }));
@@ -19,7 +23,8 @@ vi.mock("@/modules/suppliers/service", () => ({
   updateSupplierContactProfile: vi.fn()
 }));
 
-import { archiveSupplierCleanupCandidatesAction, deleteArchivedSupplierAction } from "./actions";
+import { revalidateWorkspace } from "@/app/revalidate-workspace";
+import { archiveSupplierCleanupCandidatesAction, deleteArchivedSupplierAction, updateItemSupplierEntryAction } from "./actions";
 
 describe("supplier server actions", () => {
   it("returns an inline failure instead of throwing a production server-component digest when archived delete is blocked", async () => {
@@ -37,5 +42,20 @@ describe("supplier server actions", () => {
 
     expect(result).toMatchObject({ success: true });
     expect(result.message).toMatch(/Archived 2 supplier cleanup candidate/);
+  });
+
+  it("revalidates all dependent cost views after a supplier-entry price update", async () => {
+    const form = new FormData();
+    form.set("itemId", "component-item");
+    form.set("preferredSupplierId", "supplier-id");
+    form.set("customSupplierName", "");
+    form.set("supplierSku", "COMP-001");
+    form.set("estimatedUnitCost", "1.25");
+    form.set("costConfidence", "CONFIRMED");
+    form.set("costSourceRef", "Supplier quote");
+
+    await updateItemSupplierEntryAction(form);
+
+    expect(revalidateWorkspace).toHaveBeenCalledTimes(1);
   });
 });

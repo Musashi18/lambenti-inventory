@@ -80,9 +80,11 @@ export async function refreshAllTrackingAction() {
   if (result.failed > 0 && result.refreshed === 0) {
     return { success: false, message: `Tracking refresh attempted ${result.scanned} active numbers; ${result.failed} failed. Check service configuration.` };
   }
+  const archivedOnProvider = result.archivedOnProvider ?? 0;
+  const providerArchiveSuffix = archivedOnProvider > 0 ? ` Archived ${archivedOnProvider} delivered Ship24 backend tracker(s) to clear active API availability.` : "";
   return {
     success: true,
-    message: `Refreshed ${result.refreshed} active tracking numbers; skipped ${result.skipped} delivered, archived, or over-limit records.`
+    message: `Refreshed ${result.refreshed} active tracking numbers; skipped ${result.skipped} delivered, archived, or over-limit records.${providerArchiveSuffix}`
   };
 }
 

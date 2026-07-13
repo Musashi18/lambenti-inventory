@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Mail,
   PackageSearch,
-  Radar,
   ReceiptText,
   Route,
   ShoppingCart,
@@ -17,7 +16,6 @@ import { SidebarLogoControl } from "@/components/sidebar-logo-control";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/atlas", label: "Atlas", icon: Radar },
   { href: "/inventory/items", label: "Items", icon: Boxes },
   { href: "/inventory/movements", label: "Movements", icon: ArrowDownUp },
   { href: "/suppliers", label: "Suppliers", icon: Factory },

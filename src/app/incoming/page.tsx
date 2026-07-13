@@ -22,7 +22,9 @@ export default async function IncomingPage() {
 
       {orders.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500">
-          No ordered or partially received purchase orders are waiting for receipt.
+          <div className="font-medium text-slate-900">Receiving Progress</div>
+          <p className="mt-1">No ordered or partially received purchase orders are waiting for receipt.</p>
+          <p className="mt-2 text-xs text-slate-500">Quantity Counted forms appear here only when a PO line has remaining physical stock to count.</p>
         </div>
       ) : (
         <div className="space-y-4">

@@ -142,6 +142,24 @@ describe("editable BOM quantities and explicit build consumption", () => {
     });
   });
 
+  it("rejects indirect active BOM dependency cycles on both new and edited lines", async () => {
+    const parentA = await createItem("CYCLE-A", ItemCategory.FINISHED_GOOD);
+    const parentB = await createItem("CYCLE-B", ItemCategory.FINISHED_GOOD);
+    const parentC = await createItem("CYCLE-C", ItemCategory.FINISHED_GOOD);
+    const leaf = await createItem("CYCLE-LEAF");
+    const bomA = await createBomSection({ parentItemId: parentA.id, actorId: `${TEST_PREFIX}-operator` });
+    const bomB = await createBomSection({ parentItemId: parentB.id, actorId: `${TEST_PREFIX}-operator` });
+    const bomC = await createBomSection({ parentItemId: parentC.id, actorId: `${TEST_PREFIX}-operator` });
+    const editableLine = await addBomLine({ bomId: bomC.id, componentItemId: leaf.id, quantity: 1, actorId: `${TEST_PREFIX}-operator` });
+
+    await addBomLine({ bomId: bomA.id, componentItemId: parentB.id, quantity: 1, actorId: `${TEST_PREFIX}-operator` });
+    await addBomLine({ bomId: bomB.id, componentItemId: parentC.id, quantity: 1, actorId: `${TEST_PREFIX}-operator` });
+
+    await expect(addBomLine({ bomId: bomC.id, componentItemId: parentA.id, quantity: 1, actorId: `${TEST_PREFIX}-operator` })).rejects.toThrow(/dependency cycle/i);
+    await expect(updateBomLine({ lineId: editableLine.id, componentItemId: parentA.id, quantity: 1, actorId: `${TEST_PREFIX}-operator` })).rejects.toThrow(/dependency cycle/i);
+    await expect(prisma.bOMLine.findUniqueOrThrow({ where: { id: editableLine.id } })).resolves.toMatchObject({ componentItemId: leaf.id });
+  });
+
   it("rejects build consumption when any BOM component line is obsolete instead of silently under-consuming", async () => {
     const parent = await createItem("OBSOLETE-PARENT");
     const activeComponent = await createItem("OBSOLETE-ACTIVE-COMPONENT");

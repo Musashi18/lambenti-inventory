@@ -78,6 +78,10 @@ export async function addBomLine(input: { bomId: string; componentItemId: string
   if (componentItem.id === bom.parentItemId) {
     throw new Error("A finished unit cannot use itself as a BOM component.");
   }
+  await assertNoActiveBomDependencyCycle({
+    parentItemId: bom.parentItemId,
+    componentItemId: componentItem.id
+  });
 
   const line = await prisma.bOMLine.create({
     data: {
@@ -120,6 +124,11 @@ export async function updateBomLine(input: { lineId: string; componentItemId: st
   if (componentItem.id === existing.bom.parentItemId) {
     throw new Error("A finished unit cannot use itself as a BOM component.");
   }
+  await assertNoActiveBomDependencyCycle({
+    parentItemId: existing.bom.parentItemId,
+    componentItemId: componentItem.id,
+    excludedLineId: existing.id
+  });
 
   const line = await prisma.bOMLine.update({
     where: { id: input.lineId },
@@ -269,6 +278,40 @@ function assertNoObsoleteBomComponentLines(lines: { componentItem: { sku: string
     .map((line) => line.componentItem.sku);
   if (obsoleteSkus.length > 0) {
     throw new Error(`Cannot record build while obsolete BOM component lines remain: ${obsoleteSkus.join(", ")}. Correct the BOM before consuming inventory.`);
+  }
+}
+
+async function assertNoActiveBomDependencyCycle(input: { parentItemId: string; componentItemId: string; excludedLineId?: string }) {
+  const activeBoms = await prisma.bOM.findMany({
+    where: {
+      active: true,
+      parentItem: { lifecycleStatus: { not: LifecycleStatus.OBSOLETE } }
+    },
+    select: {
+      parentItemId: true,
+      lines: {
+        where: input.excludedLineId ? { id: { not: input.excludedLineId } } : undefined,
+        select: { componentItemId: true }
+      }
+    }
+  });
+  const componentIdsByParentId = new Map<string, string[]>();
+  for (const bom of activeBoms) {
+    const componentIds = componentIdsByParentId.get(bom.parentItemId) ?? [];
+    componentIds.push(...bom.lines.map((line) => line.componentItemId));
+    componentIdsByParentId.set(bom.parentItemId, componentIds);
+  }
+
+  const pending = [input.componentItemId];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const currentItemId = pending.pop();
+    if (!currentItemId || visited.has(currentItemId)) continue;
+    if (currentItemId === input.parentItemId) {
+      throw new Error("This BOM line would create an active finished-good dependency cycle. Remove the circular dependency before saving it.");
+    }
+    visited.add(currentItemId);
+    pending.push(...(componentIdsByParentId.get(currentItemId) ?? []));
   }
 }
 

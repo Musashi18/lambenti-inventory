@@ -1,3 +1,4 @@
+/*
 import Link from "next/link";
 import { requirePermission } from "@/modules/auth/permissions";
 import { getAtlasMissionControl } from "@/modules/atlas/service";
@@ -29,9 +30,9 @@ export default async function AtlasSimulatorPage({ searchParams }: { searchParam
     <div className="space-y-6 bg-slate-950 text-slate-100 lg:-m-6 lg:p-6">
       <header className="rounded-3xl border border-cyan-400/20 bg-slate-900 p-6 shadow-xl shadow-slate-950/40">
         <div className="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-200">Project Atlas</div>
-        <h1 className="mt-3 text-3xl font-semibold text-white">Predictive Simulator</h1>
+        <h1 className="mt-3 text-3xl font-semibold text-white">Scenario Model</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          Explore counterfactuals without granting Atlas mutation authority. Scenarios update probability, timeline, cash risk, manufacturing risk, and burnout risk from the current mission-control baseline.
+          Explore counterfactuals without granting Atlas mutation authority. Scenarios update a modelled readiness index, timeline, cash risk, manufacturing risk, and burnout risk from the current mission-control baseline. These are decision aids, not calibrated probabilities or spending authorization.
         </p>
         <Link href="/atlas" className="mt-4 inline-flex text-sm font-semibold text-cyan-200 underline underline-offset-4">Back to Mission Control</Link>
       </header>
@@ -68,7 +69,7 @@ function ScenarioCard({ scenario }: { scenario: AtlasScenarioResult }) {
       <h2 className="mt-1 text-2xl font-semibold text-white">{scenario.title}</h2>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Metric label="Timeline Delta" value={`${scenario.timelineDeltaDays > 0 ? "+" : ""}${scenario.timelineDeltaDays} days`} />
-        <Metric label="Launch Probability" value={formatInterval(scenario.launchProbability)} />
+        <Metric label="Launch Readiness Index" value={formatInterval(scenario.launchProbability)} />
         <Metric label="Manufacturing Delay Risk" value={formatInterval(scenario.manufacturingDelayRisk)} />
         <Metric label="Cash Shortage Risk" value={formatInterval(scenario.cashShortageRisk)} />
         <Metric label="Burnout Risk" value={formatInterval(scenario.burnoutRisk)} />
@@ -95,4 +96,13 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function formatInterval(interval: AtlasProbabilityInterval) {
   return `${interval.low}–${interval.high}%`;
+}
+*/
+
+import { permanentRedirect } from "next/navigation";
+
+export const dynamic = "force-dynamic";
+
+export default function AtlasSimulatorPage() {
+  permanentRedirect("/");
 }

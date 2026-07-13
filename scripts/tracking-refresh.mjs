@@ -53,7 +53,7 @@ export function formatTrackingRefreshNotification(result, baseUrl) {
   const normalizedBaseUrl = String(baseUrl || "http://127.0.0.1:5173").replace(/\/$/, "");
   const scope = result.dueOnly === true ? "due" : "active";
   return [
-    `Tracking refresh checked ${result.scanned ?? 0} ${scope} number(s); refreshed ${result.refreshed ?? 0}, failed ${result.failed ?? 0}, skipped ${result.skipped ?? 0}.`,
+    `Tracking refresh checked ${result.scanned ?? 0} ${scope} number(s); refreshed ${result.refreshed ?? 0}, failed ${result.failed ?? 0}, skipped ${result.skipped ?? 0}, archived ${result.archivedOnProvider ?? 0} delivered Ship24 backend tracker(s).`,
     `Review tracking workbench: ${normalizedBaseUrl}/tracking`,
     "Tracking refresh updates shipment metadata only; it does not receive stock or confirm delivery."
   ].join("\n");

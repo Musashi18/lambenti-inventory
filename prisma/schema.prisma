@@ -862,6 +862,25 @@ model TrackingEvent {
   @@index([trackingNumberId, occurredAt])
 }
 
+/// Privacy-preserving weekly Founder OS work aggregates. Raw activity remains in the
+/// local Founder OS JSONL evidence source; this table stores only durable totals for
+/// dashboard history and later aggregate analysis.
+model FounderActivityWeek {
+  id                  String   @id @default(cuid())
+  weekStart           DateTime
+  timezone            String   @default("America/Toronto")
+  workedMinutes       Int
+  highLeverageMinutes Int
+  workBlockCount      Int
+  sourceBlockCount    Int
+  observedAt          DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([weekStart, timezone])
+  @@index([timezone, weekStart])
+}
+
 model AuditLog {
   id         String   @id @default(cuid())
   actorType  String

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { loadAtlasActivityEvents, parseFounderOsActivityBlocks } from "./activity-events";
 
 describe("Atlas Founder OS activity events", () => {
-  it("maps the latest weekly Founder OS blocks into validated Atlas velocity events", async () => {
+  it("retains recent daily history while backfilling it with the latest weekly Founder OS blocks", async () => {
     const dir = await mkdtemp(join(tmpdir(), "atlas-activity-"));
     const blocksPath = join(dir, "activity_blocks.jsonl");
     await writeFile(blocksPath, [
@@ -53,9 +53,10 @@ describe("Atlas Founder OS activity events", () => {
 
     const events = await loadAtlasActivityEvents({ blocksPath, now: new Date("2026-07-02T16:00:00.000Z") });
 
-    expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ category: "Firmware", leverageTier: "HIGH", confidencePct: 82, durationHours: 2.5, validatedProgress: true, nodeId: "engineering.firmware" });
-    expect(events[1]).toMatchObject({ category: "Unknown", leverageTier: "LOW", durationHours: 0.5, validatedProgress: false });
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({ category: "Engineering", leverageTier: "HIGH", confidencePct: 76, durationHours: 1, validatedProgress: true });
+    expect(events[1]).toMatchObject({ category: "Firmware", leverageTier: "HIGH", confidencePct: 82, durationHours: 2.5, validatedProgress: true, nodeId: "engineering.firmware" });
+    expect(events[2]).toMatchObject({ category: "Unknown", leverageTier: "LOW", durationHours: 0.5, validatedProgress: false });
   });
 
   it("deduplicates repeated exported blocks and keeps completion contributions empty", () => {
@@ -112,5 +113,19 @@ describe("Atlas Founder OS activity events", () => {
 
     expect(events.map((event) => event.category)).toEqual(["Planning", "Engineering"]);
     expect(events.at(-1)).toMatchObject({ category: "Engineering", durationHours: 0.75, validatedProgress: true });
+  });
+
+  it("classifies idle, distraction, and weakly evidenced blocks before they can reach momentum", () => {
+    const lines = [
+      { start: "2026-07-06T09:00:00Z", end: "2026-07-06T10:00:00Z", category: "Engineering", leverage: "High", confidence: 0.9, depth: "deep", artifact_types: ["software_source"], top_signals: ["Build evidence"] },
+      { start: "2026-07-06T10:00:00Z", end: "2026-07-06T11:00:00Z", category: "Engineering", leverage: "High", confidence: 0.9, depth: "idle", top_signals: ["idle_seconds=3600"] },
+      { start: "2026-07-06T11:00:00Z", end: "2026-07-06T11:30:00Z", category: "Distraction", leverage: "Low", confidence: 0.8, depth: "shallow", artifact_types: ["browser_history"], top_signals: ["research evidence"] },
+      { start: "2026-07-06T11:30:00Z", end: "2026-07-06T12:00:00Z", category: "Planning", leverage: "Medium", confidence: 0.3, depth: "shallow", top_domains: ["example.com"] }
+    ].map((block) => JSON.stringify({ period: "daily", label: "2026-07-06", hours: 0.5, ...block })).join("\n");
+
+    const events = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
+
+    expect(events.map((event) => event.activityClassification)).toEqual(["WORK", "IDLE", "DISTRACTION", "UNCERTAIN"]);
+    expect(events.map((event) => event.validatedProgress)).toEqual([true, false, false, false]);
   });
 });

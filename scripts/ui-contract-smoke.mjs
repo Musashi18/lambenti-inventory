@@ -7,9 +7,7 @@ const channel = process.env.LAMBENTI_QA_BROWSER_CHANNEL || "msedge";
 const headless = process.env.HEADLESS === "0" ? false : true;
 
 const markerContracts = [
-  { path: "/", markers: ["Phase I Launch Readiness", "Signals", "Launch Target Meter", "Operations Flow"] },
-  { path: "/atlas", markers: ["Mission Control", "Atlas Command Dock", "Blocked By", "Next Workflow", "Atlas Progress Map", "Interactive Company Nervous System", "Atlas Projection Navigation", "Command Palette", "Roadmap View", "Risk Map", "Founder Daily View", "Phase Lens", "Done So Far", "Needs Development", "Search / Zoom / Path Controls", "Selected Path Only", "Founder Focus Mode", "Strategic Playback", "Mission Focus Strip", "Development Area Summary", "Node Inspector", "Executive Intelligence Panel", "Strategic Score", "Likely Completion", "Why This Node Is Here", "What Would Move It", "Atlas AI Layer", "Predict Delays", "Estimate Launch Impact", "Dependency Pulse", "Evidence Stream", "Atlas Visual Command Deck", "Mission Orbit", "Critical Path", "Probability Bands", "Today's Work by Sector", "Opportunity Engine", "Reality Engine", "Strategic Radar", "Decision Timeline", "Stale Signals", "Atlas privacy tier"] },
-  { path: "/atlas/overlay", markers: ["Daily Mission Ring", "Highest-Leverage Task", "Next Action", "Top Risk", "Velocity Caveat", "Confidence Marker", "Time alone does not fill this ring"] },
+  { path: "/", markers: ["Phase I Launch Readiness", "Signals", "Launch Target Meter", "Operations Flow", "Longest item planning windows", "Momentum Engine", "Conservatively classified founder activity", "Today's Work by Category"] },
   { path: "/tracking", markers: ["Fix Failed", "Refresh Due", "Link Evidence", "Review Open", "Last Good Refresh"] },
   { path: "/accounting", markers: ["Daily Bookkeeping Routine", "Evidence Only Until Apply", "Needs Manual Review", "Unreadable/No Text"] },
   { path: "/inventory/items", markers: ["Stock Health", "Below Reorder", "Needs Cost", "OK"] },

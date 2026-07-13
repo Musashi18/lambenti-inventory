@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectAccountingEvidence, collectDashboardEvidence, collectTrackingEvidence } from "./evidence-adapters";
+import { collectAccountingEvidence, collectDashboardEvidence, collectTrackingEvidence, getAtlasPhaseOneReadiness } from "./evidence-adapters";
 
 const observedAt = "2026-07-01T12:00:00.000Z";
 
@@ -31,6 +31,41 @@ describe("Atlas evidence adapters", () => {
     });
     expect(evidence.map((item) => item.href)).toContain("/purchasing/recommendations");
     expect(evidence.every((item) => item.summary.toLowerCase().includes("receive stock") === false)).toBe(true);
+  });
+
+  it("keeps exact ledger-built, direct-buildable, and material-covered units distinct", () => {
+    const readiness = getAtlasPhaseOneReadiness({
+      launchReadiness: {
+        packageSku: "LAMBENTI_PACKAGE",
+        packageDescription: "Complete Package Assembly",
+        packageDisplayName: "LAMBENTI_PACKAGE — Complete Package Assembly",
+        targetPackages: 25,
+        assembledPackages: 2,
+        readyNow: 2,
+        buildCapacityNow: 3,
+        buildableTowardTarget: 3,
+        materialCoverageNow: 5,
+        materialCoveredTowardTarget: 5,
+        remainingBuildGap: 23,
+        remainingMaterialGap: 20,
+        bottleneckSku: "MAIN_UNIT",
+        status: "BLOCKED",
+        nextActions: [{ label: "Draft component purchase requests", reason: "Stock gap remains.", href: "/purchasing/recommendations" }]
+      },
+      recommendations: [],
+      incomingOrders: [],
+      humanReviewActions: []
+    });
+
+    expect(readiness).toMatchObject({
+      assembledPackages: 2,
+      buildableTowardTarget: 3,
+      materialCoveredTowardTarget: 5,
+      remainingBuildGap: 23,
+      remainingMaterialGap: 20,
+      status: "BLOCKED"
+    });
+    expect(readiness.assembledPackages).not.toBe(readiness.materialCoveredTowardTarget);
   });
 
   it("maps tracking provider failures to operations risk", () => {

@@ -59,6 +59,17 @@ describe("Atlas mission-control service", () => {
     expect(mission.graph.nodes.length).toBeGreaterThan(10);
     expect(mission.highestLeverageTask).not.toBeNull();
     expect(mission.evidenceCoverage.sourceCount).toBeGreaterThanOrEqual(4);
-    expect(mission.momentum.note).toContain("not enabled yet");
+    expect(mission.goalPosition).toMatchObject({
+      physicalTarget: {
+        targetPackages: 25,
+        assembledPackages: 2,
+        buildableTowardTarget: 3,
+        materialCoveredTowardTarget: 5,
+        remainingBuildGap: 23,
+        remainingMaterialGap: 20
+      }
+    });
+    expect(mission.goalPosition?.milestones.map((item) => item.id)).toContain("phase1.first-batch");
+    expect(mission.momentum.note).toContain("No Founder OS activity blocks are available yet");
   });
 });

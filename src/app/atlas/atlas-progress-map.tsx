@@ -134,7 +134,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
     const lensFiltered = atlas.graph.nodes.filter((node) => {
       if (lens === "phase1") return node.horizon === "PHASE_1";
       if (lens === "risk") return node.effectiveRiskScore >= 55 || node.blockers.length > 0;
-      if (lens === "done") return node.completionPct >= 65 || (node.completionPct >= 50 && node.effectiveRiskScore <= 35);
+      if (lens === "done") return node.measurementStatus === "MEASURED" && (node.completionPct >= 65 || (node.completionPct >= 50 && node.effectiveRiskScore <= 35));
       if (lens === "confidence") return node.confidencePct < 60 || node.evidence.length === 0;
       if (lens === "next") return nextChainIds.has(node.id);
       return true;
@@ -172,7 +172,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
   );
   const commandTargets = useMemo(() => buildCommandTargets(atlas.graph.nodes, PROJECTIONS), [atlas.graph.nodes]);
   const donePreview = useMemo(() => atlas.graph.nodes
-    .filter((node) => node.completionPct >= 65 || (node.completionPct >= 50 && node.effectiveRiskScore <= 35))
+    .filter((node) => node.measurementStatus === "MEASURED" && (node.completionPct >= 65 || (node.completionPct >= 50 && node.effectiveRiskScore <= 35)))
     .sort((left, right) => right.completionPct - left.completionPct || left.effectiveRiskScore - right.effectiveRiskScore)
     .slice(0, 3), [atlas.graph.nodes]);
   const needsPreview = useMemo(() => atlas.graph.nodes
@@ -186,7 +186,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
       : atlas.largestRisk?.nodeId === selectedNode?.id
         ? atlas.largestRisk
         : null;
-  const selectedSummary = selectedSignal?.summary ?? (selectedNode ? `${selectedNode.title} is ${selectedNode.completionPct}% complete with ${selectedNode.effectiveRiskScore}% residual risk and ${selectedNode.confidencePct}% confidence.` : "Select a node to inspect evidence, blockers, dependencies, and unlocks.");
+  const selectedSummary = selectedSignal?.summary ?? (selectedNode ? selectedNode.measurementStatus === "MEASURED" ? `${selectedNode.title} is ${selectedNode.completionPct}% evidence-measured with ${selectedNode.effectiveRiskScore}% residual risk and ${selectedNode.confidencePct}% confidence.` : `${selectedNode.title} has no current completion measurement. Its ${selectedNode.planningBaselineCompletionPct}% planning baseline is context only, not progress proof.` : "Select a node to inspect evidence, blockers, dependencies, and unlocks.");
 
   const lensCounts = getLensCounts(atlas.graph.nodes, selectedNode, dependencyLinks, strategicNodeIds);
   const searchedNodeCount = searchTerm.trim() ? atlas.graph.nodes.filter((node) => matchesNodeSearch(node, searchTerm.trim().toLowerCase())).length : atlas.graph.nodes.length;
@@ -247,7 +247,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[460px]">
-            <MapMetric label="Mission" value={`${atlas.missionCompletionPct}%`} detail="weighted complete" tone="cyan" />
+            <MapMetric label="Phase I Evidence" value={`${atlas.missionCompletionPct}%`} detail="weighted measured progress" tone="cyan" />
             <MapMetric label="Risk Peak" value={`${Math.max(0, ...atlas.graph.nodes.map((node) => node.effectiveRiskScore))}%`} detail="residual risk" tone="rose" />
             <MapMetric label="Trust" value={`${atlas.evidenceCoverage.confidencePct}%`} detail="evidence confidence" tone="emerald" />
           </div>
@@ -535,7 +535,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
                           <div className={`h-full rounded-full bg-gradient-to-r ${heatGradientClass(health)}`} style={{ width: `${clampPercent(node.completionPct)}%`, opacity: Math.max(0.42, node.confidencePct / 100) }} />
                         </div>
                         <div className="mt-1 grid grid-cols-3 gap-1 text-[10px] text-slate-300">
-                          <span>{node.completionPct}% done</span>
+                          <span>{node.measurementStatus === "MEASURED" ? `${node.completionPct}% measured` : "unmeasured"}</span>
                           <span>{node.confidencePct}% trust</span>
                           <span>{node.effectiveRiskScore}% risk</span>
                         </div>
@@ -544,6 +544,7 @@ export function AtlasProgressMap({ atlas }: AtlasProgressMapProps) {
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
                       <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-cyan-100">🎯 {node.horizon === "PHASE_1" ? "Launch critical" : "Roadmap"}</span>
                       {node.blockers.length > 0 ? <span className="rounded-full border border-rose-300/25 bg-rose-300/10 px-2 py-0.5 text-rose-100">⚠ {node.blockers.length} blocker</span> : null}
+                      {node.measurementStatus !== "MEASURED" ? <span className="rounded-full border border-slate-400/25 bg-slate-400/10 px-2 py-0.5 text-slate-200">◌ No completion evidence</span> : null}
                       {node.confidencePct < 60 ? <span className="rounded-full border border-slate-400/25 bg-slate-400/10 px-2 py-0.5 text-slate-200">🔒 Evidence</span> : null}
                     </div>
                   </div>
