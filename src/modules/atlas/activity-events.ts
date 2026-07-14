@@ -25,6 +25,11 @@ type FounderOsActivityBlock = {
 
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DEFAULT_ACTIVITY_BLOCKS_PATH = join(homedir(), "AppData", "Local", "hermes", "profiles", "lambenti", "founder_os", "activity_blocks.jsonl");
+const MIN_CONFIDENCE_FOR_WORK = 55;
+const STRONG_ARTIFACT_TYPES = new Set(["software_source", "document", "design_asset"]);
+const DIRECT_WORK_FILE_SUFFIXES = new Set([
+  ".afdesign", ".ai", ".c", ".cpp", ".csv", ".dxf", ".h", ".html", ".ino", ".js", ".mjs", ".md", ".pdf", ".prisma", ".py", ".sql", ".step", ".stl", ".ts", ".tsx", ".txt", ".xlsx"
+]);
 
 export async function loadAtlasActivityEvents(input: { now?: Date; blocksPath?: string; lookbackDays?: number } = {}): Promise<AtlasActivityEvent[]> {
   const blocksPath = input.blocksPath ?? process.env.LAMBENTI_FOUNDER_OS_ACTIVITY_BLOCKS_PATH ?? DEFAULT_ACTIVITY_BLOCKS_PATH;
@@ -55,8 +60,9 @@ export function parseFounderOsActivityBlocks(text: string, input: { now: Date; b
   const selectedPeriod = selectBestPeriod(blocks, input.now, input.lookbackDays ?? DEFAULT_LOOKBACK_DAYS);
   const deduped = new Map<string, FounderOsActivityBlock>();
   for (const block of selectedPeriod) {
-    const key = [block.start, block.end, block.category, block.leverage, block.depth].join("|");
-    deduped.set(key, block);
+    const key = [block.start, block.end].join("|");
+    const prior = deduped.get(key);
+    if (!prior || shouldPreferBlock(block, prior)) deduped.set(key, block);
   }
 
   return Array.from(deduped.values())
@@ -110,7 +116,7 @@ function toAtlasActivityEvent(block: FounderOsActivityBlock, index: number, bloc
   if (!startedAt || !endedAt || !Number.isFinite(startedAt.getTime()) || !Number.isFinite(endedAt.getTime()) || endedAt <= startedAt) return null;
 
   const durationHours = blockDurationHours(block, startedAt, endedAt);
-  const parsedCategory = normalizeCategory(block.category);
+  const parsedCategory = refineCategory(block, normalizeCategory(block.category));
   const classification = classifyActivityBlock({ block, category: parsedCategory, durationHours });
   const category = classification === "IDLE" ? "Unknown" : parsedCategory;
   const leverageTier = classification === "IDLE" ? "LOW" : normalizeLeverage(block.leverage);
@@ -137,9 +143,16 @@ function toAtlasActivityEvent(block: FounderOsActivityBlock, index: number, bloc
 }
 
 function blockDurationHours(block: FounderOsActivityBlock, startedAt: Date, endedAt: Date) {
-  if (Number.isFinite(block.hours) && Number(block.hours) >= 0) return Math.round(Number(block.hours) * 100) / 100;
-  if (Number.isFinite(block.minutes) && Number(block.minutes) >= 0) return Math.round((Number(block.minutes) / 60) * 100) / 100;
-  return Math.round(((endedAt.getTime() - startedAt.getTime()) / 3_600_000) * 100) / 100;
+  const elapsedMs = endedAt.getTime() - startedAt.getTime();
+  const wallClockHours = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs / 3_600_000 : 0;
+  const reportedHours = Number.isFinite(block.hours) && Number(block.hours) >= 0
+    ? Number(block.hours)
+    : Number.isFinite(block.minutes) && Number(block.minutes) >= 0
+      ? Number(block.minutes) / 60
+      : wallClockHours;
+  // Passive exports may be duplicated or malformed. Active time can be below the wall-clock
+  // interval, but it can never safely exceed it.
+  return Math.round(Math.min(reportedHours, wallClockHours) * 100) / 100;
 }
 
 function normalizeCategory(category: string | undefined): AtlasActivityCategory {
@@ -198,13 +211,70 @@ function classifyActivityBlock(input: { block: FounderOsActivityBlock; category:
 
   if (depth === "idle" || idleSeconds >= Math.max(300, durationSeconds * 0.6) || (onlyIdleApps && !directWorkEvidence)) return "IDLE";
   if (input.category === "Distraction") return "DISTRACTION";
-  if (input.category === "Unknown" || !directWorkEvidence || normalizeConfidence(input.block.confidence) < 45) return "UNCERTAIN";
+  if (input.category === "Unknown" || !directWorkEvidence || normalizeConfidence(input.block.confidence) < MIN_CONFIDENCE_FOR_WORK) return "UNCERTAIN";
   return "WORK";
 }
 
 function hasDirectWorkEvidence(block: FounderOsActivityBlock) {
-  if (compactStrings([...(block.artifact_types ?? []), ...(block.file_examples ?? []), ...(block.git_dirty_repos ?? [])]).length > 0) return true;
-  return compactStrings(block.top_signals ?? []).some((signal) => /\b(evidence|artifact|git|commit|diff|file|build|compile|test|firmware|engineering|manufacturing|supplier|invoice|purchase|design|research|planning)\b/i.test(signal));
+  const artifactTypes = compactStrings(block.artifact_types ?? []).map((value) => value.toLowerCase());
+  if (artifactTypes.some((artifactType) => STRONG_ARTIFACT_TYPES.has(artifactType))) return true;
+  return compactStrings(block.file_examples ?? []).some(isDirectWorkFile);
+}
+
+function isDirectWorkFile(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || /(?:activity_blocks|activity_snapshots)\.jsonl(?:$|[?#])/.test(normalized)) return false;
+  const suffix = normalized.match(/\.[a-z0-9]{1,8}(?:$|[?#])/i)?.[0]?.replace(/[?#].*$/, "");
+  return Boolean(suffix && DIRECT_WORK_FILE_SUFFIXES.has(suffix));
+}
+
+function refineCategory(block: FounderOsActivityBlock, category: AtlasActivityCategory): AtlasActivityCategory {
+  if (category !== "Unknown") return category;
+  const evidence = compactStrings([...(block.artifact_types ?? []), ...(block.file_examples ?? []), ...(block.top_signals ?? []), ...(block.top_apps ?? [])]).join(" ").toLowerCase();
+  if (/firmware|\.ino\b|arduino/.test(evidence)) return "Firmware";
+  if (/electronics|pcb|schematic|magnetometer|sensor/.test(evidence)) return "Engineering";
+  if (/supplier|quote|alibaba|purchase|logistics/.test(evidence)) return "Supplier Communication";
+  if (/manufacturing|production|test jig|\bqa\b/.test(evidence)) return "Manufacturing";
+  if (/cad|fusion ?360|\.step\b|\.stl\b|\.dxf\b|design_asset/.test(evidence)) return "Industrial Design";
+  if (/accounting|invoice|landed cost|cash|finance/.test(evidence)) return "Finance";
+  if (/marketing|brand|website|content/.test(evidence)) return "Marketing";
+  if (/research/.test(evidence)) return "Research";
+  if (hasDirectWorkEvidence(block)) return "Engineering";
+  return category;
+}
+
+function shouldPreferBlock(candidate: FounderOsActivityBlock, current: FounderOsActivityBlock) {
+  const candidateClassification = classificationForRanking(candidate);
+  const currentClassification = classificationForRanking(current);
+  const candidateIsExplicitNonWork = candidateClassification === "IDLE" || candidateClassification === "DISTRACTION";
+  const currentIsExplicitNonWork = currentClassification === "IDLE" || currentClassification === "DISTRACTION";
+  // Conflicting exports must not upgrade an explicit idle/distraction observation into work.
+  if (candidateIsExplicitNonWork !== currentIsExplicitNonWork) return candidateIsExplicitNonWork;
+  const candidateRank = blockReliabilityRank(candidate);
+  const currentRank = blockReliabilityRank(current);
+  if (candidateRank !== currentRank) return candidateRank > currentRank;
+  const candidateConfidence = normalizeConfidence(candidate.confidence);
+  const currentConfidence = normalizeConfidence(current.confidence);
+  if (candidateConfidence !== currentConfidence) return candidateConfidence > currentConfidence;
+  // A daily export is normally the fresher source when two equally credible snapshots agree.
+  return candidate.period === "daily" && current.period !== "daily";
+}
+
+function blockReliabilityRank(block: FounderOsActivityBlock) {
+  const classification = classificationForRanking(block);
+  if (!classification) return -1;
+  if (classification === "IDLE") return 0;
+  if (classification === "DISTRACTION") return 1;
+  if (classification === "UNCERTAIN") return 2;
+  return 3;
+}
+
+function classificationForRanking(block: FounderOsActivityBlock) {
+  const startedAt = block.start ? new Date(block.start) : null;
+  const endedAt = block.end ? new Date(block.end) : null;
+  if (!startedAt || !endedAt || !Number.isFinite(startedAt.getTime()) || !Number.isFinite(endedAt.getTime()) || endedAt <= startedAt) return null;
+  const category = refineCategory(block, normalizeCategory(block.category));
+  return classifyActivityBlock({ block, category, durationHours: blockDurationHours(block, startedAt, endedAt) });
 }
 
 function largestIdleSeconds(signals: string[]) {

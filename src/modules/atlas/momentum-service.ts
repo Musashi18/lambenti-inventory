@@ -118,7 +118,7 @@ async function persistFounderOsWeeklyHours(activityEvents: AtlasActivityEvent[],
 function buildWeekAccumulators(now: Date): WeeklyAccumulator[] {
   const currentWeekStart = sundayWeekStart(now);
   return Array.from({ length: WEEKS_TO_DISPLAY }, (_, index) => {
-    const weekStartDate = addCalendarDays(currentWeekStart, index - (WEEKS_TO_DISPLAY - 1));
+    const weekStartDate = addCalendarDays(currentWeekStart, (index - (WEEKS_TO_DISPLAY - 1)) * 7);
     return {
       weekStartDate,
       weekStart: calendarDateKey(weekStartDate),

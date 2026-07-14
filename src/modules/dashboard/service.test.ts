@@ -372,4 +372,36 @@ describe("summarizeDashboardGraphs", () => {
       { label: "Material gap", units: 0, percent: 0, tone: "slate" }
     ]);
   });
+
+  it("fills the wide lead-time horizon with the 16 longest planning windows", () => {
+    const leadTimeItems = Array.from({ length: 17 }, (_, index) => ({
+      itemId: `item-${index}`,
+      itemSku: `SKU-${String(index + 1).padStart(2, "0")}`,
+      itemDescription: `Planning item ${index + 1}`,
+      currentLeadTimeDays: 40 - index,
+      manualLeadTimeDays: 40 - index,
+      averageLeadTimeDays: 40 - index,
+      weightedAverageLeadTimeDays: 40 - index,
+      averageShipTimeDays: null,
+      averageShipTimeLabel: null,
+      leadTimeSource: "MANUAL" as const,
+      leadTimeLabel: `${40 - index}d manual planning estimate`,
+      sampleCount: 0,
+      totalQuantityOrdered: 0,
+      totalQuantityReceived: 0,
+      entries: []
+    }));
+    const graphs = summarizeDashboardGraphs({
+      launchReadiness: summarizeLaunchReadiness({ assembledPackages: 0, buildCapacityNow: 0, bottleneckSku: "LAMBENTI_MAIN_UNIT", recommendationCount: 0, recommendedUnits: 0, incomingOrderCount: 0, reviewActionCount: 0 }),
+      buildCapacity: { bottleneckSku: "LAMBENTI_MAIN_UNIT", componentCapacities: [] },
+      lowStockItems: [],
+      leadTimeLog: { sampleCount: 0, itemCount: leadTimeItems.length, totalQuantityOrdered: 0, averageLeadTimeDays: null, averageShipTimeDays: null, items: leadTimeItems },
+      inventoryValueByCategory: [],
+      operations: { recommendationRows: 0, incomingOrders: 0, reviewActions: 0, automationWork: 0 }
+    });
+
+    expect(graphs.leadTimeBars).toHaveLength(16);
+    expect(graphs.leadTimeBars.map((item) => item.sku)).toEqual(leadTimeItems.slice(0, 16).map((item) => item.itemSku));
+    expect(graphs.leadTimeBars.at(-1)).toMatchObject({ sku: "SKU-16", days: 25 });
+  });
 });

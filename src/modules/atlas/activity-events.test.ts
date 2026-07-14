@@ -128,4 +128,91 @@ describe("Atlas Founder OS activity events", () => {
     expect(events.map((event) => event.activityClassification)).toEqual(["WORK", "IDLE", "DISTRACTION", "UNCERTAIN"]);
     expect(events.map((event) => event.validatedProgress)).toEqual([true, false, false, false]);
   });
+
+  it("requires a real artifact rather than generic file metadata before counting a known task as work", () => {
+    const lines = [
+      {
+        start: "2026-07-06T09:00:00Z",
+        end: "2026-07-06T10:00:00Z",
+        category: "Planning",
+        leverage: "High",
+        confidence: 0.95,
+        depth: "deep",
+        artifact_types: ["file"],
+        file_examples: ["founder_os/activity_blocks.jsonl"],
+        top_signals: ["Planning/priority evidence"]
+      },
+      {
+        start: "2026-07-06T10:00:00Z",
+        end: "2026-07-06T11:00:00Z",
+        category: "Engineering",
+        leverage: "High",
+        confidence: 0.95,
+        depth: "deep",
+        artifact_types: ["file"],
+        file_examples: ["inventory_repo:src/modules/dashboard/service.ts"],
+        top_signals: ["Inventory/software engineering evidence"]
+      }
+    ].map((block) => JSON.stringify({ period: "daily", label: "2026-07-06", hours: 1, ...block })).join("\n");
+
+    const events = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
+
+    expect(events.map((event) => event.activityClassification)).toEqual(["UNCERTAIN", "WORK"]);
+    expect(events.map((event) => event.validatedProgress)).toEqual([false, true]);
+  });
+
+  it("deduplicates conflicting exports by exact interval conservatively and clamps impossible reported duration", () => {
+    const lines = [
+      {
+        period: "weekly",
+        label: "week 2026-07-06 to 2026-07-12",
+        start: "2026-07-06T09:00:00Z",
+        end: "2026-07-06T10:00:00Z",
+        category: "Engineering",
+        leverage: "High",
+        confidence: 0.98,
+        depth: "deep",
+        hours: 8,
+        artifact_types: ["software_source"],
+        file_examples: ["inventory_repo:src/app/page.tsx"]
+      },
+      {
+        period: "daily",
+        label: "2026-07-06",
+        start: "2026-07-06T09:00:00Z",
+        end: "2026-07-06T10:00:00Z",
+        category: "Engineering",
+        leverage: "High",
+        confidence: 0.98,
+        depth: "idle",
+        hours: 1,
+        top_signals: ["idle_seconds=3600"]
+      }
+    ].map((block) => JSON.stringify(block)).join("\n");
+
+    const events = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ activityClassification: "IDLE", durationHours: 1, validatedProgress: false });
+  });
+
+  it("infers a specific task category from strong artifact evidence only when the source category is unknown", () => {
+    const lines = JSON.stringify({
+      period: "daily",
+      label: "2026-07-06",
+      start: "2026-07-06T09:00:00Z",
+      end: "2026-07-06T10:00:00Z",
+      category: "Unknown",
+      leverage: "High",
+      confidence: 0.88,
+      depth: "deep",
+      hours: 1,
+      artifact_types: ["software_source"],
+      file_examples: ["firmware/Lambenti.ino"]
+    });
+
+    const [event] = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
+
+    expect(event).toMatchObject({ category: "Firmware", activityClassification: "WORK", nodeId: "engineering.firmware" });
+  });
 });

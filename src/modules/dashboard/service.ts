@@ -414,7 +414,7 @@ export function summarizeDashboardGraphs(input: DashboardGraphInput) {
     }))
     .sort((left, right) => right.days - left.days || left.sku.localeCompare(right.sku));
   const leadTimeMaxDays = Math.max(1, ...leadTimeRows.map((item) => item.days));
-  const leadTimeBars = leadTimeRows.slice(0, 10).map((item) => ({
+  const leadTimeBars = leadTimeRows.slice(0, 16).map((item) => ({
     ...item,
     percentOfMax: boundedPercent(item.days, leadTimeMaxDays)
   }));

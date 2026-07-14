@@ -72,12 +72,17 @@ describe("DashboardPage source contract", () => {
     expect(source).toContain("materialComponentsRequired");
     expect(source).toContain("package-buildable");
     expect(source).toContain("CompactValuationMixGraph");
-    expect(source).toContain("flex h-full min-w-0 flex-col gap-4");
+    expect(source).toContain("flex min-w-0 flex-col gap-4");
     expect(source).not.toContain("lg:grid-cols-[minmax(0,1fr)_minmax(11rem,0.72fr)]");
     expect(source.indexOf("<LaunchTargetGraph readiness={readiness} graphs={graphs} />")).toBeLessThan(
       source.indexOf("<CompactValuationMixGraph graphs={graphs} />")
     );
-    expect(source).toContain("auto-rows-fr");
+    expect(source).toContain("grid items-start gap-4 lg:grid-cols-2");
+    expect(source).toContain("flex min-w-0 flex-col self-start rounded-xl");
+    expect(source).toContain("min-w-0\">{children}");
+    expect(source).not.toContain("auto-rows-fr");
+    expect(source).not.toContain("flex h-full min-w-0 flex-col rounded-xl");
+    expect(source).not.toContain("min-w-0 flex-1");
     expect(source).not.toContain("<GraphPanel title=\"Value mix\"");
     expect(source).not.toContain("Useful Visual Signals");
     expect(source).not.toContain("Graphs are intentionally limited");
@@ -92,8 +97,17 @@ describe("DashboardPage source contract", () => {
     expect(source).toContain("Not Currently Needed Low Stock Components");
     expect(source).toContain("summary.lowStockNotCurrentlyNeededItems");
     expect(source).toContain('GraphPanel title="Momentum Engine"');
+    expect(source).toContain('GraphPanel title="Lead-Time Horizon"');
     expect(source).toContain("getFounderOsMomentum()");
     expect(source).toContain("classificationCounts");
+    expect(source).toContain("Four-week work rhythm");
+    expect(source).toContain("Sunday–Saturday");
+    expect(source).toContain("weeklyWorkHistory");
+    expect(source).toContain("weeklyHoursBarHeight");
+    expect(source).toContain("Hours worked by Sunday-start week");
+    expect(source).toContain("No data");
+    expect(source).toContain("week.recorded");
+    expect(source).toContain("This Week Worked");
     expect(source).not.toContain("Velocity without fake progress");
     expect(source.indexOf('GraphPanel title="Lead-Time Horizon"')).toBeLessThan(
       source.indexOf('GraphPanel title="Momentum Engine"')

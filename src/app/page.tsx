@@ -57,7 +57,7 @@ export default async function DashboardPage() {
           </div>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">Read-only analytics</span>
         </div>
-        <div className="grid auto-rows-fr gap-4 lg:grid-cols-2">
+        <div className="grid items-start gap-4 lg:grid-cols-2">
           <GraphPanel title="Launch Target Meter" kicker="25-unit target + value mix">
             <LaunchTargetAndValueMixGraph readiness={summary.launchReadiness} graphs={summary.dashboardGraphs} />
           </GraphPanel>
@@ -216,19 +216,19 @@ function LaunchGauge({ readiness, graphs }: { readiness: LaunchReadiness; graphs
 
 function GraphPanel({ title, kicker, children, className = "" }: { title: string; kicker: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={`flex h-full min-w-0 flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm ${className}`}>
+    <div className={`flex min-w-0 flex-col self-start rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm ${className}`}>
       <div className="mb-4">
         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{kicker}</div>
         <h3 className="text-base font-semibold text-slate-900">{title}</h3>
       </div>
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
 
 function LaunchTargetAndValueMixGraph({ readiness, graphs }: { readiness: LaunchReadiness; graphs: DashboardGraphs }) {
   return (
-    <div className="flex h-full min-w-0 flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <LaunchTargetGraph readiness={readiness} graphs={graphs} />
       <CompactValuationMixGraph graphs={graphs} />
     </div>
@@ -358,13 +358,51 @@ function LeadTimeHorizonGraph({ graphs }: { graphs: DashboardGraphs }) {
 function MomentumEngineGraph({ momentum }: { momentum: AtlasMomentumSummary }) {
   const classified = momentum.classificationCounts;
   const excludedBlocks = classified.idle + classified.distraction + classified.uncertain;
+  const weeklyWorkHistory = momentum.weeklyWorkHistory;
+  const currentWeekHours = weeklyWorkHistory.find((week) => week.isCurrentWeek)?.workedHours ?? null;
+  const maximumWeeklyHours = Math.max(...weeklyWorkHistory.map((week) => week.workedHours), 1);
+  const recordedWeekCount = weeklyWorkHistory.filter((week) => week.recorded).length;
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
-        <GraphNumber label="Weekly High-Leverage" value={momentum.weeklyDeepWorkHours == null ? "—" : `${momentum.weeklyDeepWorkHours}h`} />
+        <GraphNumber label="This Week Worked" value={currentWeekHours == null ? "—" : `${currentWeekHours}h`} />
         <GraphNumber label="Classified Work Today" value={momentum.dailyTotalHours == null ? "—" : `${momentum.dailyTotalHours}h`} />
         <GraphNumber label="Classification Confidence" value={`${momentum.confidencePct}%`} />
       </div>
+      <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4" aria-label="Four-week weekly work history">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+              Four-week work rhythm
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">Sunday–Saturday · weekly totals from direct work evidence.</p>
+          </div>
+          <div className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-400">
+            {recordedWeekCount > 0 ? `${recordedWeekCount} recorded week${recordedWeekCount === 1 ? "" : "s"}` : "Recording activity"}
+          </div>
+        </div>
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="grid grid-cols-4 gap-2 sm:gap-4" role="list" aria-label="Hours worked by Sunday-start week">
+            {weeklyWorkHistory.map((week) => (
+              <div key={week.weekStart} className="min-w-0" role="listitem" aria-label={`${week.label} through ${week.weekEnd}: ${week.workedHours} hours worked${week.isCurrentWeek ? ", current week" : ""}${week.recorded ? ", recorded" : ", no recorded activity"}`}>
+                <div className="mb-2 flex min-h-7 items-end justify-center text-center text-sm font-medium tabular-nums text-slate-200">{week.workedHours}h</div>
+                <div className="relative flex h-24 items-end overflow-hidden rounded-md border border-slate-800 bg-slate-900/80 p-1">
+                  <span aria-hidden="true" className="absolute inset-x-1 top-1/2 border-t border-slate-800/80" />
+                  <div
+                    className={`relative w-full rounded-sm transition-[height,background-color] duration-500 ${week.isCurrentWeek ? "bg-teal-400/85" : week.recorded ? "bg-slate-500" : "bg-slate-700/80"}`}
+                    style={{ height: `${weeklyHoursBarHeight(week.workedHours, maximumWeeklyHours)}%` }}
+                    title={`${week.workedHours} hours · ${week.workBlockCount} verified work block${week.workBlockCount === 1 ? "" : "s"}`}
+                  />
+                </div>
+                <div className="mt-2 text-center">
+                  <div className={`text-[11px] font-medium ${week.isCurrentWeek ? "text-teal-200" : "text-slate-400"}`}>{week.label}</div>
+                  {week.isCurrentWeek ? <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-teal-400/80">Current</div> : <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-600">{week.recorded ? "Recorded" : "No data"}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
       <div className="rounded-lg border border-slate-200 bg-white p-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -395,6 +433,11 @@ function MomentumEngineGraph({ momentum }: { momentum: AtlasMomentumSummary }) {
       <p className="text-xs leading-5 text-slate-500">{momentum.note}</p>
     </div>
   );
+}
+
+function weeklyHoursBarHeight(hours: number, maximumHours: number) {
+  if (hours <= 0 || maximumHours <= 0) return 4;
+  return Math.max(10, Math.min(100, (hours / maximumHours) * 100));
 }
 
 function momentumWidth(hours: number, totalHours: number | null) {
