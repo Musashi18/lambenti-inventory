@@ -115,6 +115,38 @@ describe("Atlas Founder OS activity events", () => {
     expect(events.at(-1)).toMatchObject({ category: "Engineering", durationHours: 0.75, validatedProgress: true });
   });
 
+  it("uses a newer weekly re-export instead of stale historical daily classifier output", () => {
+    const staleDaily = JSON.stringify({
+      period: "daily",
+      label: "2026-07-14",
+      exported_at: "2026-07-14T17:00:00Z",
+      start: "2026-07-14T09:00:00Z",
+      end: "2026-07-14T10:00:00Z",
+      category: "Engineering",
+      leverage: "High",
+      confidence: 0.76,
+      depth: "deep",
+      artifact_types: ["software_source"],
+      file_examples: ["founder_os:reports/daily_2026-07-14.json"]
+    });
+    const refreshedWeekly = JSON.stringify({
+      period: "weekly",
+      label: "week 2026-07-13 to 2026-07-19",
+      exported_at: "2026-07-16T18:00:00Z",
+      start: "2026-07-14T09:00:00Z",
+      end: "2026-07-14T10:00:00Z",
+      category: "Research",
+      leverage: "High",
+      confidence: 0.8,
+      depth: "deep",
+      artifact_types: ["launch_research"]
+    });
+
+    const [event] = parseFounderOsActivityBlocks(`${staleDaily}\n${refreshedWeekly}`, { now: new Date("2026-07-16T16:00:00.000Z") });
+
+    expect(event).toMatchObject({ category: "Research", activityClassification: "WORK", durationHours: 1 });
+  });
+
   it("classifies idle, distraction, and weakly evidenced blocks before they can reach momentum", () => {
     const lines = [
       { start: "2026-07-06T09:00:00Z", end: "2026-07-06T10:00:00Z", category: "Engineering", leverage: "High", confidence: 0.9, depth: "deep", artifact_types: ["software_source"], top_signals: ["Build evidence"] },
@@ -159,6 +191,25 @@ describe("Atlas Founder OS activity events", () => {
 
     expect(events.map((event) => event.activityClassification)).toEqual(["UNCERTAIN", "WORK"]);
     expect(events.map((event) => event.validatedProgress)).toEqual([false, true]);
+  });
+
+  it("does not count Founder OS generated reports as software work", () => {
+    const line = JSON.stringify({
+      period: "daily",
+      label: "2026-07-16",
+      start: "2026-07-16T09:00:00Z",
+      end: "2026-07-16T10:00:00Z",
+      category: "Engineering",
+      leverage: "High",
+      confidence: 0.9,
+      depth: "deep",
+      artifact_types: ["software_source"],
+      file_examples: ["founder_os:reports/daily_2026-07-16.json", "founder_os:activity_blocks.jsonl"]
+    });
+
+    const [event] = parseFounderOsActivityBlocks(line, { now: new Date("2026-07-16T16:00:00.000Z") });
+
+    expect(event).toMatchObject({ activityClassification: "UNCERTAIN", validatedProgress: false });
   });
 
   it("deduplicates conflicting exports by exact interval conservatively and clamps impossible reported duration", () => {
@@ -214,5 +265,56 @@ describe("Atlas Founder OS activity events", () => {
     const [event] = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
 
     expect(event).toMatchObject({ category: "Firmware", activityClassification: "WORK", nodeId: "engineering.firmware" });
+  });
+
+  it("counts launch-aligned Google Docs research while keeping generic browser telemetry uncertain", () => {
+    const lines = [
+      {
+        start: "2026-07-06T09:00:00Z",
+        end: "2026-07-06T10:00:00Z",
+        category: "Research",
+        leverage: "High",
+        confidence: 0.72,
+        depth: "deep",
+        artifact_types: ["launch_research"],
+        top_signals: ["Launch-aligned Google Docs research evidence"]
+      },
+      {
+        start: "2026-07-06T10:00:00Z",
+        end: "2026-07-06T11:00:00Z",
+        category: "Research",
+        leverage: "High",
+        confidence: 0.72,
+        depth: "deep",
+        artifact_types: ["file"],
+        top_signals: ["Research/AI/browser evidence"]
+      }
+    ].map((block) => JSON.stringify({ period: "daily", label: "2026-07-06", hours: 1, ...block })).join("\n");
+
+    const events = parseFounderOsActivityBlocks(lines, { now: new Date("2026-07-06T16:00:00.000Z") });
+
+    expect(events.map((event) => event.activityClassification)).toEqual(["WORK", "UNCERTAIN"]);
+    expect(events[0]).toMatchObject({ category: "Research", leverageTier: "HIGH", validatedProgress: true });
+    expect(events[1]).toMatchObject({ category: "Research", validatedProgress: false });
+  });
+
+  it("counts an explicit founder manual label without treating generic telemetry as artifact evidence", () => {
+    const line = JSON.stringify({
+      period: "daily",
+      label: "2026-07-16",
+      start: "2026-07-16T10:00:00Z",
+      end: "2026-07-16T10:30:00Z",
+      category: "Customer Development",
+      leverage: "High",
+      confidence: 0.95,
+      depth: "shallow",
+      minutes: 30,
+      artifact_types: ["manual_label"],
+      top_signals: ["manual_label: User-confirmed Lambenti founder/contact work"]
+    });
+
+    const [event] = parseFounderOsActivityBlocks(line, { now: new Date("2026-07-16T16:00:00.000Z") });
+
+    expect(event).toMatchObject({ category: "Customer Development", activityClassification: "WORK", validatedProgress: true });
   });
 });

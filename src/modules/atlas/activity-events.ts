@@ -6,6 +6,7 @@ import type { AtlasActivityCategory, AtlasActivityEvent, AtlasLeverageTier, Foun
 type FounderOsActivityBlock = {
   period?: string;
   label?: string;
+  exported_at?: string;
   start?: string;
   end?: string;
   category?: string;
@@ -26,7 +27,11 @@ type FounderOsActivityBlock = {
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DEFAULT_ACTIVITY_BLOCKS_PATH = join(homedir(), "AppData", "Local", "hermes", "profiles", "lambenti", "founder_os", "activity_blocks.jsonl");
 const MIN_CONFIDENCE_FOR_WORK = 55;
-const STRONG_ARTIFACT_TYPES = new Set(["software_source", "document", "design_asset"]);
+// `launch_research` and `manual_label` are emitted only by the local Founder
+// OS exporter. The former requires bounded Phase I title/source evidence; the
+// latter is an explicit founder correction. Generic browser/app telemetry
+// remains insufficient evidence.
+const STRONG_ARTIFACT_TYPES = new Set(["software_source", "document", "design_asset", "launch_research", "manual_label"]);
 const DIRECT_WORK_FILE_SUFFIXES = new Set([
   ".afdesign", ".ai", ".c", ".cpp", ".csv", ".dxf", ".h", ".html", ".ino", ".js", ".mjs", ".md", ".pdf", ".prisma", ".py", ".sql", ".step", ".stl", ".ts", ".tsx", ".txt", ".xlsx"
 ]);
@@ -217,15 +222,30 @@ function classifyActivityBlock(input: { block: FounderOsActivityBlock; category:
 
 function hasDirectWorkEvidence(block: FounderOsActivityBlock) {
   const artifactTypes = compactStrings(block.artifact_types ?? []).map((value) => value.toLowerCase());
+  // The Founder OS writes its own JSONL/report artifacts while exporting. Those
+  // files must never turn the exporter itself into Engineering work. A bounded
+  // `launch_research` is bounded local semantic evidence and `manual_label`
+  // is an explicit founder correction, so both remain valid without a file.
+  if (artifactTypes.includes("launch_research") || artifactTypes.includes("manual_label")) return true;
+  const fileExamples = compactStrings(block.file_examples ?? []);
+  if (fileExamples.length > 0 && fileExamples.every(isFounderOsTelemetryFile)) return false;
   if (artifactTypes.some((artifactType) => STRONG_ARTIFACT_TYPES.has(artifactType))) return true;
-  return compactStrings(block.file_examples ?? []).some(isDirectWorkFile);
+  return fileExamples.some(isDirectWorkFile);
 }
 
 function isDirectWorkFile(value: string) {
   const normalized = value.trim().toLowerCase();
-  if (!normalized || /(?:activity_blocks|activity_snapshots)\.jsonl(?:$|[?#])/.test(normalized)) return false;
+  if (!normalized || isFounderOsTelemetryFile(normalized)) return false;
   const suffix = normalized.match(/\.[a-z0-9]{1,8}(?:$|[?#])/i)?.[0]?.replace(/[?#].*$/, "");
   return Boolean(suffix && DIRECT_WORK_FILE_SUFFIXES.has(suffix));
+}
+
+function isFounderOsTelemetryFile(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\\/g, "/");
+  return normalized.startsWith("founder_os:")
+    || /(?:^|[/\\])founder_os(?:[/\\]|$)/.test(normalized)
+    || /(?:activity_blocks|activity_snapshots|collector_state)\.jsonl?(?:$|[?#])/.test(normalized)
+    || /founder_os[/\\]reports[/\\]/.test(normalized);
 }
 
 function refineCategory(block: FounderOsActivityBlock, category: AtlasActivityCategory): AtlasActivityCategory {
@@ -250,6 +270,12 @@ function shouldPreferBlock(candidate: FounderOsActivityBlock, current: FounderOs
   const currentIsExplicitNonWork = currentClassification === "IDLE" || currentClassification === "DISTRACTION";
   // Conflicting exports must not upgrade an explicit idle/distraction observation into work.
   if (candidateIsExplicitNonWork !== currentIsExplicitNonWork) return candidateIsExplicitNonWork;
+  const candidateExportedAt = exportTimestamp(candidate.exported_at);
+  const currentExportedAt = exportTimestamp(current.exported_at);
+  // A weekly tick re-exports the whole active week, while historical daily
+  // rows may retain old classifier output. Prefer a demonstrably fresher
+  // export before applying the legacy period/reliability tie-breakers.
+  if (candidateExportedAt !== currentExportedAt) return candidateExportedAt > currentExportedAt;
   const candidateRank = blockReliabilityRank(candidate);
   const currentRank = blockReliabilityRank(current);
   if (candidateRank !== currentRank) return candidateRank > currentRank;
@@ -258,6 +284,11 @@ function shouldPreferBlock(candidate: FounderOsActivityBlock, current: FounderOs
   if (candidateConfidence !== currentConfidence) return candidateConfidence > currentConfidence;
   // A daily export is normally the fresher source when two equally credible snapshots agree.
   return candidate.period === "daily" && current.period !== "daily";
+}
+
+function exportTimestamp(value: string | undefined) {
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function blockReliabilityRank(block: FounderOsActivityBlock) {

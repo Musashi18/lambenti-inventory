@@ -7,6 +7,8 @@ coverage
 qa-output
 var/
 .hermes/runtime/
+.hermes/desktop-attachments/
+.hermes/work/
 tsconfig.tsbuildinfo
 *.log
 prisma/dev.db
